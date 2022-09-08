@@ -21,11 +21,14 @@ from tabulate import tabulate
 from yahoo_fin import stock_info as si
 from yahoo_fin.stock_info import get_data as gd
 from yahoofinancials import YahooFinancials
+import warnings
 
 parser = argparse.ArgumentParser(description='Script to track NV investment')
 parser.add_argument("-elk", help="Send Data to ELK", action="store_true")
 parser.add_argument("-itr", help="Generate ITR json", action="store_true")
 args = parser.parse_args()
+
+warnings.filterwarnings("ignore", category=UserWarning)
 
 
 taxSlab = 0.3
