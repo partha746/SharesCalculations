@@ -9,6 +9,7 @@ import os
 import sqlite3
 import sys
 import uuid
+import warnings
 from datetime import date, datetime, timedelta
 
 import pandas as pd
@@ -21,7 +22,6 @@ from tabulate import tabulate
 from yahoo_fin import stock_info as si
 from yahoo_fin.stock_info import get_data as gd
 from yahoofinancials import YahooFinancials
-import warnings
 
 parser = argparse.ArgumentParser(description='Script to track NV investment')
 parser.add_argument("-elk", help="Send Data to ELK", action="store_true")
@@ -40,15 +40,13 @@ conn = sqlite3.connect(dbName)
 
 def login_eks():
 
-    creds = {"id":"3zXVHIMB0x5uLYdavSUD","name":"access","api_key":"Ctgi6_3ZTY-EQKYROFAtiA","encoded":"M3pYVkhJTUIweDV1TFlkYXZTVUQ6Q3RnaTZfM1pUWS1FUUtZUk9GQXRpQQ=="}
+    creds = {"id": "O3jMaoMBDsq7mYZZEuYO", "name": "Access", "api_key": "uFhFnhGTQYaImOOVrhiU_Q",
+             "encoded": "TzNqTWFvTUJEc3E3bVlaWkV1WU86dUZoRm5oR1RRWWFJbU9PVnJoaVVfUQ=="}
 
-    es = Elasticsearch(
-        ['localhost'],
-        api_key=(creds['id'], creds['api_key']),
-        scheme="http",
-        port=9200,
-    )
-    return es
+    elastic_obj = Elasticsearch(
+        'http://' + '192.168.1.21' + ':9200', api_key=(creds['id'], creds['api_key']))
+
+    return elastic_obj
 
 
 def genarate_data(instance_data, index_name):
@@ -171,7 +169,6 @@ def get_live_price():
         else:
             return round(si.get_live_price("nvda"), 2)
 
-
     livePrice = get_price()
     todaysRP = convRate(todaysDate)
     # livePrice = 312.5
@@ -278,7 +275,7 @@ print('________________________________________')
 print('\n')
 
 if args.elk:
-    login_eks().indices.delete(index='psardar-shares', ignore=[400, 404])
+    login_eks().indices.delete(index='psardar-shares', ignore_unavailable=True)
 
 ESPP_dict = dfESPP.to_dict('records')
 for each_data in ESPP_dict:
