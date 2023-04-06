@@ -1,1 +1,4 @@
-test*
+helpers/__pycache__/*
+configs/*.db
+configs/old/*
+output/*
