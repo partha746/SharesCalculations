@@ -340,8 +340,8 @@ class Tax:
         
         fy_date = datetime(date.today().year, 4, 1)
         shares_dict = []
-        dfNSU, _, _ = OwnStockData().generate_display_data(type='NSU')
-        dfESPP, _, _ = OwnStockData().generate_display_data(type='ESPP')
+        dfNSU, _, _, _, _, _, _, _ = OwnStockData().generate_display_data(type='NSU')
+        dfESPP, _, _, _, _, _, _, _ = OwnStockData().generate_display_data(type='ESPP')
         dfs_arr = [dfNSU.iterrows(), dfESPP.iterrows()]
         for each_df in dfs_arr:
             for _, row in each_df:
