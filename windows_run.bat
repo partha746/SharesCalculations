@@ -1,6 +1,6 @@
 @echo off
 if not "%1" == "max" start /MAX cmd /c %0 max & exit/b
-python E:\Software\SharesCalculations\run.py 
+python "E:\GoogleDrive\Work Files\#Scripts\SharesCalculations\main.py"
 
 :MENU
 SET INPUT=
@@ -15,7 +15,7 @@ GOTO :MENU
 
 :runScript
 CLS
-python E:\Software\SharesCalculations\run.py 
+python "E:\GoogleDrive\Work Files\#Scripts\SharesCalculations\main.py"
 GOTO :MENU
 
 :Quit
