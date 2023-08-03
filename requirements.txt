@@ -1,0 +1,9 @@
+Django
+elasticsearch
+pandas
+pytz
+requests
+retrying
+tabulate
+yahoo_fin
+yahoofinancials
