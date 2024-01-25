@@ -44,7 +44,7 @@ class EksHelper:
             _type_: _description_
         """
         elastic_obj = Elasticsearch(
-            'http://' + '192.168.1.21' + ':9200', api_key=(self.creds['id'], self.creds['api_key']))
+            'http://' + '192.168.1.235' + ':9200', api_key=(self.creds['id'], self.creds['api_key']))
 
         return elastic_obj
 
