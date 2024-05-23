@@ -51,7 +51,7 @@ livePrice, todaysRP = rupee_conv_obj.get_live_price()
 #XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX#
 arrowRT = u'\u2192'
 print('-'*26)
-print('NVDA\t\t: $ ' + str(livePrice))
+print('NVDA\t\t: $' + str(livePrice))
 print('USD ' + smart_str(arrowRT) + ' INR\t: ' + rupee_conv_obj.print_rupees(todaysRP))
 print('-'*26)
 
