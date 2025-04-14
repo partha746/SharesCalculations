@@ -7,15 +7,14 @@ import sys
 import uuid
 import warnings
 from datetime import date, datetime, timedelta
+import requests
 
 import pandas as pd
 import pytz
+import time
 from django.utils.encoding import smart_str
 from elasticsearch import Elasticsearch, helpers
 from retrying import retry
-from yahoo_fin import stock_info as si
-from yahoo_fin.stock_info import get_data as gd
-from yahoofinancials import YahooFinancials
 
 
 class EksHelper:
@@ -211,40 +210,72 @@ class RupeeConv:
 
     @retry(wait_random_min=10, stop_max_attempt_number=3)
     def get_rupee_rate(self, date):
-        yahoo_financials = YahooFinancials('USDINR=X')
+        def fetch_rate_for_day(date_str):
+            url = f"https://api.frankfurter.app/{date_str}"
+            params = {
+                "from": "USD",
+                "to": "INR"
+            }
+            response = requests.get(url, params=params)
+            data = response.json()
+            rate = data.get("rates", {}).get("INR")
+            if rate:
+                return round(rate, 2)
+            else:
+                print(f"Error retrieving rate for {date_str}: {data}")
+                return None
+
+        # Handle pandas Series
         if isinstance(date, pd.Series):
-            rateList = []
-            for dat in date:
-                date = datetime.strptime(dat, '%m/%d/%Y').strftime("%Y-%m-%d")
-                prev_day = datetime.today() - timedelta(days=1)
-                rateList.append(yahoo_financials.get_historical_price_data(
-                    prev_day, date, "daily")["USDINR=X"]["prices"][0]["close"])
-            return rateList
+            return [self.get_rupee_rate(d) for d in date]
 
-        if not isinstance(date, dt.date):
-            if '/' in date:
-                date = datetime.strptime(date, '%m/%d/%Y').strftime("%Y-%m-%d")
-                prev_day = (datetime.strptime(date, "%Y-%m-%d") -
-                            timedelta(days=1)).strftime("%Y-%m-%d")
-                rate = yahoo_financials.get_historical_price_data(prev_day, date, "daily")[
-                    "USDINR=X"]["prices"][0]["close"]
+        # Handle single date
+        if isinstance(date, datetime):
+            date_str = date.strftime('%Y-%m-%d')
+        elif isinstance(date, str):
+            try:
+                if '/' in date:
+                    date_obj = datetime.strptime(date, "%m/%d/%Y")
+                else:
+                    date_obj = datetime.strptime(date, "%Y-%m-%d")
+                date_str = date_obj.strftime('%Y-%m-%d')
+            except Exception as e:
+                print(f"Invalid date format: {date} -> {e}")
+                return None
         else:
-            date = datetime.strptime(
-                str(date), '%Y-%m-%d %H:%M:%S.%f').strftime("%Y-%m-%d")
-            prev_day = (datetime.strptime(date, '%Y-%m-%d') -
-                        timedelta(days=1)).strftime("%Y-%m-%d")
-            rate = yahoo_financials.get_historical_price_data(prev_day, date, "daily")[
-                "USDINR=X"]["prices"][0]["close"]
+            raise ValueError(f"Unsupported date format: {type(date)}")
 
-        return round(rate, 2)
+        return fetch_rate_for_day(date_str)
 
-    def get_stock_price(self, stock_code):
-        if self.post_start_time <= datetime.now().time() <= self.post_stop_time:
-            return round(si.get_postmarket_price(stock_code), 2)
-        elif self.pre_start_time <= datetime.now().time() <= self.pre_stop_time:
-            return round(si.get_premarket_price(stock_code), 2)
-        else:
-            return round(si.get_live_price(stock_code), 2)
+    def get_stock_price(self, stock_code='NVDA', api_key="cvsfdk9r01qhup0qfks0cvsfdk9r01qhup0qfksg"):
+        """
+        Fetches the latest stock price for a given symbol using Finnhub.io.
+
+        Parameters:
+            stock_code (str): Stock ticker symbol (e.g., 'NVDA', 'AAPL')
+            api_key (str): Finnhub.io API key
+
+        Returns:
+            float: Latest stock price, or None if not available
+        """
+        url = f"https://finnhub.io/api/v1/quote"
+        params = {
+            "symbol": stock_code.upper(),
+            "token": api_key
+        }
+
+        try:
+            response = requests.get(url, params=params)
+            data = response.json()
+            price = data.get("c")  # 'c' is current price
+            if price is not None:
+                return round(float(price), 2)
+            else:
+                print("Price not found in response:", data)
+                return None
+        except Exception as e:
+            print(f"Error retrieving stock price for {stock_code}:", e)
+            return None
 
     @retry(wait_random_min=10, stop_max_attempt_number=3)
     def get_live_price(self):
@@ -254,14 +285,6 @@ class RupeeConv:
         return live_price, todays_rp
 
     def print_rupees(self, amt, cur='INR'):
-        """_summary_
-
-        Args:
-            amt (_type_): _description_
-
-        Returns:
-            _type_: _description_
-        """
         if cur == 'INR':
             locale.setlocale(locale.LC_MONETARY, 'en_IN.UTF-8')
         elif cur == 'USD':
@@ -327,7 +350,7 @@ class Tax:
         years_bought = round((date.today() - buy_date).days / 365.2425, 1)
 
         if years_bought >= 2.0:
-            tax_rate = 0.2
+            tax_rate = 0.125
         else:
             tax_rate = 0.34
 
@@ -366,7 +389,6 @@ class Tax:
         with open(os.path.join(sys.path[0], 'output', "AY_" + str(date.today().year) + "_Shares.json"), "w") as outfile:
             outfile.write(json.dumps(shares_dict, indent=4))
 
-
 class OwnStockData:
     def __init__(self) -> None:
         self.db_obj = DB()
@@ -374,7 +396,64 @@ class OwnStockData:
         self.tax_obj = Tax()
         
         self.livePrice, self.todaysRP = self.rupeeconv_obj.get_live_price()
-        
+        self.max_closing_json = {}
+
+    def fetch_max_high_and_closing(self, symbol, start_date, end_date, api_key="db623c532e3e4568aad28629c00b574e"):
+        json_file = "configs/historic_data.json"
+        key = f"{str(start_date)}{str(end_date)}"
+
+        # Load existing data
+        if os.path.exists(json_file):
+            with open(json_file, "r") as f:
+                try:
+                    self.max_closing_json = json.load(f)
+                except json.JSONDecodeError:
+                    self.max_closing_json = {}
+        else:
+            self.max_closing_json = {}
+
+        # Return if data is already present
+        if key in self.max_closing_json:
+            data = self.max_closing_json[key]
+            return round(data["max_price"], 0), round(data["closing_price"], 0)
+
+        # Otherwise fetch from API
+        url = "https://api.twelvedata.com/time_series"
+        params = {
+            "symbol": symbol,
+            "interval": "1month",
+            "start_date": start_date,
+            "end_date": end_date,
+            "apikey": api_key
+        }
+
+        response = requests.get(url, params=params)
+        data = response.json()
+
+        try:
+            df = pd.DataFrame(data["values"])
+            df["datetime"] = pd.to_datetime(df["datetime"])
+            df["high"] = pd.to_numeric(df["high"])
+            df["close"] = pd.to_numeric(df["close"])
+
+            max_high = df["high"].max()
+            latest_close = df.loc[df["datetime"] == df["datetime"].max(), "close"].values[0]
+
+            self.max_closing_json[key] = {
+                "max_price": max_high,
+                "closing_price": latest_close
+            }
+
+            # Save updated data
+            with open(json_file, "w") as f:
+                json.dump(self.max_closing_json, f, indent=4)
+
+            return round(max_high, 0), round(latest_close, 0)
+
+        except Exception as e:
+            print("Data error for", start_date, "to", end_date, ":", data)
+            return 0, 0
+
     def generate_display_data(self, type):
         """_summary_
         """
@@ -414,16 +493,34 @@ class OwnStockData:
 
         Max_Price = []
         FY_Closing_Price = []
-        for cnt in range(0, len(df['Buy_Year'])):
-            if int(df['Buy_Month'][cnt]) > 3:
-                Max_Price.append(round(gd("nvda", start_date="01/04/" + df['Buy_Year'][cnt], end_date="31/03/" + str(int(df['Buy_Year'][cnt]) + 1), index_as_date=True, interval="1mo")['high'].max(), 0))
-                try:
-                    FY_Closing_Price.append(round(gd("nvda", start_date="01/03/" + str(int(df['Buy_Year'][cnt]) + 1), end_date="31/03/" + str(int(df['Buy_Year'][cnt]) + 1), index_as_date=True, interval="1mo")['close'].max(), 0))
-                except:
-                    FY_Closing_Price.append(0)
+        
+        for cnt in range(len(df['Buy_Year'])):
+            year = int(df['Buy_Year'][cnt])
+            month = int(df['Buy_Month'][cnt])
+
+            if month > 3:
+                start = f"{year}-04-01"
+                end = f"{year + 1}-03-31"
+                closing_month = f"{year + 1}-03-01"
+                closing_end = f"{year + 1}-03-31"
             else:
-                Max_Price.append(round(gd("nvda", start_date="01/04/" + str(int(df['Buy_Year'][cnt]) - 1), end_date="31/03/" + df['Buy_Year'][cnt], index_as_date=True, interval="1mo")['high'].max(), 0))
-                FY_Closing_Price.append(round(gd("nvda", start_date="01/03/" + str(int(df['Buy_Year'][cnt]) - 1), end_date="31/03/" + str(int(df['Buy_Year'][cnt]) - 1), index_as_date=True, interval="1mo")['close'].max(), 0))
+                start = f"{year - 1}-04-01"
+                end = f"{year}-03-31"
+                closing_month = f"{year}-03-01"
+                closing_end = f"{year}-03-31"
+
+            if f"{str(start)}{str(end)}" in self.max_closing_json.keys():
+                max_price = self.max_closing_json[f"{str(start)}{str(end)}"]["max_price"]
+            else:
+                max_price, _ = self.fetch_max_high_and_closing("NVDA", start, end)
+
+            if f"{str(closing_month)}{str(closing_end)}" in self.max_closing_json.keys():
+                closing_price = self.max_closing_json[f"{str(closing_month)}{str(closing_end)}"]["closing_price"]
+            else:
+                _, closing_price = self.fetch_max_high_and_closing("NVDA", closing_month, closing_end)
+
+            Max_Price.append(max_price)
+            FY_Closing_Price.append(closing_price)
 
         df['Max_Price'] = Max_Price
         df['FY_Closing_Price'] = FY_Closing_Price
@@ -459,16 +556,34 @@ class OwnStockData:
 
         Max_Price = []
         FY_Closing_Price = []
-        for cnt in range(0, len(dfSellOut['Buy_Year'])):
-            if int(dfSellOut['Buy_Month'][cnt]) > 3:
-                Max_Price.append(round(gd("nvda", start_date="01/04/" + dfSellOut['Buy_Year'][cnt], end_date="31/03/" + str(int(dfSellOut['Buy_Year'][cnt]) + 1), index_as_date=True, interval="1mo")['high'].max(), 0))
-                try:
-                    FY_Closing_Price.append(round(gd("nvda", start_date="01/03/" + str(int(dfSellOut['Buy_Year'][cnt]) + 1), end_date="31/03/" + str(int(dfSellOut['Buy_Year'][cnt]) + 1), index_as_date=True, interval="1mo")['close'].max(), 0))
-                except:
-                    FY_Closing_Price.append(0)
+
+        for cnt in range(len(dfSellOut['Buy_Year'])):
+            buy_year = int(dfSellOut['Buy_Year'][cnt])
+            buy_month = int(dfSellOut['Buy_Month'][cnt])
+            
+            if buy_month > 3:
+                fy_start = f"{buy_year}-04-01"
+                fy_end = f"{buy_year+1}-03-31"
+                closing_start = f"{buy_year+1}-03-01"
+                closing_end = f"{buy_year+1}-03-31"
             else:
-                Max_Price.append(round(gd("nvda", start_date="01/04/" + str(int(dfSellOut['Buy_Year'][cnt]) - 1), end_date="31/03/" + dfSellOut['Buy_Year'][cnt], index_as_date=True, interval="1mo")['high'].max(), 0))
-                FY_Closing_Price.append(round(gd("nvda", start_date="01/03/" + str(int(dfSellOut['Buy_Year'][cnt]) - 1), end_date="31/03/" + str(int(dfSellOut['Buy_Year'][cnt]) - 1), index_as_date=True, interval="1mo")['close'].max(), 0))
+                fy_start = f"{buy_year-1}-04-01"
+                fy_end = f"{buy_year}-03-31"
+                closing_start = f"{buy_year}-03-01"
+                closing_end = f"{buy_year}-03-31"
+
+            if f"{str(fy_start)}{str(fy_end)}" in self.max_closing_json.keys():
+                max_price = self.max_closing_json[f"{str(fy_start)}{str(fy_end)}"]["max_price"]
+            else:
+                max_price, _ = self.fetch_max_high_and_closing("NVDA", fy_start, fy_end)
+
+            if f"{str(closing_start)}{str(closing_end)}" in self.max_closing_json.keys():
+                closing_price = self.max_closing_json[f"{str(closing_start)}{str(closing_end)}"]["closing_price"]
+            else:
+                _, closing_price = self.fetch_max_high_and_closing("NVDA", closing_start, closing_end)
+
+            Max_Price.append(round(max_price, 0))
+            FY_Closing_Price.append(round(closing_price, 0))
 
         dfSellOut['Max_Price'] = Max_Price
         dfSellOut['FY_Closing_Price'] = FY_Closing_Price
