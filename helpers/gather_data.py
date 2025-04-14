@@ -398,11 +398,13 @@ class OwnStockData:
         self.livePrice, self.todaysRP = self.rupeeconv_obj.get_live_price()
         self.max_closing_json = {}
 
+    @retry(wait_fixed=30000)
     def fetch_max_high_and_closing(self, symbol, start_date, end_date, api_key="db623c532e3e4568aad28629c00b574e"):
         json_file = "configs/historic_data.json"
         key = f"{str(start_date)}{str(end_date)}"
+        current_year = datetime.now().year
 
-        # Load existing data
+        # Load JSON cache if exists
         if os.path.exists(json_file):
             with open(json_file, "r") as f:
                 try:
@@ -412,12 +414,31 @@ class OwnStockData:
         else:
             self.max_closing_json = {}
 
-        # Return if data is already present
-        if key in self.max_closing_json:
-            data = self.max_closing_json[key]
-            return round(data["max_price"], 0), round(data["closing_price"], 0)
+        # Check if data is from current year
+        start_is_current = datetime.strptime(start_date, "%Y-%m-%d").year == current_year
+        end_is_current = datetime.strptime(end_date, "%Y-%m-%d").year == current_year
 
-        # Otherwise fetch from API
+        cached_entry = self.max_closing_json.get(key)
+
+        should_update = False
+        if start_is_current or end_is_current:
+            if cached_entry:
+                last_updated = datetime.strptime(cached_entry.get("last_updated", "1900-01-01"), "%Y-%m-%d")
+                if datetime.now() - last_updated > timedelta(days=1):
+                    should_update = True
+            else:
+                should_update = True
+        else:
+            # Not current year: don't update if already cached
+            if cached_entry:
+                return round(cached_entry["max_price"], 0), round(cached_entry["closing_price"], 0)
+            else:
+                should_update = True
+
+        if not should_update and cached_entry:
+            return round(cached_entry["max_price"], 0), round(cached_entry["closing_price"], 0)
+
+        # Fetch from API
         url = "https://api.twelvedata.com/time_series"
         params = {
             "symbol": symbol,
@@ -441,10 +462,11 @@ class OwnStockData:
 
             self.max_closing_json[key] = {
                 "max_price": max_high,
-                "closing_price": latest_close
+                "closing_price": latest_close,
+                "last_updated": datetime.now().strftime("%Y-%m-%d")
             }
 
-            # Save updated data
+            # Save to JSON
             with open(json_file, "w") as f:
                 json.dump(self.max_closing_json, f, indent=4)
 

@@ -1,58 +1,72 @@
 {
     "2018-04-012019-03-31": {
         "max_price": 7.319,
-        "closing_price": 4.489
+        "closing_price": 4.489,
+        "last_updated": "2025-04-14"
     },
     "2019-03-012019-03-31": {
         "max_price": 4.625,
-        "closing_price": 4.489
+        "closing_price": 4.489,
+        "last_updated": "2025-04-14"
     },
     "2019-04-012020-03-31": {
         "max_price": 7.908,
-        "closing_price": 6.59
+        "closing_price": 6.59,
+        "last_updated": "2025-04-14"
     },
     "2020-03-012020-03-31": {
         "max_price": 7.12225,
-        "closing_price": 6.59
+        "closing_price": 6.59,
+        "last_updated": "2025-04-14"
     },
     "2020-04-012021-03-31": {
         "max_price": 15.3725,
-        "closing_price": 13.34825
+        "closing_price": 13.34825,
+        "last_updated": "2025-04-14"
     },
     "2021-03-012021-03-31": {
         "max_price": 13.925,
-        "closing_price": 13.34825
+        "closing_price": 13.34825,
+        "last_updated": "2025-04-14"
     },
     "2022-04-012023-03-31": {
         "max_price": 27.834,
-        "closing_price": 27.777
+        "closing_price": 27.777,
+        "last_updated": "2025-04-14"
     },
     "2023-03-012023-03-31": {
         "max_price": 27.834,
-        "closing_price": 27.777
+        "closing_price": 27.777,
+        "last_updated": "2025-04-14"
     },
     "2023-04-012024-03-31": {
         "max_price": 97.4,
-        "closing_price": 90.356
+        "closing_price": 90.356,
+        "last_updated": "2025-04-14"
     },
     "2024-03-012024-03-31": {
         "max_price": 97.4,
-        "closing_price": 90.356
+        "closing_price": 90.356,
+        "last_updated": "2025-04-14"
     },
     "2024-04-012025-03-31": {
         "max_price": 153.13,
-        "closing_price": 108.38
+        "closing_price": 108.38,
+        "last_updated": "2025-04-14"
     },
     "2025-03-012025-03-31": {
         "max_price": 123.7,
-        "closing_price": 108.38
+        "closing_price": 108.38,
+        "last_updated": "2025-04-14"
     },
     "2021-04-012022-03-31": {
         "max_price": 34.647,
-        "closing_price": 27.286
+        "closing_price": 27.286,
+        "last_updated": "2025-04-14"
     },
     "2022-03-012022-03-31": {
         "max_price": 28.946,
-        "closing_price": 27.286
+        "closing_price": 27.286,
+        "last_updated": "2025-04-14"
     }
 }
