@@ -68,5 +68,10 @@
         "max_price": 28.946,
         "closing_price": 27.286,
         "last_updated": "2025-04-14"
+    },
+    "2025-04-012026-03-31": {
+        "max_price": 146.2,
+        "closing_price": 143.85001,
+        "last_updated": "2025-06-22"
     }
 }
