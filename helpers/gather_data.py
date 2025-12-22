@@ -614,10 +614,11 @@ class OwnStockData:
         dfSellOut['InitialValue'] = (dfSellOut['Qty_Sold'].mul(dfSellOut['Price_Bought'])).mul(dfSellOut['BuyRupeeRate'])
 
         dfSellOut['Buy_Date'] = pd.to_datetime(dfSellOut['Buy_Date']).dt.date
-        dfSellOut = dfSellOut.sort_values(by=['Buy_Date'], ascending=True)
-
+        
         dfSellOut['Sell_Date_formatted'] = pd.to_datetime(dfSellOut['Sell_Date']).dt.strftime("%d/%m/%Y")
         dfSellOut['Sell_Date'] = pd.to_datetime(dfSellOut['Sell_Date']).dt.date
+        
+        dfSellOut = dfSellOut.sort_values(by=['Sell_Date'], ascending=True)
 
         dfSellOut['Buy@R'] = ((dfSellOut['Qty_Sold'].mul(dfSellOut['Price_Bought'])) * dfSellOut['BuyRupeeRate'])
         dfSellOut['Sold@R'] = ((dfSellOut['Qty_Sold'].mul(dfSellOut['Price_Sell'])) * dfSellOut['SellRupeeRate'])
