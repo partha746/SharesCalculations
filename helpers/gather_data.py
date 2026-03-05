@@ -151,21 +151,29 @@ class DB:
         self.db_path = os.path.join(sys.path[0], 'configs', db_name)
     
     def create_tables(self, db_path):
-        """_summary_
-        """
+        """Create NSU, ESPP, SellOut tables if they do not exist."""
         conn = sqlite3.connect(db_path)
         db_cursor = conn.cursor()
-
-        nsu_create_table_query = "CREATE TABLE 'NSU' ( `Buy_Date` TEXT, `Available_Sell` REAL, `Price_Bought` REAL, `RupeeRate` REAL )"
+        nsu_create_table_query = "CREATE TABLE IF NOT EXISTS 'NSU' ( `Buy_Date` TEXT, `Available_Sell` REAL, `Price_Bought` REAL, `RupeeRate` REAL )"
         db_cursor.execute(nsu_create_table_query)
-
-        espp_create_table_query = "CREATE TABLE 'ESPP' ( `Buy_Date` TEXT, `Available_Sell` REAL, `Price_Bought` REAL, `RupeeRate` REAL )"
+        espp_create_table_query = "CREATE TABLE IF NOT EXISTS 'ESPP' ( `Buy_Date` TEXT, `Available_Sell` REAL, `Price_Bought` REAL, `RupeeRate` REAL, `TDS_Price` REAL )"
         db_cursor.execute(espp_create_table_query)
-
-        sellout_create_table_query = "CREATE TABLE 'SellOut' ( `Sell_Date` TEXT, `Buy_Date` TEXT, `Qty_Sold` INTEGER, `Price_Bought` REAL, `Price_Sell` REAL, `BuyRupeeRate` REAL, `SellRupeeRate` REAL, `Type` TEXT )"
+        sellout_create_table_query = "CREATE TABLE IF NOT EXISTS 'SellOut' ( `Sell_Date` TEXT, `Buy_Date` TEXT, `Qty_Sold` INTEGER, `Price_Bought` REAL, `Price_Sell` REAL, `BuyRupeeRate` REAL, `SellRupeeRate` REAL, `Type` TEXT )"
         db_cursor.execute(sellout_create_table_query)
-        
         conn.commit()
+        conn.close()
+
+    def ensure_tables(self):
+        """Create tables if the database exists but NSU table is missing."""
+        if not os.path.isfile(self.db_path):
+            return
+        conn = sqlite3.connect(self.db_path)
+        cur = conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='NSU'")
+        if cur.fetchone() is None:
+            conn.close()
+            self.create_tables(self.db_path)
+        else:
+            conn.close()
 
     def get_table_data(self, table_name):
         conn = sqlite3.connect(self.db_path)
@@ -247,6 +255,21 @@ class RupeeConv:
 
         return fetch_rate_for_day(date_str)
 
+    @retry(wait_random_min=10, stop_max_attempt_number=3)
+    def get_latest_usd_to_inr(self):
+        """Fetch the latest USD→INR rate (for live display / refresh). Uses Frankfurter 'latest' endpoint."""
+        url = "https://api.frankfurter.dev/v1/latest"
+        params = {"base": "USD", "symbols": "INR"}
+        try:
+            response = requests.get(url, params=params)
+            data = response.json()
+            rate = data.get("rates", {}).get("INR")
+            if rate is not None:
+                return round(float(rate), 2)
+        except Exception as e:
+            print(f"Error retrieving latest USD/INR rate: {e}")
+        return None
+
     def get_stock_price(self, stock_code='NVDA', api_key="cvsfdk9r01qhup0qfks0cvsfdk9r01qhup0qfksg"):
         """
         Fetches the latest stock price for a given symbol using Finnhub.io.
@@ -280,8 +303,10 @@ class RupeeConv:
     @retry(wait_random_min=10, stop_max_attempt_number=3)
     def get_live_price(self):
         live_price = self.get_stock_price(stock_code='nvda')
-        todays_rp = self.get_rupee_rate(self.todays_date)
-
+        # Use latest endpoint so refresh gets current rate; fallback to date-based for today
+        todays_rp = self.get_latest_usd_to_inr()
+        if todays_rp is None:
+            todays_rp = self.get_rupee_rate(self.todays_date)
         return live_price, todays_rp
 
     def print_rupees(self, amt, cur='INR'):
@@ -335,26 +360,15 @@ class RupeeConv:
 
 
 class Tax:
-    def  __init__(self) -> None:
-        self.fix_tax_slab = 0.3
+    def __init__(self) -> None:
+        self.fix_tax_slab = 0.30  # default when buy_date unknown; < 2 yrs = 30%, >= 2 yrs = 12.5%
 
     def get_tax_slab(self, buy_date):
-        """_summary_
-
-        Args:
-            buy_date (_type_): _description_
-
-        Returns:
-            _type_: _description_
-        """
+        """Tax on capital gain: >= 2 years since buy -> 12.5%; else -> 30%."""
         years_bought = round((date.today() - buy_date).days / 365.2425, 1)
-
         if years_bought >= 2.0:
-            tax_rate = 0.125
-        else:
-            tax_rate = 0.34
-
-        return tax_rate
+            return 0.125
+        return 0.30
     
     def generate_tax_doc(self):
         """_summary_
@@ -496,13 +510,17 @@ class OwnStockData:
         df['InitialValue_raw'] = (df['Available_Sell'].mul(df[Price_Bought])).mul(df['RupeeRate'])
         df['TodaysValue_raw'] = (df['Available_Sell'].mul(self.livePrice) * self.todaysRP)
         df['CapitalGain'] = df['TodaysValue_raw'] - df['InitialValue_raw']
-        df['TaxNeedtoPay_raw'] = df['CapitalGain'] * self.tax_obj.fix_tax_slab
+        # Tax per row: >= 2 years since buy -> 12.5%; else 30%
+        buy_dates = pd.to_datetime(df['Buy_Date'], format='%m/%d/%Y', errors='coerce').dt.date
+        df['TaxSlab'] = buy_dates.map(lambda d: self.tax_obj.get_tax_slab(d) if pd.notna(d) else self.tax_obj.fix_tax_slab)
+        df['TaxNeedtoPay_raw'] = df['CapitalGain'] * df['TaxSlab']
 
         if type == 'ESPP':
             df['OwnInvestedMoney_raw'] = (df['Available_Sell'].mul(df['Price_Bought_raw']) * df['RupeeRate'])
             df['CompanyInvestedMoney_raw'] = df['InitialValue_raw'] - df['OwnInvestedMoney_raw']
-            df['ProfitPercent'] = (((df['TodaysValue_raw']-df['OwnInvestedMoney_raw']) / df['OwnInvestedMoney_raw']))*100                
-            
+            # Profit % = gain / cost base (same as NSU), so it matches "Total purchase" and tax; not (value - own paid)/own paid
+            df['ProfitPercent'] = ((df['CapitalGain'] / df['InitialValue_raw'])) * 100
+
             df['OwnInvestedMoney'] = self.rupeeconv_obj.print_rupees(df['OwnInvestedMoney_raw'])
             df['CompanyInvestedMoney'] = self.rupeeconv_obj.print_rupees(df['CompanyInvestedMoney_raw'])
             df['TDS_Price'] = self.rupeeconv_obj.print_rupees(df['TDS_Price_raw'], cur='USD')
@@ -560,10 +578,22 @@ class OwnStockData:
 
         df = df.sort_values(by=['Buy_Date'], ascending=True)
         df = df.round(1)
-        
+        # Restore TaxSlab after round(1): 0.125 was rounded to 0.1; keep 12.5% / 30% correct
+        df['TaxSlab'] = df['Buy_Date'].map(lambda d: self.tax_obj.get_tax_slab(d) if pd.notna(d) else self.tax_obj.fix_tax_slab)
+
         total_qty = int(df['Available_Sell'].sum())
-        total_capital_gain = float(df['TodaysValue_raw'].sum())
+        total_todays_value = float(df['TodaysValue_raw'].sum())
+        # Unrealised profit: gain = TodaysValue - InitialValue (in INR); after tax = gain - tax
+        total_gain_before_tax = float(df['CapitalGain'].sum())
         total_tds = float(df['TaxNeedtoPay_raw'].sum())
+        # Gain cannot exceed total current value (cost base is non-negative)
+        if total_gain_before_tax > total_todays_value and total_gain_before_tax > 0:
+            scale = total_todays_value / total_gain_before_tax
+            total_tds = total_tds * scale
+            total_gain_before_tax = total_todays_value
+        if total_tds > total_gain_before_tax:
+            total_tds = total_gain_before_tax
+        total_capital_gain = total_gain_before_tax - total_tds  # profit after tax
         avg_buy_price = float(round(df['Price_Bought_raw'].mean(), 0))
         avg_profit_percent = float(round(df['ProfitPercent'].mean(), 0))
 
@@ -613,25 +643,36 @@ class OwnStockData:
         dfSellOut['FY_Closing_Value'] = ((dfSellOut['Qty_Sold'].mul(dfSellOut['BuyRupeeRate'])).mul(dfSellOut['FY_Closing_Price']))
         dfSellOut['InitialValue'] = (dfSellOut['Qty_Sold'].mul(dfSellOut['Price_Bought'])).mul(dfSellOut['BuyRupeeRate'])
 
-        dfSellOut['Buy_Date'] = pd.to_datetime(dfSellOut['Buy_Date']).dt.date
-        
+        dfSellOut['Buy_Date'] = pd.to_datetime(dfSellOut['Buy_Date'], format='%m/%d/%Y', errors='coerce').dt.date
+
         dfSellOut['Sell_Date_formatted'] = pd.to_datetime(dfSellOut['Sell_Date']).dt.strftime("%d/%m/%Y")
         dfSellOut['Sell_Date'] = pd.to_datetime(dfSellOut['Sell_Date']).dt.date
-        
+
         dfSellOut = dfSellOut.sort_values(by=['Sell_Date'], ascending=True)
 
         dfSellOut['Buy@R'] = ((dfSellOut['Qty_Sold'].mul(dfSellOut['Price_Bought'])) * dfSellOut['BuyRupeeRate'])
         dfSellOut['Sold@R'] = ((dfSellOut['Qty_Sold'].mul(dfSellOut['Price_Sell'])) * dfSellOut['SellRupeeRate'])
-        dfSellOut['ProfitPercent'] = round(((dfSellOut['Sold@R'] - dfSellOut['Buy@R'] - ((dfSellOut['Sold@R'] - dfSellOut['Buy@R']) * self.tax_obj.fix_tax_slab)) / dfSellOut['Buy@R']) * 100, 2)
+        # Tax per row: >= 2 years since buy -> 12.5%; else 30%
+        dfSellOut['TaxSlab'] = dfSellOut['Buy_Date'].map(lambda d: self.tax_obj.get_tax_slab(d) if pd.notna(d) else self.tax_obj.fix_tax_slab)
+        gain_before_tax = dfSellOut['Sold@R'] - dfSellOut['Buy@R']
+        dfSellOut['TaxNeedToBePaid'] = (round((gain_before_tax * dfSellOut['TaxSlab']), 2))
+        dfSellOut['ProfitPercent'] = round(((gain_before_tax - dfSellOut['TaxNeedToBePaid']) / dfSellOut['Buy@R']) * 100, 2)
         dfSellOut['ProfitNSU'] = round((dfSellOut[dfSellOut['Type'] == 'NSU']['Sold@R']), 2)
         dfSellOut['ProfitESPP'] = round((dfSellOut[dfSellOut['Type'] == 'ESPP']['Sold@R'] - dfSellOut[dfSellOut['Type'] == 'ESPP']['Buy@R']), 2)
-        dfSellOut['TaxNeedToBePaid'] = (round(((dfSellOut['Sold@R'] - dfSellOut['Buy@R']) * self.tax_obj.fix_tax_slab), 2))
-
         dfSellOut = dfSellOut.fillna(0)
         dfSellOut = dfSellOut.round(1)
-        
-        sell_profit = ((dfSellOut[dfSellOut['Type'] == 'NSU']['Sold@R']).sum() + (dfSellOut[dfSellOut['Type'] == 'ESPP']['Sold@R'] - dfSellOut[dfSellOut['Type'] == 'ESPP']['Buy@R']).sum() - ((dfSellOut['Sold@R'] - dfSellOut['Buy@R']) * self.tax_obj.fix_tax_slab).sum())
-        
+
+        # Realised profit = (total sell value − total buy value) − total tax (same as your manual: sell − buy − tax)
+        total_sell_inr = dfSellOut['Sold@R'].sum()
+        total_buy_inr = dfSellOut['Buy@R'].sum()
+        total_tax = dfSellOut['TaxNeedToBePaid'].sum()
+        sell_profit = (total_sell_inr - total_buy_inr) - total_tax
+        total_qty_sold = int(dfSellOut['Qty_Sold'].sum())
+        # Normalize Type (strip, upper) so "NSU", "RSU", "nsu" all count as RSU
+        type_norm = dfSellOut['Type'].astype(str).str.strip().str.upper()
+        total_sell_rsu_inr = dfSellOut.loc[type_norm.isin(['NSU', 'RSU']), 'Sold@R'].sum()
+        total_sell_espp_inr = dfSellOut.loc[type_norm == 'ESPP', 'Sold@R'].sum()
+
         dfSellOut['Price_Bought'] = self.rupeeconv_obj.print_rupees(dfSellOut['Price_Bought'], cur='USD')
         dfSellOut['BuyRupeeRate'] = self.rupeeconv_obj.print_rupees(dfSellOut['BuyRupeeRate'])
         # dfSellOut['Price_Sell'] = self.rupeeconv_obj.print_rupees(dfSellOut['BuyRupeeRate'], cur='USD')
@@ -643,7 +684,7 @@ class OwnStockData:
         dfSellOut['Max_Value_FY'] = self.rupeeconv_obj.print_rupees(dfSellOut['Max_Value_FY'])
         dfSellOut['FY_Closing_Value'] = self.rupeeconv_obj.print_rupees(dfSellOut['FY_Closing_Value'])
         
-        return dfSellOut, sell_profit
+        return dfSellOut, sell_profit, total_qty_sold, total_sell_inr, total_sell_rsu_inr, total_sell_espp_inr
         
 class DataCleaner:
     def convert_from_symbol(self, text):

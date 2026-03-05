@@ -1,0 +1,333 @@
+@if (loading) {
+  <div class="dashboard-loading">Loading dashboard…</div>
+} @else if (error) {
+  <div class="dashboard-error">
+    <p>{{ error }}</p>
+    <button type="button" class="retry-btn" (click)="load()">Retry</button>
+  </div>
+} @else if (data) {
+  <section class="dashboard-section">
+    <h2 class="section-title">Overview</h2>
+    <div class="stat-grid stat-grid--primary">
+      <div
+        class="live-price-block"
+        [class.live-price-block--refreshing]="refreshLiveInProgress"
+        role="button"
+        tabindex="0"
+        (click)="refreshLiveData()"
+        (keydown.enter)="refreshLiveData()"
+        (keydown.space)="refreshLiveData(); $event.preventDefault()"
+        title="Click to refresh live price and rates"
+        aria-label="Live price – click to refresh">
+        <div class="live-price-block__title">Live price {{ refreshLiveInProgress ? '…' : '' }}</div>
+        <div class="live-price-block__row live-price-block__row--main">
+          <span class="live-price-block__label">NVDA</span>
+          <span class="live-price-block__value">$ {{ formatUsd(data.livePriceUsd) }}</span>
+        </div>
+        <div class="live-price-block__row">
+          <span class="live-price-block__label">INR value</span>
+          <span class="live-price-block__value">₹ {{ formatInr(liveInrPerShare())}}</span>
+          <span class="live-price-block__hint">/ share</span>
+        </div>
+        <div class="live-price-block__row">
+          <span class="live-price-block__label">USD → INR</span>
+          <span class="live-price-block__value">{{ formatUsd(data.usdToInrRate) }}</span>
+        </div>
+      </div>
+      <div class="total-holdings-block">
+        <div class="total-holdings-block__title">Total holdings</div>
+        <div class="total-holdings-block__row total-holdings-block__row--main">
+          <span class="total-holdings-block__label">Shares</span>
+          <span class="total-holdings-block__value">{{ data.totalShares }}</span>
+        </div>
+        <div class="total-holdings-block__row">
+          <span class="total-holdings-block__label">Total value (USD)</span>
+          <span class="total-holdings-block__value">$ {{ formatUsd(data.totalValueUsd) }}</span>
+        </div>
+        <div class="total-holdings-block__row">
+          <span class="total-holdings-block__label">Total value (INR)</span>
+          <span class="total-holdings-block__value">₹ {{ formatInr(data.totalValueInr) }}</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="dashboard-section">
+    <h2 class="section-title">Profits & tax</h2>
+    <div class="stat-grid">
+      <app-stat-card title="In bank if you sell now" [value]="formatInr(data.netInBankIfSellNow)" sublabel="Total value − tax (proceeds in hand)" currency="INR"></app-stat-card>
+      <app-stat-card title="Unrealised profit (after tax)" [value]="formatInr(data.unrealisedProfitAfterTax)" sublabel="Gain − estimated tax when sold" currency="INR"></app-stat-card>
+      <app-stat-card title="Unrealised profit (before tax)" [value]="formatInr(data.unrealisedProfitBeforeTax)" sublabel="Gain before tax" currency="INR"></app-stat-card>
+      <app-stat-card title="Total tax to pay" [value]="formatInr(data.totalTaxToPay)" currency="INR"></app-stat-card>
+      @if (data.realisedProfit != null) {
+        <div class="realised-profit-block">
+          <app-stat-card
+            title="Realised profit"
+            [value]="formatInr(data.realisedProfit)"
+            [sublabel]="(data.soldTotalQty != null && data.soldTotalValueInr != null) ? (data.soldTotalQty + ' shares sold\n₹ ' + formatInr(data.soldTotalValueInr) + ' total') : ''"
+            currency="INR"></app-stat-card>
+          <div class="sold-pie-wrap">
+            @if (hasSoldBreakdown) {
+              <div class="sold-pie" [style.background]="soldPieConicGradient" title="RSU {{ soldRsuPercent | number:'1.1-1' }}% · ESPP {{ soldEsppPercent | number:'1.1-1' }}%"></div>
+              <div class="sold-pie-legend">
+                <span class="sold-pie-legend__item"><span class="sold-pie-legend__dot sold-pie-legend__dot--rsu"></span> RSU {{ soldRsuPercent | number:'1.1-1' }}%</span>
+                <span class="sold-pie-legend__item"><span class="sold-pie-legend__dot sold-pie-legend__dot--espp"></span> ESPP {{ soldEsppPercent | number:'1.1-1' }}%</span>
+              </div>
+            } @else {
+              <span class="sold-pie-no-data">No RSU/ESPP breakdown</span>
+            }
+          </div>
+        </div>
+      }
+    </div>
+  </section>
+
+  @if (data.nsu || data.espp) {
+    <section class="dashboard-section">
+      <h2 class="section-title">Breakdown (RSU / ESPP)</h2>
+      <div class="breakdown-grid">
+        @if (data.nsu) {
+          <div class="breakdown-card">
+            <h3>RSU</h3>
+            <ul>
+              <li>Quantity: {{ data.nsu.qty }}</li>
+              <li>Profit after tax: ₹ {{ formatInr(data.nsu.profitAfterTax) }}</li>
+              <li>Avg buy price: $ {{ formatUsd(data.nsu.avgBuyPrice) }}</li>
+              <li>Avg profit: {{ data.nsu.avgProfitPercent }}%</li>
+            </ul>
+          </div>
+        }
+        @if (data.espp) {
+          <div class="breakdown-card">
+            <h3>ESPP</h3>
+            <ul>
+              <li>Quantity: {{ data.espp.qty }}</li>
+              <li>Profit after tax: ₹ {{ formatInr(data.espp.profitAfterTax) }}</li>
+              <li>Avg buy price: $ {{ formatUsd(data.espp.avgBuyPrice) }}</li>
+              <li>Avg profit: {{ data.espp.avgProfitPercent }}%</li>
+            </ul>
+          </div>
+        }
+        @if (data.nsu && data.espp) {
+          <div class="breakdown-card breakdown-card--pie">
+            <h3 class="breakdown-pie-title">Profit after tax</h3>
+            <div class="breakdown-pie-wrap">
+              <div class="breakdown-pie" [style.background]="breakdownPieConicGradient" title="RSU {{ breakdownNsuPercent | number:'1.1-1' }}% · ESPP {{ breakdownEsppPercent | number:'1.1-1' }}%"></div>
+              <div class="breakdown-pie-legend">
+                <span class="breakdown-pie-legend__item"><span class="breakdown-pie-legend__dot breakdown-pie-legend__dot--nsu"></span> RSU {{ breakdownNsuPercent | number:'1.1-1' }}%</span>
+                <span class="breakdown-pie-legend__item"><span class="breakdown-pie-legend__dot breakdown-pie-legend__dot--espp"></span> ESPP {{ breakdownEsppPercent | number:'1.1-1' }}%</span>
+              </div>
+            </div>
+          </div>
+        }
+      </div>
+    </section>
+  }
+
+  <section class="dashboard-section tab-section">
+    <div class="tab-bar">
+      <button type="button" class="tab-btn" [class.tab-btn--active]="activeTab === 'holdings'" (click)="setActiveTab('holdings')">Holdings</button>
+      <button type="button" class="tab-btn" [class.tab-btn--active]="activeTab === 'sold'" (click)="setActiveTab('sold')">Sold Shares</button>
+    </div>
+
+    @if (activeTab === 'holdings') {
+  <div class="holdings-section">
+    @if (holdings.length > 0) {
+      <section class="dashboard-section holdings-chart-section">
+        <div class="holdings-chart-header">
+          <h2 class="section-title">Holdings by date bought</h2>
+          <div class="holdings-chart-group-by">
+            @for (opt of holdingsChartGroupByOptions; track opt.value) {
+              <button
+                type="button"
+                class="holdings-chart-group-btn"
+                [class.holdings-chart-group-btn--active]="holdingsChartGroupBy === opt.value"
+                (click)="setHoldingsChartGroupBy(opt.value)">
+                {{ opt.label }}
+              </button>
+            }
+          </div>
+        </div>
+        <div class="holdings-chart-wrap">
+          <canvas #holdingsChartCanvas class="holdings-chart"></canvas>
+        </div>
+      </section>
+    }
+    <div class="section-title-row">
+      <h2 class="section-title">Holdings</h2>
+      @if (holdingsFilteredSorted.length > 0) {
+        <button type="button" class="export-btn" (click)="exportHoldingsCsv()">Export CSV</button>
+      }
+    </div>
+    @if (holdingsFilteredSorted.length > 0) {
+      <div class="holdings-summary holdings-summary--top">
+        @if (holdingsSelectedTotals.selectedCount > 0) {
+          <span class="holdings-summary__item">Value today ₹ {{ formatInr(holdingsSelectedTotals.totalValueTodayInr) }}</span>
+          <span class="holdings-summary__item">Tax to pay ₹ {{ formatInr(holdingsSelectedTotals.totalTaxToPayInr) }}</span>
+          <span class="holdings-summary__item">In your account after tax ₹ {{ formatInr(holdingsSelectedTotals.totalNetInAccountInr) }}</span>
+        } @else {
+          <span class="holdings-summary__hint">Select rows and enter sell qty to simulate your sell strategy.</span>
+        }
+      </div>
+    }
+    <p class="holdings-table__hint">Drag column headers to reorder; order is saved. Select rows and set sell qty to see totals above.</p>
+    <div class="holdings-table-wrap">
+      <table class="holdings-table">
+        <thead>
+          <tr class="holdings-table__header">
+            <th class="holdings-table__th--fixed">Select</th>
+            <th class="holdings-table__th--fixed">Sell qty <span class="holdings-table__total-sell">(total: {{ totalSellQty }})</span></th>
+            @for (colKey of holdingsColumnOrder; track colKey; let i = $index) {
+              <th
+                class="holdings-table__th--sortable holdings-table__th--draggable"
+                draggable="true"
+                (click)="setHoldingsSort(colKey)"
+                (dragstart)="onColDragStart($event, i)"
+                (dragend)="onColDragEnd()"
+                (dragover)="onColDragOver($event)"
+                (drop)="onColDrop($event, i)"
+              >{{ getColLabel(colKey) }} {{ holdingsSortKey === colKey ? (holdingsSortDir === 1 ? '↑' : '↓') : '' }}</th>
+            }
+          </tr>
+          <tr class="holdings-table__filter">
+            <th class="holdings-table__select-actions">
+              <button type="button" class="holdings-table__action-btn" (click)="selectAllVisible()">Select all</button>
+              <button type="button" class="holdings-table__action-btn" (click)="deselectAllVisible()">Deselect all</button>
+            </th>
+            <th></th>
+            @for (colKey of holdingsColumnOrder; track colKey) {
+              <th><input type="text" [(ngModel)]="holdingsFilter[colKey]" placeholder="Filter…" class="holdings-table__filter-input" /></th>
+            }
+          </tr>
+        </thead>
+        <tbody>
+          @for (row of holdingsFilteredSorted; track getRowKey(row)) {
+            <tr>
+              <td class="holdings-table__cell--center">
+                <button type="button" class="holdings-table__checkbox-btn" [class.holdings-table__checkbox-btn--checked]="isRowSelected(row)" (click)="onRowSelectClick(row, $event)" [attr.aria-label]="isRowSelected(row) ? 'Deselect row' : 'Select row'">
+                  @if (isRowSelected(row)) {
+                    <span class="holdings-table__checkbox-tick">✓</span>
+                  }
+                </button>
+              </td>
+              <td class="holdings-table__cell--sellqty">
+                <input type="text" inputmode="numeric" [value]="getSellQty(row)" (input)="onSellQtyInput(row, $event)" (focus)="onSellQtyFocus($event)" [attr.max]="row.qty" placeholder="0" class="holdings-table__sellqty-input" aria-label="Sell qty" />
+                <span class="holdings-table__sellqty-max">/ {{ row.qty }}</span>
+              </td>
+              @for (colKey of holdingsColumnOrder; track colKey) {
+                <td>{{ formatCell(row, colKey) }}</td>
+              }
+            </tr>
+          } @empty {
+            <tr><td [attr.colspan]="holdingsColumnOrder.length + 2" class="holdings-table__empty">No holdings or no rows match the filter.</td></tr>
+          }
+        </tbody>
+      </table>
+    </div>
+  </div>
+    }
+
+    @if (activeTab === 'sold') {
+  <div class="sold-section">
+    @if (soldRows.length > 0 && !soldLoading) {
+      <section class="dashboard-section holdings-chart-section sold-chart-section">
+        <div class="holdings-chart-header">
+          <h2 class="section-title">Sold by sell date</h2>
+          <div class="holdings-chart-group-by">
+            @for (opt of soldChartGroupByOptions; track opt.value) {
+              <button
+                type="button"
+                class="holdings-chart-group-btn"
+                [class.holdings-chart-group-btn--active]="soldChartGroupBy === opt.value"
+                (click)="setSoldChartGroupBy(opt.value)">
+                {{ opt.label }}
+              </button>
+            }
+          </div>
+        </div>
+        <div class="holdings-chart-wrap">
+          <canvas #soldChartCanvas class="holdings-chart"></canvas>
+        </div>
+      </section>
+    }
+    <div class="section-title-row">
+      <h2 class="section-title">Sold Shares</h2>
+      @if (soldRows.length > 0 && !soldLoading) {
+        <button type="button" class="export-btn" (click)="exportSoldCsv()">Export CSV</button>
+      }
+    </div>
+    @if (soldLoading) {
+      <p class="sold-loading">Loading sold shares…</p>
+    } @else if (soldRows.length === 0) {
+      <p class="sold-empty">No sold shares recorded.</p>
+    } @else {
+      @if (soldFilteredSorted.length > 0) {
+        <div class="holdings-summary holdings-summary--top">
+          @if (soldSummaryTotals.selectedCount > 0) {
+            <span class="holdings-summary__item">Total qty sold {{ soldSummaryTotals.totalQtySold }}</span>
+            <span class="holdings-summary__item">Total amount ₹ {{ formatInr(soldSummaryTotals.totalSellValueInr) }}</span>
+            <span class="holdings-summary__item">Total tax paid ₹ {{ formatInr(soldSummaryTotals.totalTaxPaidInr) }}</span>
+            <span class="holdings-summary__hint">(selected rows)</span>
+          } @else {
+            <span class="holdings-summary__item">Total qty sold {{ soldSummaryTotals.totalQtySold }}</span>
+            <span class="holdings-summary__item">Total amount ₹ {{ formatInr(soldSummaryTotals.totalSellValueInr) }}</span>
+            <span class="holdings-summary__item">Total tax paid ₹ {{ formatInr(soldSummaryTotals.totalTaxPaidInr) }}</span>
+            <span class="holdings-summary__hint">(all rows) Select rows to see selected totals.</span>
+          }
+        </div>
+      }
+      <div class="sold-table-wrap">
+        <table class="holdings-table sold-table">
+          <thead>
+            <tr class="holdings-table__header">
+              <th class="holdings-table__th--fixed">Select</th>
+              @for (col of soldCols; track col) {
+                <th class="holdings-table__th--sortable" (click)="setSoldSort(col)">
+                  {{ soldColLabels[col] }} {{ soldSortKey === col ? (soldSortDir === 1 ? '↑' : '↓') : '' }}
+                </th>
+              }
+            </tr>
+            <tr class="holdings-table__filter">
+              <th class="holdings-table__select-actions">
+                <button type="button" class="holdings-table__action-btn" (click)="selectAllSoldVisible()">Select all</button>
+                <button type="button" class="holdings-table__action-btn" (click)="deselectAllSoldVisible()">Deselect all</button>
+              </th>
+              @for (col of soldCols; track col) {
+                <th><input type="text" [(ngModel)]="soldFilter[col]" placeholder="Filter…" class="holdings-table__filter-input" /></th>
+              }
+            </tr>
+          </thead>
+          <tbody>
+            @for (row of soldFilteredSorted; track getSoldRowKey(row)) {
+              <tr>
+                <td class="holdings-table__cell--center">
+                  <button type="button" class="holdings-table__checkbox-btn" [class.holdings-table__checkbox-btn--checked]="isSoldRowSelected(row)" (click)="toggleSoldRowSelection(row)" [attr.aria-label]="isSoldRowSelected(row) ? 'Deselect row' : 'Select row'">
+                    @if (isSoldRowSelected(row)) {
+                      <span class="holdings-table__checkbox-tick">✓</span>
+                    }
+                  </button>
+                </td>
+                <td>{{ formatDate(row.sellDate) }}</td>
+                <td>{{ formatDate(row.buyDate) }}</td>
+                <td>{{ typeLabel(row.type) }}</td>
+                <td>{{ row.qtySold }}</td>
+                <td>{{ formatUsd(row.priceBoughtUsd) }}</td>
+                <td>{{ formatUsd(row.priceSellUsd) }}</td>
+                <td>₹ {{ formatInr(row.buyValueInr) }}</td>
+                <td>₹ {{ formatInr(row.sellValueInr) }}</td>
+                <td>₹ {{ formatInr(row.gainBeforeTaxInr) }}</td>
+                <td>₹ {{ formatInr(row.taxPaidInr) }}</td>
+                <td>{{ row.profitPercent }}%</td>
+                <td>{{ row.taxPercent }}%</td>
+              </tr>
+            } @empty {
+              <tr><td [attr.colspan]="soldCols.length + 1" class="holdings-table__empty">No sold shares or no rows match the filter.</td></tr>
+            }
+          </tbody>
+        </table>
+      </div>
+    }
+  </div>
+    }
+  </section>
+}

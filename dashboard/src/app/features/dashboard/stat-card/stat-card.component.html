@@ -1,0 +1,15 @@
+<div class="stat-card">
+  <div class="stat-card__title">{{ title }}</div>
+  <div class="stat-card__value">
+    @if (currency === 'USD' && value !== '') {
+      $ {{ value }}
+    } @else if (currency === 'INR' && value !== '') {
+      ₹ {{ value }}
+    } @else {
+      {{ value }}
+    }
+  </div>
+  @if (sublabel) {
+    <div class="stat-card__sublabel">{{ sublabel }}</div>
+  }
+</div>

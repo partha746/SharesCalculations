@@ -1,0 +1,611 @@
+.dashboard-loading {
+  padding: 2rem;
+  text-align: center;
+  color: #8b949e;
+}
+.dashboard-error {
+  padding: 2rem;
+  text-align: center;
+  color: #f85149;
+  p { margin: 0 0 1rem; }
+}
+.retry-btn {
+  font: inherit;
+  padding: 0.5rem 1rem;
+  border-radius: 6px;
+  border: 1px solid #30363d;
+  background: #161b22;
+  color: #e6edf3;
+  cursor: pointer;
+}
+.retry-btn:hover {
+  background: #21262d;
+}
+.section-title {
+  font-size: 1rem;
+  font-weight: 600;
+  margin: 0 0 0.75rem;
+  color: #8b949e;
+}
+.section-title-row {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  margin-bottom: 0.75rem;
+  .section-title {
+    margin: 0;
+  }
+}
+.export-btn {
+  font-size: 0.875rem;
+  padding: 0.35rem 0.75rem;
+  background: #21262d;
+  border: 1px solid #30363d;
+  border-radius: 6px;
+  color: #c9d1d9;
+  cursor: pointer;
+  &:hover {
+    background: #30363d;
+    border-color: #8b949e;
+  }
+}
+.dashboard-section {
+  margin-bottom: 1.5rem;
+}
+.live-price-block {
+  background: #161b22;
+  border: 1px solid #30363d;
+  border-radius: 8px;
+  padding: 1rem 1.25rem;
+  min-width: 260px;
+  display: flex;
+  flex-direction: column;
+  cursor: pointer;
+  user-select: none;
+  transition: border-color 0.15s ease, background-color 0.15s ease;
+  &:hover:not(.live-price-block--refreshing) {
+    border-color: #58a6ff;
+    background: #1c2128;
+  }
+  &:focus-visible {
+    outline: 2px solid #58a6ff;
+    outline-offset: 2px;
+  }
+  &.live-price-block--refreshing {
+    pointer-events: none;
+    opacity: 0.85;
+  }
+}
+.live-price-block__title {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #8b949e;
+  margin-bottom: 0.5rem;
+}
+.live-price-block__row {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  font-size: 0.9rem;
+  margin-top: 0.35rem;
+  &:first-of-type { margin-top: 0; }
+}
+.live-price-block__row--main {
+  font-size: 1.25rem;
+  font-weight: 600;
+  margin-top: 0.25rem;
+}
+.live-price-block__label {
+  color: #8b949e;
+}
+.live-price-block__value {
+  color: #e6edf3;
+}
+.live-price-block__hint {
+  font-size: 0.75rem;
+  color: #8b949e;
+}
+.total-holdings-block {
+  background: #161b22;
+  border: 1px solid #30363d;
+  border-radius: 8px;
+  padding: 1rem 1.25rem;
+  min-width: 260px;
+  min-height: 170px;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+.total-holdings-block__title {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #8b949e;
+  margin-bottom: 0.5rem;
+}
+.total-holdings-block__row {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  font-size: 0.9rem;
+  margin-top: 0.35rem;
+  &:first-of-type { margin-top: 0; }
+}
+.total-holdings-block__row--main {
+  font-size: 1.25rem;
+  font-weight: 600;
+  margin-top: 0.25rem;
+}
+.total-holdings-block__label {
+  color: #8b949e;
+}
+.total-holdings-block__value {
+  color: #e6edf3;
+  white-space: nowrap;
+}
+.live-price-block__value {
+  white-space: nowrap;
+}
+.stat-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: 1rem;
+  align-items: stretch;
+}
+.stat-grid--primary {
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+}
+.realised-profit-block {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  background: #161b22;
+  border: 1px solid #30363d;
+  border-radius: 8px;
+  padding: 1rem 1.25rem;
+  min-width: 240px;
+  app-stat-card {
+    flex: 0 0 auto;
+  }
+  app-stat-card::ng-deep .stat-card {
+    background: transparent;
+    border: none;
+    border-radius: 0;
+    padding: 0;
+    min-height: 0;
+    height: auto;
+  }
+  app-stat-card::ng-deep .stat-card__value {
+    word-break: break-word;
+  }
+  app-stat-card::ng-deep .stat-card__sublabel {
+    white-space: pre-line;
+  }
+}
+.sold-pie-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+  padding-top: 0.25rem;
+  border-top: 1px solid #21262d;
+}
+.sold-pie {
+  width: 80px;
+  height: 80px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.sold-pie-legend {
+  display: flex;
+  justify-content: center;
+  gap: 1rem;
+  font-size: 0.75rem;
+  color: #8b949e;
+}
+.sold-pie-legend__item {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+.sold-pie-legend__dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.sold-pie-legend__dot--rsu {
+  background: #388bfd;
+}
+.sold-pie-legend__dot--espp {
+  background: #7ee787;
+}
+.sold-pie-no-data {
+  font-size: 0.75rem;
+  color: #8b949e;
+}
+.live-price-block {
+  min-height: 170px;
+  height: 100%;
+}
+.holdings-chart-section {
+  .section-title { margin-bottom: 0; }
+}
+.holdings-chart-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 1rem;
+  margin-bottom: 0.75rem;
+}
+.holdings-chart-group-by {
+  display: flex;
+  gap: 0.25rem;
+}
+.holdings-chart-group-btn {
+  padding: 0.35rem 0.65rem;
+  font-size: 0.8rem;
+  border: 1px solid #30363d;
+  border-radius: 6px;
+  background: #21262d;
+  color: #c9d1d9;
+  cursor: pointer;
+  &:hover {
+    background: #30363d;
+    border-color: #8b949e;
+  }
+  &.holdings-chart-group-btn--active {
+    background: #388bfd;
+    border-color: #388bfd;
+    color: #fff;
+  }
+}
+.holdings-chart-wrap {
+  background: #161b22;
+  border: 1px solid #30363d;
+  border-radius: 8px;
+  padding: 1rem;
+  height: 320px;
+  position: relative;
+}
+.holdings-chart {
+  display: block;
+}
+.breakdown-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 1rem;
+}
+.breakdown-card {
+  background: #161b22;
+  border: 1px solid #30363d;
+  border-radius: 8px;
+  padding: 1rem 1.25rem;
+  h3 {
+    margin: 0 0 0.5rem;
+    font-size: 1rem;
+  }
+  ul {
+    margin: 0;
+    padding-left: 1.25rem;
+    line-height: 1.6;
+    color: #8b949e;
+    font-size: 0.9rem;
+  }
+}
+.breakdown-card--pie {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  .breakdown-pie-title {
+    margin-bottom: 0.75rem;
+  }
+}
+.breakdown-pie-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+}
+.breakdown-pie {
+  width: 100px;
+  height: 100px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.breakdown-pie-legend {
+  display: flex;
+  gap: 0.75rem;
+  font-size: 0.8rem;
+  color: #8b949e;
+}
+.breakdown-pie-legend__item {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+.breakdown-pie-legend__dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.breakdown-pie-legend__dot--nsu {
+  background: #388bfd;
+}
+.breakdown-pie-legend__dot--espp {
+  background: #7ee787;
+}
+
+.tab-section {
+  margin-top: 0.5rem;
+}
+.tab-bar {
+  display: flex;
+  gap: 0.25rem;
+  margin-bottom: 1rem;
+}
+.tab-btn {
+  padding: 0.5rem 1rem;
+  font-size: 0.9rem;
+  font-weight: 500;
+  border: 1px solid #30363d;
+  border-radius: 6px;
+  background: #21262d;
+  color: #8b949e;
+  cursor: pointer;
+}
+.tab-btn:hover {
+  color: #e6edf3;
+  background: #30363d;
+}
+.tab-btn--active {
+  background: #238636;
+  border-color: #238636;
+  color: #fff;
+}
+.tab-btn--active:hover {
+  background: #2ea043;
+  border-color: #2ea043;
+  color: #fff;
+}
+.holdings-section {
+  overflow-x: auto;
+}
+.sold-section {
+  overflow-x: auto;
+}
+.sold-loading,
+.sold-empty {
+  color: #8b949e;
+  padding: 1rem 0;
+  margin: 0;
+}
+.sold-table-wrap {
+  overflow-x: auto;
+}
+.sold-table {
+  margin-top: 0.5rem;
+}
+.holdings-table__hint {
+  font-size: 0.8rem;
+  color: #8b949e;
+  margin: 0 0 0.5rem;
+}
+.holdings-summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 1rem 1.5rem;
+  padding: 1rem 1.25rem;
+  background: #161b22;
+  border: 1px solid #30363d;
+  border-radius: 8px;
+  font-size: 0.95rem;
+}
+.holdings-summary--top {
+  margin-bottom: 1rem;
+}
+.holdings-summary__item {
+  color: #e6edf3;
+  white-space: nowrap;
+}
+.holdings-summary__hint {
+  color: #8b949e;
+  font-size: 0.9rem;
+}
+.holdings-table__th--fixed {
+  white-space: nowrap;
+  width: 1%;
+}
+.holdings-table__select-actions {
+  vertical-align: middle;
+}
+.holdings-table__action-btn {
+  display: block;
+  width: 100%;
+  margin-bottom: 0.25rem;
+  padding: 0.25rem 0.5rem;
+  font-size: 0.75rem;
+  background: transparent;
+  border: 1px solid #30363d;
+  border-radius: 4px;
+  color: #8b949e;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.holdings-table__action-btn:hover {
+  color: #e6edf3;
+  border-color: #8b949e;
+}
+.holdings-table__action-btn:last-child {
+  margin-bottom: 0;
+}
+.holdings-table__total-sell {
+  display: block;
+  font-size: 0.75rem;
+  font-weight: normal;
+  color: #8b949e;
+}
+.holdings-table__cell--center {
+  text-align: center;
+  vertical-align: middle;
+}
+.holdings-table__checkbox-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.125rem;
+  height: 1.125rem;
+  padding: 0;
+  margin: 0;
+  border: 1px solid #484f58;
+  border-radius: 3px;
+  background: #0d1117;
+  color: transparent;
+  cursor: pointer;
+  font-size: 0.75rem;
+  line-height: 1;
+  vertical-align: middle;
+}
+.holdings-table__checkbox-btn:hover {
+  border-color: #8b949e;
+  background: #21262d;
+}
+.holdings-table__checkbox-btn--checked {
+  background: #238636;
+  border-color: #238636;
+  color: #fff;
+}
+.holdings-table__checkbox-btn--checked:hover {
+  background: #2ea043;
+  border-color: #2ea043;
+}
+.holdings-table__checkbox-tick {
+  color: #fff;
+  font-weight: bold;
+}
+.holdings-table__cell--sellqty {
+  white-space: nowrap;
+}
+.holdings-table__sellqty-input {
+  width: 4rem;
+  padding: 0.25rem 0.5rem;
+  font-size: 0.85rem;
+  background: #0d1117;
+  border: 1px solid #30363d;
+  border-radius: 4px;
+  color: #e6edf3;
+}
+.holdings-table__sellqty-max {
+  font-size: 0.8rem;
+  color: #8b949e;
+  margin-left: 0.25rem;
+}
+.holdings-table-wrap {
+  overflow-x: auto;
+  overflow-y: visible;
+  border-radius: 8px;
+  // Softer scrollbar
+  scrollbar-width: thin;
+  scrollbar-color: #484f58 #21262d;
+  &::-webkit-scrollbar {
+    height: 8px;
+  }
+  &::-webkit-scrollbar-track {
+    background: #21262d;
+    border-radius: 0 0 8px 8px;
+  }
+  &::-webkit-scrollbar-thumb {
+    background: #484f58;
+    border-radius: 4px;
+  }
+  &::-webkit-scrollbar-thumb:hover {
+    background: #6e7681;
+  }
+}
+.holdings-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.8125rem;
+  background: #161b22;
+  border: 1px solid #30363d;
+  border-radius: 8px;
+  overflow: hidden;
+  th, td {
+    padding: 0.35rem 0.5rem;
+    text-align: left;
+    border-bottom: 1px solid #21262d;
+  }
+  thead th {
+    background: #21262d;
+    color: #8b949e;
+    font-weight: 600;
+  }
+  // Sticky first two columns (Select, Sell qty) so row context stays visible when scrolling
+  thead th:first-child,
+  thead th:nth-child(2),
+  tbody td:first-child,
+  tbody td:nth-child(2) {
+    position: sticky;
+    left: 0;
+    z-index: 1;
+    background: #161b22;
+    box-shadow: 2px 0 4px rgba(0, 0, 0, 0.15);
+  }
+  thead th:nth-child(2),
+  tbody td:nth-child(2) {
+    left: 5rem; // after Select column (buttons + padding)
+  }
+  thead th {
+    background: #21262d;
+  }
+  thead th:first-child,
+  thead th:nth-child(2) {
+    background: #21262d;
+    z-index: 2;
+    box-shadow: 2px 0 4px rgba(0, 0, 0, 0.2);
+  }
+  tbody tr:hover td:first-child,
+  tbody tr:hover td:nth-child(2) {
+    background: #21262d;
+  }
+  .holdings-table__th--sortable {
+    cursor: pointer;
+    user-select: none;
+    white-space: nowrap;
+  }
+  .holdings-table__th--sortable:hover {
+    color: #e6edf3;
+  }
+  .holdings-table__th--draggable {
+    cursor: grab;
+  }
+  .holdings-table__th--draggable:active {
+    cursor: grabbing;
+  }
+  .holdings-table__filter-input {
+    width: 100%;
+    min-width: 3rem;
+    padding: 0.2rem 0.4rem;
+    font-size: 0.75rem;
+    background: #0d1117;
+    border: 1px solid #30363d;
+    border-radius: 4px;
+    color: #e6edf3;
+  }
+  tbody tr:hover {
+    background: #21262d;
+  }
+  td {
+    color: #e6edf3;
+    white-space: nowrap;
+  }
+  .holdings-table__empty {
+    text-align: center;
+    color: #8b949e;
+    padding: 1rem;
+  }
+}
