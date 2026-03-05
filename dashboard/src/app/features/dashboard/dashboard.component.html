@@ -23,6 +23,11 @@
         <div class="live-price-block__row live-price-block__row--main">
           <span class="live-price-block__label">NVDA</span>
           <span class="live-price-block__value">$ {{ formatUsd(data.livePriceUsd) }}</span>
+          @if (livePriceMovement) {
+            <span class="live-price-block__diff" [class.live-price-block__diff--up]="livePriceMovement.diffUsd > 0" [class.live-price-block__diff--down]="livePriceMovement.diffUsd < 0">
+              ({{ livePriceMovement.diffUsd > 0 ? '↑' : (livePriceMovement.diffUsd < 0 ? '↓' : '—') }} $ {{ formatUsd(Math.abs(livePriceMovement.diffUsd)) }} ({{ livePriceMovement.diffPct >= 0 ? '+' : '' }}{{ livePriceMovement.diffPct | number:'1.2-2' }}%))
+            </span>
+          }
         </div>
         <div class="live-price-block__row">
           <span class="live-price-block__label">INR value</span>
@@ -33,22 +38,55 @@
           <span class="live-price-block__label">USD → INR</span>
           <span class="live-price-block__value">{{ formatUsd(data.usdToInrRate) }}</span>
         </div>
+        @if (lastRefreshedAt) {
+          <div class="live-price-block__row live-price-block__row--muted">
+            <span class="live-price-block__label">Last refreshed</span>
+            <span class="live-price-block__value live-price-block__value--muted">{{ formatLastRefreshed(lastRefreshedAt) }}</span>
+          </div>
+        }
+        <div class="live-price-block__row live-price-block__row--muted">
+          <span class="live-price-block__label">Market</span>
+          <span class="live-price-block__value live-price-block__value--muted">{{ marketOpen ? 'Open' : 'Closed' }}</span>
+        </div>
       </div>
       <div class="total-holdings-block">
         <div class="total-holdings-block__title">Total holdings</div>
         <div class="total-holdings-block__row total-holdings-block__row--main">
           <span class="total-holdings-block__label">Shares</span>
           <span class="total-holdings-block__value">{{ data.totalShares }}</span>
+          @if (totalSharesMovement) {
+            <span class="total-holdings-block__diff" [class.total-holdings-block__diff--up]="totalSharesMovement.diff > 0" [class.total-holdings-block__diff--down]="totalSharesMovement.diff < 0">
+              ({{ totalSharesMovement.diff > 0 ? '↑' : (totalSharesMovement.diff < 0 ? '↓' : '—') }} {{ Math.abs(totalSharesMovement.diff) }} ({{ totalSharesMovement.diffPct >= 0 ? '+' : '' }}{{ totalSharesMovement.diffPct | number:'1.2-2' }}%))
+            </span>
+          }
         </div>
         <div class="total-holdings-block__row">
           <span class="total-holdings-block__label">Total value (USD)</span>
           <span class="total-holdings-block__value">$ {{ formatUsd(data.totalValueUsd) }}</span>
+          @if (totalValueUsdMovement) {
+            <span class="total-holdings-block__diff" [class.total-holdings-block__diff--up]="totalValueUsdMovement.diffUsd > 0" [class.total-holdings-block__diff--down]="totalValueUsdMovement.diffUsd < 0">
+              ({{ totalValueUsdMovement.diffUsd > 0 ? '↑' : (totalValueUsdMovement.diffUsd < 0 ? '↓' : '—') }} $ {{ formatUsd(Math.abs(totalValueUsdMovement.diffUsd)) }} ({{ totalValueUsdMovement.diffPct >= 0 ? '+' : '' }}{{ totalValueUsdMovement.diffPct | number:'1.2-2' }}%))
+            </span>
+          }
         </div>
         <div class="total-holdings-block__row">
           <span class="total-holdings-block__label">Total value (INR)</span>
           <span class="total-holdings-block__value">₹ {{ formatInr(data.totalValueInr) }}</span>
+          @if (totalValueInrMovement) {
+            <span class="total-holdings-block__diff" [class.total-holdings-block__diff--up]="totalValueInrMovement.diffInr > 0" [class.total-holdings-block__diff--down]="totalValueInrMovement.diffInr < 0">
+              ({{ totalValueInrMovement.diffInr > 0 ? '↑' : (totalValueInrMovement.diffInr < 0 ? '↓' : '—') }} ₹ {{ formatInr(Math.abs(totalValueInrMovement.diffInr)) }} ({{ totalValueInrMovement.diffPct >= 0 ? '+' : '' }}{{ totalValueInrMovement.diffPct | number:'1.2-2' }}%))
+            </span>
+          }
         </div>
       </div>
+    </div>
+    <h3 class="section-subtitle">Live price movement</h3>
+    <div class="live-price-chart-wrap">
+      @if (livePriceHistory.length >= 2) {
+        <canvas #livePriceChartCanvas class="holdings-chart"></canvas>
+      } @else {
+        <p class="holdings-table__hint">Polling when market is open… Need at least 2 points to show the chart.</p>
+      }
     </div>
   </section>
 
@@ -93,7 +131,7 @@
               <li>Quantity: {{ data.nsu.qty }}</li>
               <li>Profit after tax: ₹ {{ formatInr(data.nsu.profitAfterTax) }}</li>
               <li>Avg buy price: $ {{ formatUsd(data.nsu.avgBuyPrice) }}</li>
-              <li>Avg profit: {{ data.nsu.avgProfitPercent }}%</li>
+              <li>Avg profit: {{ data.nsu.avgProfitPercent | number:'1.1-1' }}%</li>
             </ul>
           </div>
         }
@@ -104,7 +142,7 @@
               <li>Quantity: {{ data.espp.qty }}</li>
               <li>Profit after tax: ₹ {{ formatInr(data.espp.profitAfterTax) }}</li>
               <li>Avg buy price: $ {{ formatUsd(data.espp.avgBuyPrice) }}</li>
-              <li>Avg profit: {{ data.espp.avgProfitPercent }}%</li>
+              <li>Avg profit: {{ data.espp.avgProfitPercent | number:'1.1-1' }}%</li>
             </ul>
           </div>
         }
@@ -128,7 +166,154 @@
     <div class="tab-bar">
       <button type="button" class="tab-btn" [class.tab-btn--active]="activeTab === 'holdings'" (click)="setActiveTab('holdings')">Holdings</button>
       <button type="button" class="tab-btn" [class.tab-btn--active]="activeTab === 'sold'" (click)="setActiveTab('sold')">Sold Shares</button>
+      <button type="button" class="tab-btn" [class.tab-btn--active]="activeTab === 'playground'" (click)="setActiveTab('playground')">Playground</button>
     </div>
+
+    @if (activeTab === 'playground') {
+  <div class="playground-section">
+    <p class="holdings-table__hint">Use live price and USD→INR rate from the dashboard. Adjust inputs to see how many shares to sell or compare values.</p>
+
+    <section class="dashboard-section playground-card">
+      <h2 class="section-title">Start with money</h2>
+      <p class="playground-desc">Enter the amount you want in your bank after taxes and a target price. Optionally set current price to simulate. See how many shares to sell at current vs target price.</p>
+      <div class="playground-form">
+        <label class="playground-label">
+          Req. amount in bank after tax (₹)
+          <input type="number" min="0" step="1000" class="playground-input" [ngModel]="playReqAmountInr" (ngModelChange)="playReqAmountInr = $event" placeholder="e.g. 30000000" />
+        </label>
+        <label class="playground-label">
+          Keep after tax (% of gross)
+          <input type="number" min="1" max="100" step="1" class="playground-input playground-input--short" [ngModel]="playKeepPct" (ngModelChange)="playKeepPct = $event" />
+        </label>
+        <label class="playground-label">
+          Current price (USD)
+          <input type="number" min="0" step="0.01" class="playground-input playground-input--short" [ngModel]="playCurrentPriceOverride1" (ngModelChange)="playCurrentPriceOverride1 = $event === '' || $event == null ? null : $event" [placeholder]="'Live: ' + formatPlayNum(playCurrentPrice, 2)" title="Leave empty to use live price" />
+        </label>
+        <label class="playground-label">
+          Target price (USD)
+          <input type="number" min="0" step="0.01" class="playground-input playground-input--short" [ngModel]="playTargetPrice1" (ngModelChange)="playTargetPrice1 = $event" placeholder="e.g. 200" />
+        </label>
+      </div>
+      <div class="playground-table-wrap">
+        <table class="playground-table">
+          <tr><th>Current NVDA price</th><td>$ {{ formatPlayNum(playCurrentPriceForMoney, 2) }}{{ playCurrentPriceOverride1 != null ? '' : ' (live)' }}</td></tr>
+          <tr><th>Target price</th><td>$ {{ formatPlayNum(playTargetPrice1, 2) }}</td></tr>
+          <tr><th>Req. amount (after tax)</th><td>₹ {{ playReqAmountInr != null ? formatInr(playReqAmountInr) : '–' }}</td></tr>
+          <tr><th>Req. amount before tax</th><td>₹ {{ playReqBeforeTaxInr != null ? formatInr(playReqBeforeTaxInr) : '–' }}</td></tr>
+          <tr><th>Shares to sell (at current)</th><td>{{ formatPlayNum(playSharesAtCurrent) }}</td></tr>
+          <tr><th>Shares to sell (at target)</th><td>{{ formatPlayNum(playSharesAtTarget) }}</td></tr>
+          <tr><th>Difference (shares)</th><td>{{ formatPlayNum(playSharesDiff) }}</td></tr>
+          <tr><th>Difference (₹)</th><td>₹ {{ playValueDiffInr != null ? formatInr(playValueDiffInr) : '–' }}</td></tr>
+          <tr><th>Difference (USD)</th><td>$ {{ (playValueDiffInr != null && playUsdToInr > 0) ? formatPlayNum(playValueDiffInr / playUsdToInr, 2) : '–' }}</td></tr>
+          <tr><th>Rupee price</th><td>₹ {{ formatPlayNum(playUsdToInr, 2) }}</td></tr>
+        </table>
+      </div>
+    </section>
+
+    <section class="dashboard-section playground-card">
+      <h2 class="section-title">Start with quantity</h2>
+      <p class="playground-desc">Enter a quantity and target price to compare total value at current vs target price. Optionally set current price to simulate.</p>
+      <div class="playground-form">
+        <label class="playground-label">
+          Qty
+          <input type="number" min="0" step="1" class="playground-input playground-input--short" [ngModel]="playQty" (ngModelChange)="playQty = $event" placeholder="e.g. 1500" />
+        </label>
+        <label class="playground-label">
+          Current price (USD)
+          <input type="number" min="0" step="0.01" class="playground-input playground-input--short" [ngModel]="playCurrentPriceOverride" (ngModelChange)="playCurrentPriceOverride = $event === '' || $event == null ? null : $event" [placeholder]="'Live: ' + formatPlayNum(playCurrentPrice, 2)" title="Leave empty to use live price" />
+        </label>
+        <label class="playground-label">
+          Target price (USD)
+          <input type="number" min="0" step="0.01" class="playground-input playground-input--short" [ngModel]="playTargetPrice2" (ngModelChange)="playTargetPrice2 = $event" placeholder="e.g. 210" />
+        </label>
+      </div>
+      <div class="playground-table-wrap">
+        <table class="playground-table">
+          <tr><th>Current NVDA price</th><td>$ {{ formatPlayNum(playCurrentPriceForQty, 2) }}{{ playCurrentPriceOverride != null ? '' : ' (live)' }}</td></tr>
+          <tr><th>Target price</th><td>$ {{ formatPlayNum(playTargetPrice2, 2) }}</td></tr>
+          <tr><th>Qty</th><td>{{ formatPlayNum(playQty) }}</td></tr>
+          <tr><th>Rupee price</th><td>₹ {{ formatPlayNum(playUsdToInr, 2) }}</td></tr>
+          <tr><th>Current value (₹)</th><td>₹ {{ playCurrentValueInr != null ? formatInr(playCurrentValueInr) : '–' }}</td></tr>
+          <tr><th>Target value (₹)</th><td>₹ {{ playTargetValueInr != null ? formatInr(playTargetValueInr) : '–' }}</td></tr>
+          <tr><th>Diff (₹)</th><td>₹ {{ playValueDiff2Inr != null ? formatInr(playValueDiff2Inr) : '–' }}</td></tr>
+        </table>
+      </div>
+    </section>
+
+    <section class="dashboard-section playground-card">
+      <h2 class="section-title">Sell order to minimize tax</h2>
+      <p class="playground-desc">Lots are ordered so that <strong>total tax at target price is minimized</strong>: we sort by tax per share at target (lowest first), so lots with smaller gains (e.g. recently bought) can appear before older lots with large gains. Only up to the number of shares needed in the simulation are included. Tax is computed at the simulation target price when set, otherwise at current price.</p>
+      <div class="playground-form">
+        <span class="playground-label">Use for recommendation:</span>
+        <label class="playground-radio">
+          <input type="radio" name="playRecommendationSource" value="money" [ngModel]="playRecommendationSource" (ngModelChange)="playRecommendationSource = ($event === 'quantity' ? 'quantity' : 'money')" />
+          Start with money
+        </label>
+        <label class="playground-radio">
+          <input type="radio" name="playRecommendationSource" value="quantity" [ngModel]="playRecommendationSource" (ngModelChange)="playRecommendationSource = ($event === 'quantity' ? 'quantity' : 'money')" />
+          Start with quantity
+        </label>
+        <span class="playground-label" style="margin-left: 1rem;">Lots:</span>
+        <label class="playground-radio">
+          <input type="radio" name="playRecommendationTermFilter" value="mixed" [ngModel]="playRecommendationTermFilter" (ngModelChange)="playRecommendationTermFilter = ($event === 'short' ? 'short' : $event === 'long' ? 'long' : 'mixed')" />
+          Mixed
+        </label>
+        <label class="playground-radio">
+          <input type="radio" name="playRecommendationTermFilter" value="long" [ngModel]="playRecommendationTermFilter" (ngModelChange)="playRecommendationTermFilter = ($event === 'short' ? 'short' : $event === 'long' ? 'long' : 'mixed')" />
+          Long-term only
+        </label>
+        <label class="playground-radio">
+          <input type="radio" name="playRecommendationTermFilter" value="short" [ngModel]="playRecommendationTermFilter" (ngModelChange)="playRecommendationTermFilter = ($event === 'short' ? 'short' : $event === 'long' ? 'long' : 'mixed')" />
+          Short-term only
+        </label>
+      </div>
+      @if (playTaxRecommendations.length === 0) {
+        <p class="holdings-table__hint">Load holdings in the Holdings tab to see recommendations.</p>
+      } @else {
+        @if (playTargetPriceForRecommendation != null) {
+          <p class="playground-desc">Target price for tax: $ {{ formatPlayNum(playTargetPriceForRecommendation, 2) }}</p>
+        }
+        @if (playSharesNeededForRecommendation != null) {
+          <p class="playground-desc">Shares to sell (from simulation): {{ playSharesNeededForRecommendation }}</p>
+        }
+        @if (playTaxRecommendationShortfall != null && playTaxRecommendationShortfall > 0) {
+          <p class="playground-desc playground-desc--warning">Recommended total: {{ playTaxRecommendationTotalShares }} shares. <strong>Short by {{ playTaxRecommendationShortfall }} shares</strong> (try Mixed or include Long-term lots to cover the target).</p>
+        }
+        <div class="playground-table-wrap">
+          <table class="holdings-table playground-table">
+            <thead>
+              <tr class="holdings-table__header">
+                <th>Order</th>
+                <th>Type</th>
+                <th>Buy date</th>
+                <th>Buy price (USD)</th>
+                <th>Qty</th>
+                <th>Tax %</th>
+                <th>Tax to pay at target (INR)</th>
+              </tr>
+            </thead>
+            <tbody>
+              @for (row of playTaxRecommendations; track getRowKey(row); let i = $index) {
+                <tr>
+                  <td>{{ i + 1 }}</td>
+                  <td>{{ typeLabel(row.type) }}</td>
+                  <td>{{ formatDate(row.buyDate) }}</td>
+                  <td>{{ formatCell(row, 'buyPriceUsd') }}</td>
+                  <td>{{ row.qtyToSell }}{{ row.qtyToSell < row.qty ? ' of ' + row.qty : '' }}</td>
+                  <td>{{ row.taxPercent | number:'1.1-1' }}%</td>
+                  <td>₹ {{ formatInr(row.taxToPayAtTargetInr) }}</td>
+                </tr>
+              }
+            </tbody>
+          </table>
+        </div>
+        @if (playTaxRecommendationTotalTaxInr != null) {
+          <p class="playground-desc"><strong>Total tax at target price (for recommended lots): ₹ {{ formatInr(playTaxRecommendationTotalTaxInr) }}</strong></p>
+        }
+      }
+    </section>
+  </div>
+    }
 
     @if (activeTab === 'holdings') {
   <div class="holdings-section">
@@ -157,8 +342,25 @@
       <h2 class="section-title">Holdings</h2>
       @if (holdingsFilteredSorted.length > 0) {
         <button type="button" class="export-btn" (click)="exportHoldingsCsv()">Export CSV</button>
+        <button
+          type="button"
+          class="export-btn mark-sold-btn"
+          [disabled]="totalSellQty <= 0"
+          (click)="openMarkSoldModal()">
+          Mark as sold
+        </button>
+        <button
+          type="button"
+          class="export-btn"
+          [disabled]="undoMarkSoldInProgress || !canUndoMarkSold"
+          (click)="undoLastMarkSold()">
+          {{ undoMarkSoldInProgress ? 'Undoing…' : 'Undo last sale' }}
+        </button>
       }
     </div>
+    @if (undoMarkSoldError) {
+      <p class="holdings-table__hint holdings-table__hint--error">{{ undoMarkSoldError }}</p>
+    }
     @if (holdingsFilteredSorted.length > 0) {
       <div class="holdings-summary holdings-summary--top">
         @if (holdingsSelectedTotals.selectedCount > 0) {
@@ -317,8 +519,8 @@
                 <td>₹ {{ formatInr(row.sellValueInr) }}</td>
                 <td>₹ {{ formatInr(row.gainBeforeTaxInr) }}</td>
                 <td>₹ {{ formatInr(row.taxPaidInr) }}</td>
-                <td>{{ row.profitPercent }}%</td>
-                <td>{{ row.taxPercent }}%</td>
+                <td>{{ row.profitPercent | number:'1.1-1' }}%</td>
+                <td>{{ row.taxPercent | number:'1.1-1' }}%</td>
               </tr>
             } @empty {
               <tr><td [attr.colspan]="soldCols.length + 1" class="holdings-table__empty">No sold shares or no rows match the filter.</td></tr>
@@ -330,4 +532,34 @@
   </div>
     }
   </section>
+
+  @if (showMarkSoldModal) {
+    <div class="mark-sold-overlay" role="dialog" aria-modal="true" aria-labelledby="mark-sold-title">
+      <div class="mark-sold-modal">
+        <h2 id="mark-sold-title" class="mark-sold-modal__title">Mark as sold</h2>
+        <p class="mark-sold-modal__summary">
+          Recording sale of {{ totalSellQty }} share(s) across {{ markSoldRows.length }} lot(s).
+        </p>
+        <div class="mark-sold-modal__form">
+          <label class="mark-sold-modal__label">
+            Sell date
+            <input type="date" class="mark-sold-modal__input" [(ngModel)]="markSoldSellDate" />
+          </label>
+          <label class="mark-sold-modal__label">
+            Sell price (USD) per share
+            <input type="number" step="0.01" min="0" class="mark-sold-modal__input" [ngModel]="markSoldPriceUsd" (ngModelChange)="markSoldPriceUsd = $event" placeholder="e.g. 140.50" />
+          </label>
+        </div>
+        @if (markSoldError) {
+          <p class="mark-sold-modal__error">{{ markSoldError }}</p>
+        }
+        <div class="mark-sold-modal__actions">
+          <button type="button" class="holdings-table__action-btn" (click)="closeMarkSoldModal()" [disabled]="markSoldInProgress">Cancel</button>
+          <button type="button" class="export-btn" (click)="submitMarkSold()" [disabled]="markSoldInProgress">
+            {{ markSoldInProgress ? 'Saving…' : 'Confirm' }}
+          </button>
+        </div>
+      </div>
+    </div>
+  }
 }

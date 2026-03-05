@@ -5,6 +5,25 @@ export interface NsuEsppStats {
   avgProfitPercent: number;
 }
 
+export interface LivePriceResponse {
+  livePriceUsd: number;
+  usdToInrRate: number;
+  lastUpdated: string;
+}
+
+/** One stored point for live price history (chart + diff baseline). */
+export interface LivePriceHistoryPoint {
+  timestamp: number;
+  livePriceUsd: number;
+  usdToInrRate: number;
+}
+
+export interface MarketStatusResponse {
+  marketOpen: boolean;
+  nextOpen?: string;
+  nextClose?: string;
+}
+
 export interface DashboardResponse {
   livePriceUsd: number;
   usdToInrRate: number;
@@ -27,6 +46,8 @@ export interface DashboardResponse {
   soldValueEsppInr?: number | null;
   nsu: NsuEsppStats | null;
   espp: NsuEsppStats | null;
+  /** True if the last "mark as sold" can be undone */
+  canUndoMarkSold?: boolean;
 }
 
 export interface HoldingRow {

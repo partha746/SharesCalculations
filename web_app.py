@@ -47,6 +47,7 @@ TABLE_COLUMNS = {
         "BuyRupeeRate", "SellRupeeRate", "Type",
     ],
     "Split": ["date", "split_ratio"],
+    "live_price_history": ["timestamp_ms", "live_price_usd", "usd_to_inr_rate"],
 }
 
 

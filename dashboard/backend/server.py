@@ -16,9 +16,16 @@ REPO_ROOT = os.path.dirname(_DASHBOARD_DIR)
 if REPO_ROOT not in sys.path:
     sys.path.insert(0, REPO_ROOT)
 
+import requests
+
 from flask import Flask, jsonify, request
 
 app = Flask(__name__)
+
+try:
+    from zoneinfo import ZoneInfo
+except ImportError:
+    ZoneInfo = None  # Python < 3.9
 DB_PATH = os.path.join(REPO_ROOT, "configs", "nvShares.db")
 
 TABLE_COLUMNS = {
@@ -117,6 +124,126 @@ def delete_row(table_name, rowid):
 _DASHBOARD_CACHE = {}
 _DASHBOARD_CACHE_TTL = 120
 
+# Finnhub API key (same as in gather_data.RupeeConv.get_stock_price)
+_FINNHUB_TOKEN = "cvsfdk9r01qhup0qfks0cvsfdk9r01qhup0qfksg"
+
+
+def _is_nasdaq_open_et():
+    """True if current time in Eastern is Mon-Fri 9:30 AM - 4:00 PM (regular session)."""
+    if ZoneInfo is not None:
+        et = datetime.now(ZoneInfo("America/New_York"))
+    else:
+        # Python < 3.9: approximate ET as UTC-5 (ignores DST)
+        from datetime import timezone, timedelta
+        et = datetime.now(timezone.utc) - timedelta(hours=5)
+    if et.weekday() >= 5:  # Saturday=5, Sunday=6
+        return False
+    t = et.time()
+    open_t = datetime.strptime("09:30", "%H:%M").time()
+    close_t = datetime.strptime("16:00", "%H:%M").time()
+    return open_t <= t < close_t
+
+
+@app.route("/api/market-status", methods=["GET"])
+def get_market_status():
+    """Return whether US market is open. Tries Finnhub first; falls back to ET time window."""
+    try:
+        r = requests.get(
+            "https://finnhub.io/api/v1/stock/market-status",
+            params={"exchange": "US", "token": _FINNHUB_TOKEN},
+            timeout=5,
+        )
+        if r.status_code == 200:
+            data = r.json()
+            # Finnhub may return exchange, status, etc.
+            if isinstance(data, dict):
+                if data.get("exchange") and "status" in data:
+                    status = str(data.get("status", "")).lower()
+                    market_open = status == "open"
+                elif "marketOpen" in data:
+                    market_open = bool(data["marketOpen"])
+                else:
+                    market_open = _is_nasdaq_open_et()
+            else:
+                market_open = _is_nasdaq_open_et()
+        else:
+            market_open = _is_nasdaq_open_et()
+    except Exception:
+        market_open = _is_nasdaq_open_et()
+    return jsonify({"marketOpen": market_open})
+
+
+def _ensure_live_price_history_table(conn):
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS live_price_history (
+           timestamp_ms INTEGER NOT NULL,
+           live_price_usd REAL NOT NULL,
+           usd_to_inr_rate REAL NOT NULL
+        )"""
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_live_price_history_ts ON live_price_history(timestamp_ms)"
+    )
+
+
+@app.route("/api/live-price-history", methods=["GET"])
+def get_live_price_history():
+    """Return stored live price history for the last N days (default 7). Max 5000 points."""
+    days = min(7, max(1, int(request.args.get("days", 7))))
+    cutoff_ms = int(time.time() * 1000) - (days * 24 * 60 * 60 * 1000)
+    with get_db() as conn:
+        _ensure_live_price_history_table(conn)
+        cur = conn.execute(
+            "SELECT timestamp_ms, live_price_usd, usd_to_inr_rate FROM live_price_history WHERE timestamp_ms >= ? ORDER BY timestamp_ms ASC LIMIT 5001",
+            (cutoff_ms,),
+        )
+        rows = cur.fetchall()
+    out = [
+        {"timestamp": r[0], "livePriceUsd": round(r[1], 2), "usdToInrRate": round(r[2], 2)}
+        for r in rows
+    ]
+    return jsonify(out)
+
+
+@app.route("/api/live-price-history", methods=["POST"])
+def append_live_price_history():
+    """Append one live price point (from frontend poll). Body: { timestamp, livePriceUsd, usdToInrRate }."""
+    data = request.get_json()
+    if not data:
+        return jsonify({"error": "JSON body required"}), 400
+    ts = data.get("timestamp")
+    price = data.get("livePriceUsd")
+    rate = data.get("usdToInrRate")
+    if ts is None or not isinstance(price, (int, float)) or not isinstance(rate, (int, float)):
+        return jsonify({"error": "timestamp, livePriceUsd, usdToInrRate required"}), 400
+    ts_ms = int(ts)
+    with get_db() as conn:
+        _ensure_live_price_history_table(conn)
+        conn.execute(
+            "INSERT INTO live_price_history (timestamp_ms, live_price_usd, usd_to_inr_rate) VALUES (?, ?, ?)",
+            (ts_ms, float(price), float(rate)),
+        )
+    return jsonify({"ok": True}), 201
+
+
+@app.route("/api/live-price", methods=["GET"])
+def get_live_price():
+    """Lightweight endpoint: NVDA price + USD/INR rate only. No cache."""
+    try:
+        from helpers import gather_data
+
+        rupee_conv_obj = gather_data.RupeeConv()
+        live_price, todays_rp = rupee_conv_obj.get_live_price()
+        if live_price is None or todays_rp is None:
+            return jsonify({"error": "Could not fetch live price or USD/INR rate"}), 503
+        return jsonify({
+            "livePriceUsd": round(live_price, 2),
+            "usdToInrRate": round(todays_rp, 2),
+            "lastUpdated": datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z",
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 503
+
 
 def _build_dashboard_response():
     from helpers import gather_data
@@ -158,7 +285,7 @@ def _build_dashboard_response():
             "qty": total_qty,
             "profitAfterTax": round(total_capital_gain, 2),
             "avgBuyPrice": round(avg_buy_price, 2),
-            "avgProfitPercent": round(avg_profit_percent, 2),
+            "avgProfitPercent": round(avg_profit_percent, 1),
         }
         nsu = blob if stock_type == "NSU" else nsu
         espp = blob if stock_type == "ESPP" else espp
@@ -205,6 +332,7 @@ def _build_dashboard_response():
         "soldValueEsppInr": sold_value_espp_inr,
         "nsu": nsu,
         "espp": espp,
+        "canUndoMarkSold": len(_MARK_SOLD_UNDO_STACK) > 0,
     }
 
 
@@ -240,15 +368,15 @@ def _build_holdings_response():
                 "type": stock_type,
                 "buyDate": buy_date_str,
                 "qty": qty,
-                "buyPriceUsd": round(float(r[price_col]), 2),
-                "totalPurchaseInr": round(float(r["InitialValue_raw"]), 2),
-                "netIfSellTodayInr": round(net_if_sell_today_inr, 2),
-                "profitPercent": round(float(r["ProfitPercent"]), 2),
-                "taxToPayInr": round(tax_to_pay_inr, 2),
-                "taxPercent": round(tax_slab_pct, 1),
+                "buyPriceUsd": float(r[price_col]),
+                "totalPurchaseInr": float(r["InitialValue_raw"]),
+                "netIfSellTodayInr": net_if_sell_today_inr,
+                "profitPercent": round(float(r["ProfitPercent"]), 1),
+                "taxToPayInr": tax_to_pay_inr,
+                "taxPercent": tax_slab_pct,
             }
             if stock_type == "ESPP":
-                row_data["priceBoughtUsd"] = round(float(r["Price_Bought_raw"]), 2)
+                row_data["priceBoughtUsd"] = float(r["Price_Bought_raw"])
             rows.append(row_data)
     return rows
 
@@ -300,20 +428,20 @@ def _build_sold_response():
         gain_before_tax = sell_at_r - buy_at_r
         tax_slab = tax_obj.get_tax_slab(buy_date) if buy_date else tax_obj.fix_tax_slab
         tax_paid = round(gain_before_tax * tax_slab, 2)
-        profit_pct = round((gain_before_tax - tax_paid) / buy_at_r * 100, 2) if buy_at_r else 0
+        profit_pct = round((gain_before_tax - tax_paid) / buy_at_r * 100, 1) if buy_at_r else 0
         rows.append({
             "sellDate": sell_date.isoformat() if sell_date else "",
             "buyDate": buy_date.isoformat() if buy_date else "",
             "qtySold": qty,
             "type": typ,
-            "priceBoughtUsd": round(price_bought, 2),
-            "priceSellUsd": round(price_sell, 2),
-            "buyValueInr": round(buy_at_r, 2),
-            "sellValueInr": round(sell_at_r, 2),
-            "gainBeforeTaxInr": round(gain_before_tax, 2),
-            "taxPaidInr": round(tax_paid, 2),
-            "profitPercent": round(profit_pct, 2),
-            "taxPercent": round(tax_slab * 100, 1),
+            "priceBoughtUsd": price_bought,
+            "priceSellUsd": price_sell,
+            "buyValueInr": buy_at_r,
+            "sellValueInr": sell_at_r,
+            "gainBeforeTaxInr": gain_before_tax,
+            "taxPaidInr": tax_paid,
+            "profitPercent": profit_pct,
+            "taxPercent": tax_slab * 100,
         })
     return rows
 
@@ -359,6 +487,194 @@ def get_sold():
         return jsonify(rows)
     except Exception as e:
         return jsonify({"error": str(e)}), 503
+
+
+# In-memory undo stack for last mark-sold: list of { "sellout_rowids": [...], "operations": [{ type, buy_date_str, buy_price_usd, price_bought_usd, qty }, ...] }
+_MARK_SOLD_UNDO_STACK = []
+
+
+@app.route("/api/mark-sold", methods=["POST"])
+def mark_sold():
+    from helpers import gather_data
+
+    data = request.get_json()
+    if not data:
+        return jsonify({"error": "JSON body required"}), 400
+    sell_date_str = (data.get("sellDate") or "").strip()[:10]
+    price_sell_usd = data.get("priceSellUsd")
+    items = data.get("items") or []
+    sell_date = _parse_date(sell_date_str)
+    if not sell_date:
+        return jsonify({"error": "Invalid sell date"}), 400
+    if not isinstance(price_sell_usd, (int, float)) or price_sell_usd <= 0:
+        return jsonify({"error": "Invalid sell price"}), 400
+    if not items:
+        return jsonify({"error": "No items"}), 400
+
+    rupee_conv = gather_data.RupeeConv()
+    # get_rupee_rate expects datetime or str (not date); use YYYY-MM-DD
+    sell_rate = rupee_conv.get_rupee_rate(sell_date.strftime("%Y-%m-%d"))
+    if sell_rate is None:
+        return jsonify({"error": "Could not get exchange rate for sell date"}), 400
+
+    validated = []
+    for it in items:
+        typ = (it.get("type") or "").strip().upper()
+        if typ not in ("NSU", "ESPP"):
+            return jsonify({"error": f"Invalid type: {typ}"}), 400
+        buy_date_str = (it.get("buyDate") or "").strip()[:10]
+        buy_date = _parse_date(buy_date_str)
+        if not buy_date:
+            return jsonify({"error": f"Invalid buy date: {buy_date_str}"}), 400
+        buy_price_usd = it.get("buyPriceUsd")
+        if not isinstance(buy_price_usd, (int, float)) or buy_price_usd < 0:
+            return jsonify({"error": "Invalid buyPriceUsd"}), 400
+        price_bought_usd = it.get("priceBoughtUsd") if typ == "ESPP" else buy_price_usd
+        if typ == "ESPP" and (not isinstance(price_bought_usd, (int, float)) or price_bought_usd < 0):
+            return jsonify({"error": "Invalid priceBoughtUsd for ESPP"}), 400
+        qty = int(it.get("qtyToSell") or 0)
+        if qty <= 0:
+            return jsonify({"error": "qtyToSell must be positive"}), 400
+        buy_rate = rupee_conv.get_rupee_rate(buy_date.strftime("%Y-%m-%d"))
+        if buy_rate is None:
+            return jsonify({"error": f"Could not get exchange rate for buy date {buy_date_str}"}), 400
+        # DB stores Buy_Date as MM/DD/YYYY (gather_data); frontend sends YYYY-MM-DD
+        buy_date_db = buy_date.strftime("%m/%d/%Y")
+        validated.append({
+            "type": typ,
+            "buy_date_str": buy_date_str,
+            "buy_date_db": buy_date_db,
+            "buy_price_usd": float(buy_price_usd),
+            "price_bought_usd": float(price_bought_usd),
+            "qty": qty,
+            "buy_rate": buy_rate,
+        })
+
+    # Tolerance for float match (DB may store 177.19, frontend sends 177.2)
+    _PRICE_EPS = 0.006
+
+    sellout_rowids = []
+    with get_db() as conn:
+        for v in validated:
+            table = "NSU" if v["type"] == "NSU" else "ESPP"
+            row = None
+            for try_date in (v["buy_date_db"], v["buy_date_str"]):
+                if table == "NSU":
+                    cur = conn.execute(
+                        "SELECT Available_Sell, Price_Bought FROM NSU WHERE Buy_Date = ? AND ABS(Price_Bought - ?) < ?",
+                        (try_date, v["buy_price_usd"], _PRICE_EPS),
+                    )
+                else:
+                    cur = conn.execute(
+                        """SELECT Available_Sell, Price_Bought, TDS_Price FROM ESPP
+                           WHERE Buy_Date = ? AND ABS(Price_Bought - ?) < ? AND ABS(TDS_Price - ?) < ?""",
+                        (try_date, v["price_bought_usd"], _PRICE_EPS, v["buy_price_usd"], _PRICE_EPS),
+                    )
+                row = cur.fetchone()
+                if row:
+                    v["_match_buy_date"] = try_date
+                    v["_match_price_bought"] = float(row[1]) if row[1] is not None else (v["price_bought_usd"] if table == "ESPP" else v["buy_price_usd"])
+                    if table == "ESPP":
+                        v["_match_tds_price"] = float(row[2]) if row[2] is not None else v["buy_price_usd"]
+                    break
+            if not row:
+                return jsonify({"error": f"Lot not found: {v['type']} {v['buy_date_str']}"}), 400
+            avail = int(row[0]) if row[0] is not None else 0
+            if avail < v["qty"]:
+                return jsonify({
+                    "error": f"Insufficient available qty for lot {v['buy_date_str']}: has {avail}, need {v['qty']}",
+                }), 400
+
+        inserted = 0
+        price_sell_val = float(price_sell_usd)
+        for v in validated:
+            match_date = v["_match_buy_date"]
+            cur = conn.execute(
+                """INSERT INTO SellOut (Sell_Date, Buy_Date, Qty_Sold, Price_Bought, Price_Sell, BuyRupeeRate, SellRupeeRate, Type)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    sell_date.strftime("%m/%d/%Y"),
+                    match_date,
+                    v["qty"],
+                    v["price_bought_usd"],
+                    price_sell_val,
+                    v["buy_rate"],
+                    sell_rate,
+                    v["type"],
+                ),
+            )
+            rowid = cur.lastrowid
+            if rowid is not None:
+                sellout_rowids.append(rowid)
+            inserted += 1
+            if v["type"] == "NSU":
+                conn.execute(
+                    "UPDATE NSU SET Available_Sell = Available_Sell - ? WHERE Buy_Date = ? AND ABS(Price_Bought - ?) < ?",
+                    (v["qty"], match_date, v["_match_price_bought"], _PRICE_EPS),
+                )
+            else:
+                conn.execute(
+                    "UPDATE ESPP SET Available_Sell = Available_Sell - ? WHERE Buy_Date = ? AND ABS(Price_Bought - ?) < ? AND ABS(TDS_Price - ?) < ?",
+                    (v["qty"], match_date, v["_match_price_bought"], _PRICE_EPS, v["_match_tds_price"], _PRICE_EPS),
+                )
+
+        if sellout_rowids:
+            undo_ops = [
+                {
+                    "type": v["type"],
+                    "buy_date_db": v["_match_buy_date"],
+                    "buy_price_usd": v["_match_tds_price"] if v["type"] == "ESPP" else v["_match_price_bought"],
+                    "price_bought_usd": v["_match_price_bought"],
+                    "qty": v["qty"],
+                }
+                for v in validated
+            ]
+            _MARK_SOLD_UNDO_STACK.append({"sellout_rowids": list(sellout_rowids), "operations": undo_ops})
+
+    _DASHBOARD_CACHE.pop("data", None)
+    _DASHBOARD_CACHE.pop("at", None)
+    return jsonify({"success": True, "inserted": inserted})
+
+
+@app.route("/api/mark-sold-can-undo", methods=["GET"])
+def mark_sold_can_undo():
+    """Lightweight check for undo availability (not cached with dashboard)."""
+    return jsonify({"canUndo": len(_MARK_SOLD_UNDO_STACK) > 0})
+
+
+@app.route("/api/mark-sold-undo", methods=["POST"])
+def mark_sold_undo():
+    if not _MARK_SOLD_UNDO_STACK:
+        return jsonify({"error": "Nothing to undo"}), 404
+    entry = _MARK_SOLD_UNDO_STACK.pop()
+    sellout_rowids = entry["sellout_rowids"]
+    operations = entry["operations"]
+    with get_db() as conn:
+        if sellout_rowids:
+            placeholders = ",".join("?" * len(sellout_rowids))
+            conn.execute(f"DELETE FROM SellOut WHERE rowid IN ({placeholders})", sellout_rowids)
+        for op in operations:
+            typ = op["type"]
+            buy_date_db = op.get("buy_date_db")
+            if not buy_date_db:
+                d = _parse_date(op.get("buy_date_str", ""))
+                buy_date_db = d.strftime("%m/%d/%Y") if d else op.get("buy_date_str", "")
+            buy_price_usd = op["buy_price_usd"]
+            price_bought_usd = op["price_bought_usd"]
+            qty = op["qty"]
+            if typ == "NSU":
+                conn.execute(
+                    "UPDATE NSU SET Available_Sell = Available_Sell + ? WHERE Buy_Date = ? AND Price_Bought = ?",
+                    (qty, buy_date_db, buy_price_usd),
+                )
+            else:
+                conn.execute(
+                    "UPDATE ESPP SET Available_Sell = Available_Sell + ? WHERE Buy_Date = ? AND Price_Bought = ? AND TDS_Price = ?",
+                    (qty, buy_date_db, price_bought_usd, buy_price_usd),
+                )
+    _DASHBOARD_CACHE.pop("data", None)
+    _DASHBOARD_CACHE.pop("at", None)
+    return jsonify({"success": True, "undone": len(sellout_rowids)})
 
 
 PORT = 8080

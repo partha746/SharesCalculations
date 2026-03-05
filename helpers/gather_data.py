@@ -577,7 +577,13 @@ class OwnStockData:
         df['Price_Bought'] = self.rupeeconv_obj.print_rupees(df['Price_Bought_raw'], cur='USD')
 
         df = df.sort_values(by=['Buy_Date'], ascending=True)
+        # Keep full precision for dashboard (price columns and _raw columns); round(1) for display elsewhere
+        cols_to_preserve = ['Price_Bought_raw', 'InitialValue_raw', 'TodaysValue_raw', 'TaxNeedtoPay_raw', 'ProfitPercent']
+        if type == 'ESPP':
+            cols_to_preserve = cols_to_preserve + ['TDS_Price_raw']
+        raw_backup = df[cols_to_preserve].copy()
         df = df.round(1)
+        df[cols_to_preserve] = raw_backup
         # Restore TaxSlab after round(1): 0.125 was rounded to 0.1; keep 12.5% / 30% correct
         df['TaxSlab'] = df['Buy_Date'].map(lambda d: self.tax_obj.get_tax_slab(d) if pd.notna(d) else self.tax_obj.fix_tax_slab)
 
@@ -656,7 +662,7 @@ class OwnStockData:
         dfSellOut['TaxSlab'] = dfSellOut['Buy_Date'].map(lambda d: self.tax_obj.get_tax_slab(d) if pd.notna(d) else self.tax_obj.fix_tax_slab)
         gain_before_tax = dfSellOut['Sold@R'] - dfSellOut['Buy@R']
         dfSellOut['TaxNeedToBePaid'] = (round((gain_before_tax * dfSellOut['TaxSlab']), 2))
-        dfSellOut['ProfitPercent'] = round(((gain_before_tax - dfSellOut['TaxNeedToBePaid']) / dfSellOut['Buy@R']) * 100, 2)
+        dfSellOut['ProfitPercent'] = round(((gain_before_tax - dfSellOut['TaxNeedToBePaid']) / dfSellOut['Buy@R']) * 100, 1)
         dfSellOut['ProfitNSU'] = round((dfSellOut[dfSellOut['Type'] == 'NSU']['Sold@R']), 2)
         dfSellOut['ProfitESPP'] = round((dfSellOut[dfSellOut['Type'] == 'ESPP']['Sold@R'] - dfSellOut[dfSellOut['Type'] == 'ESPP']['Buy@R']), 2)
         dfSellOut = dfSellOut.fillna(0)
