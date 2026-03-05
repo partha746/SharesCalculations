@@ -1,5 +1,6 @@
 Django
 elasticsearch
+flask
 pandas
 pytz
 requests

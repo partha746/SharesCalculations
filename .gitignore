@@ -1,5 +1,51 @@
-helpers/__pycache__/*
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+.eggs/
+*.egg
+.venv/
+venv/
+env/
+
+# DB and config artifacts
 configs/*.db
-configs/old/*
-output/*
+configs/*.db-shm
+configs/*.db-wal
+configs/old/
+output/
+
+# Logs and PIDs
+*.log
+*.pid
+web_app.log
+web_app.pid
+dashboard.log
+dashboard.pid
+
+# Angular / dashboard
+dashboard/node_modules/
+dashboard/.angular/
+dashboard/dist/
+dashboard/.cache/
+dashboard/coverage/
+dashboard/.tmp/
+*.tsbuildinfo
+
+# IDE / editor
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Local / temp
 test*
+main.py

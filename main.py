@@ -20,7 +20,7 @@ args = parser.parse_args()
 warnings.filterwarnings("ignore", category=UserWarning)
 
 
-taxSlab = 0.3
+taxSlab = 0.125
 todaysDate = datetime.now()
 
 ###################Update database with rupee Rate###################
@@ -95,7 +95,7 @@ for type in types:
 
 ###################Sell Calculations###################
 if db_status['SellOut']:
-    dfSellOut, sell_profit = gather_data.OwnStockData().generate_sellout_display_data()
+    dfSellOut, sell_profit, _qty, _val, _rsu, _espp = gather_data.OwnStockData().generate_sellout_display_data()
     print(tabulate(dfSellOut[['Type', 'Buy_Date_formatted', 'Sell_Date_formatted', 'Qty_Sold', 'Price_Bought', 'BuyRupeeRate', 'Price_Sell', 'SellRupeeRate', 'ProfitESPP',
         'ProfitNSU', 'TaxNeedToBePaid', 'ProfitPercent', 'InitialValue', 'Max_Value_FY', 'FY_Closing_Value']], headers='keys', tablefmt='pretty', colalign=("centre",)))
 
