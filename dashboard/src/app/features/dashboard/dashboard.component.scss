@@ -33,6 +33,24 @@
   margin: 1.25rem 0 0.5rem;
   color: #8b949e;
 }
+.live-price-label-threshold {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+  font-size: 0.9rem;
+  color: #8b949e;
+  label { white-space: nowrap; }
+  .live-price-threshold-input {
+    width: 4rem;
+    padding: 0.25rem 0.5rem;
+    background: #21262d;
+    border: 1px solid #30363d;
+    border-radius: 4px;
+    color: #e6edf3;
+    font-size: 0.9rem;
+  }
+}
 .live-price-chart-wrap {
   background: #161b22;
   border: 1px solid #30363d;
@@ -210,6 +228,35 @@
 }
 .stat-grid--primary {
   grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+}
+.overview-clock-block {
+  background: #161b22;
+  border: 1px solid #30363d;
+  border-radius: 8px;
+  padding: 1rem 1.25rem;
+  min-width: 200px;
+  min-height: 170px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  gap: 0.5rem;
+}
+.overview-clock-block__title {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #8b949e;
+}
+.overview-clock-block__time {
+  font-size: 2rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: #e6edf3;
+}
+.overview-clock-block__date {
+  font-size: 0.85rem;
+  color: #8b949e;
 }
 .realised-profit-block {
   display: flex;
@@ -444,6 +491,44 @@
 .sold-table {
   margin-top: 0.5rem;
 }
+.holdings-simulate-price {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+  font-size: 0.9rem;
+  color: #8b949e;
+  label { white-space: nowrap; }
+  .holdings-simulate-price__input {
+    min-width: 8rem;
+    width: 8rem;
+    padding: 0.35rem 0.5rem;
+    box-sizing: border-box;
+    background: #21262d;
+    border: 1px solid #30363d;
+    border-radius: 4px;
+    color: #e6edf3;
+    font-size: 0.9rem;
+  }
+  .holdings-simulate-price__hint {
+    font-size: 0.8rem;
+    color: #8b949e;
+    min-width: 0;
+  }
+  .holdings-simulate-price__diff {
+    font-size: 0.85em;
+    font-weight: 500;
+    color: #8b949e;
+    white-space: nowrap;
+  }
+  .holdings-simulate-price__diff--up {
+    color: #3fb950;
+  }
+  .holdings-simulate-price__diff--down {
+    color: #f85149;
+  }
+}
 .holdings-table__hint {
   font-size: 0.8rem;
   color: #8b949e;
@@ -548,6 +633,13 @@
 .holdings-summary__hint {
   color: #8b949e;
   font-size: 0.9rem;
+}
+.holdings-summary__diff {
+  color: #8b949e;
+  font-size: 0.9rem;
+  white-space: nowrap;
+  .holdings-summary__diff-num.holdings-summary__diff--up { color: #3fb950; }
+  .holdings-summary__diff-num.holdings-summary__diff--down { color: #f85149; }
 }
 .holdings-table__th--fixed {
   white-space: nowrap;

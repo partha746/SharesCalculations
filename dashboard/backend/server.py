@@ -233,14 +233,17 @@ def get_live_price():
         from helpers import gather_data
 
         rupee_conv_obj = gather_data.RupeeConv()
-        live_price, todays_rp = rupee_conv_obj.get_live_price()
+        live_price, todays_rp, open_price = rupee_conv_obj.get_live_price()
         if live_price is None or todays_rp is None:
             return jsonify({"error": "Could not fetch live price or USD/INR rate"}), 503
-        return jsonify({
+        payload = {
             "livePriceUsd": round(live_price, 2),
             "usdToInrRate": round(todays_rp, 2),
             "lastUpdated": datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z",
-        })
+        }
+        if open_price is not None:
+            payload["openPriceUsd"] = round(open_price, 2)
+        return jsonify(payload)
     except Exception as e:
         return jsonify({"error": str(e)}), 503
 
@@ -262,7 +265,7 @@ def _build_dashboard_response():
         rupee_conv_obj.update_null_rupees_rate("SellOut", "Buy_Date", "BuyRupeeRate")
         rupee_conv_obj.update_null_rupees_rate("SellOut", "Sell_Date", "SellRupeeRate")
 
-    live_price, todays_rp = rupee_conv_obj.get_live_price()
+    live_price, todays_rp, open_price = rupee_conv_obj.get_live_price()
     if live_price is None or todays_rp is None:
         raise ValueError("Could not fetch live price or USD/INR rate")
 
@@ -315,7 +318,7 @@ def _build_dashboard_response():
         sold_value_rsu_inr = round(total_sell_rsu_inr, 2)
         sold_value_espp_inr = round(total_sell_espp_inr, 2)
 
-    return {
+    payload = {
         "livePriceUsd": round(live_price, 2),
         "usdToInrRate": round(todays_rp, 2),
         "totalShares": all_qty,
@@ -334,6 +337,9 @@ def _build_dashboard_response():
         "espp": espp,
         "canUndoMarkSold": len(_MARK_SOLD_UNDO_STACK) > 0,
     }
+    if open_price is not None:
+        payload["openPriceUsd"] = round(open_price, 2)
+    return payload
 
 
 def _build_holdings_response():

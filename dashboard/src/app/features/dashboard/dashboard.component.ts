@@ -85,6 +85,8 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
   selectedRowKeys = new Set<string>();
   /** Sell qty per row key (qty to sell from that lot; used for simulation). */
   rowSellQty: Record<string, number> = {};
+  /** Override current price (USD) for Holdings table simulation; null = use live price. */
+  holdingsSimulatePriceUsd: number | null = null;
   /** Last row clicked (without shift) for shift-click range selection. */
   private lastClickedRowKey: string | null = null;
   /** Tab: Holdings vs Sold Shares vs Playground */
@@ -92,13 +94,15 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
   soldRows: SoldRow[] = [];
   soldLoading = false;
   private soldLoaded = false;
-  soldSortKey: keyof SoldRow | '' = '';
-  soldSortDir: 1 | -1 = 1;
+  soldSortKey: keyof SoldRow | '' = 'sellDate';
+  soldSortDir: 1 | -1 = -1;
   soldFilter: Record<string, string> = {};
   readonly soldCols = SOLD_COLS;
   readonly soldColLabels = SOLD_COL_LABELS;
   /** Selected sold row keys for summary card (key = getSoldRowKey(row)). */
   selectedSoldKeys = new Set<string>();
+  /** Last sold row clicked (without shift) for shift-click range selection. */
+  private lastClickedSoldRowKey: string | null = null;
 
   @ViewChild('holdingsChartCanvas') holdingsChartCanvas?: ElementRef<HTMLCanvasElement>;
   @ViewChild('soldChartCanvas') soldChartCanvas?: ElementRef<HTMLCanvasElement>;
@@ -156,8 +160,15 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
 
   /** Live price polling: history for chart (max 7 days, max 5000 points) */
   livePriceHistory: { timestamp: number; livePriceUsd: number; usdToInrRate: number }[] = [];
+  /** Per-day (ET) open price for live chart: date key (YYYY-MM-DD) -> first price that day. Used for "diff from open" in tooltip. */
+  private livePriceOpenByDay = new Map<string, number>();
   /** Whether US market is open (from /api/market-status). */
   marketOpen = false;
+  /** Show data label when |diff from open %| is at least this (e.g. 1.6). */
+  livePriceLabelThresholdPct = 1.6;
+  /** Current time for Overview clock (updated every second). */
+  currentTime = new Date();
+  private clockInterval: ReturnType<typeof setInterval> | null = null;
   private livePricePollingInterval: ReturnType<typeof setInterval> | null = null;
   private static readonly LIVE_PRICE_POLL_MS = 14000;
   private static readonly LIVE_PRICE_HISTORY_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
@@ -171,8 +182,11 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
   ngOnInit(): void {
     this.loadHoldingsColumnOrder();
     this.load();
-    // Fetch undo availability immediately so Undo button state is correct
     this.updateCanUndoMarkSold();
+    this.clockInterval = setInterval(() => {
+      this.currentTime = new Date();
+      this.cdr.detectChanges();
+    }, 1000);
   }
 
   private loadHoldingsColumnOrder(): void {
@@ -226,6 +240,12 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
             livePriceUsd: res.livePriceUsd,
           };
         }
+        if (res.openPriceUsd != null && res.openPriceUsd > 0 && res.livePriceUsd != null) {
+          const d = res.livePriceUsd - res.openPriceUsd;
+          if (Math.abs(d) >= 0.01) {
+            this.lastShownLivePriceMovement = { diffUsd: d, diffPct: (d / res.openPriceUsd) * 100 };
+          }
+        }
         this.lastRefreshedAt = new Date();
         this.loading = false;
         this.loadHoldings();
@@ -269,9 +289,11 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
             totalValueInr: Math.round(prevTotalInr * 100) / 100,
             livePriceUsd: prev.livePriceUsd,
           };
-          const diffUsd = this.data!.livePriceUsd - prev.livePriceUsd;
-          if (prev.livePriceUsd !== 0 && Math.abs(diffUsd) >= 0.01) {
-            this.lastShownLivePriceMovement = { diffUsd, diffPct: (diffUsd / prev.livePriceUsd) * 100 };
+          if (this.data!.openPriceUsd == null || this.data!.openPriceUsd <= 0) {
+            const diffUsd = this.data!.livePriceUsd - prev.livePriceUsd;
+            if (prev.livePriceUsd !== 0 && Math.abs(diffUsd) >= 0.01) {
+              this.lastShownLivePriceMovement = { diffUsd, diffPct: (diffUsd / prev.livePriceUsd) * 100 };
+            }
           }
           if (prevTotalUsd !== 0 && Math.abs(this.data!.totalValueUsd - prevTotalUsd) >= 0.01) {
             const du = this.data!.totalValueUsd - prevTotalUsd;
@@ -337,6 +359,7 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
           ...this.data,
           livePriceUsd: res.livePriceUsd,
           usdToInrRate: res.usdToInrRate,
+          ...(res.openPriceUsd != null && { openPriceUsd: res.openPriceUsd }),
           totalValueUsd: Math.round(totalValueUsd * 100) / 100,
           totalValueInr: Math.round(totalValueInr * 100) / 100,
         };
@@ -363,7 +386,13 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
     if (!this.data || !this.lastRefreshHoldings) return;
     const last = this.lastRefreshHoldings;
     const cur = this.data;
-    if (last.livePriceUsd !== 0) {
+    const openToday = cur.openPriceUsd;
+    if (openToday != null && openToday > 0) {
+      const diffUsd = cur.livePriceUsd - openToday;
+      if (Math.abs(diffUsd) >= 0.01) {
+        this.lastShownLivePriceMovement = { diffUsd, diffPct: (diffUsd / openToday) * 100 };
+      }
+    } else if (last.livePriceUsd !== 0) {
       const diffUsd = cur.livePriceUsd - last.livePriceUsd;
       if (Math.abs(diffUsd) >= 0.01) {
         this.lastShownLivePriceMovement = { diffUsd, diffPct: (diffUsd / last.livePriceUsd) * 100 };
@@ -418,6 +447,10 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
   }
 
   ngOnDestroy(): void {
+    if (this.clockInterval != null) {
+      clearInterval(this.clockInterval);
+      this.clockInterval = null;
+    }
     this.stopLivePricePolling();
     if (this.holdingsChart) {
       this.holdingsChart.destroy();
@@ -445,9 +478,37 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
     }, 100);
   }
 
+  /** Eastern-time date key (YYYY-MM-DD) for a timestamp. Used to group by trading day. */
+  private getEtDateKey(timestamp: number): string {
+    return new Date(timestamp).toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
+  }
+
+  /** Build map of ET date -> open price that day. Uses API today open when provided; else first point per day from history. */
+  private buildLivePriceOpenByDay(history: { timestamp: number; livePriceUsd: number }[], todayOpenUsd?: number): Map<string, number> {
+    const map = new Map<string, number>();
+    for (const p of history) {
+      const key = this.getEtDateKey(p.timestamp);
+      if (!map.has(key)) map.set(key, p.livePriceUsd);
+    }
+    if (todayOpenUsd != null && todayOpenUsd > 0) {
+      const todayKey = this.getEtDateKey(Date.now());
+      map.set(todayKey, todayOpenUsd);
+    }
+    return map;
+  }
+
+  /** Called when user changes the data-label threshold; redraw chart so labels use new value. */
+  onLivePriceLabelThresholdChange(): void {
+    const n = Number(this.livePriceLabelThresholdPct);
+    if (!Number.isFinite(n) || n < 0) this.livePriceLabelThresholdPct = 0;
+    if (this.livePriceChart) this.livePriceChart.update();
+    this.cdr.detectChanges();
+  }
+
   private updateLivePriceChartData(): void {
     if (!this.livePriceChart || this.livePriceHistory.length < 2) return;
     const h = this.livePriceHistory;
+    this.livePriceOpenByDay = this.buildLivePriceOpenByDay(h, this.data?.openPriceUsd);
     this.livePriceChart.data.labels = h.map((p) => {
       const d = new Date(p.timestamp);
       return d.toLocaleString('en-IN', { month: 'short', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false });
@@ -463,6 +524,7 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
     const canvas = this.livePriceChartCanvas?.nativeElement;
     if (!canvas || this.livePriceHistory.length < 2 || this.livePriceChart) return;
     const h = this.livePriceHistory;
+    this.livePriceOpenByDay = this.buildLivePriceOpenByDay(h, this.data?.openPriceUsd);
     const labels = h.map((p) => {
       const d = new Date(p.timestamp);
       return d.toLocaleString('en-IN', { month: 'short', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false });
@@ -478,10 +540,27 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
             label: 'NVDA (USD)',
             data: nvdaPrices,
             borderColor: '#388bfd',
+            pointRadius: 1,
+            pointHoverRadius: 2,
             backgroundColor: 'rgba(56, 139, 253, 0.1)',
             fill: false,
             yAxisID: 'y',
             tension: 0.2,
+            datalabels: {
+              display: (ctx: { dataIndex: number }) => {
+                const i = ctx.dataIndex;
+                const point = this.livePriceHistory[i];
+                if (!point) return false;
+                const openPrice = this.livePriceOpenByDay.get(this.getEtDateKey(point.timestamp));
+                if (openPrice == null || openPrice === 0) return false;
+                const diffPct = ((point.livePriceUsd - openPrice) / openPrice) * 100;
+                const threshold = this.livePriceLabelThresholdPct;
+                return Math.abs(diffPct) >= threshold;
+              },
+              formatter: (value: number) => '$' + Number(value).toFixed(2),
+              color: '#e6edf3',
+              font: { size: 10 },
+            },
           },
           {
             label: 'Average',
@@ -492,6 +571,8 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
             yAxisID: 'y',
             borderDash: [6, 4],
             tension: 0,
+            pointRadius: 0,
+            pointHoverRadius: 4,
             datalabels: { display: false },
           },
         ],
@@ -502,7 +583,23 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
         interaction: { mode: 'index', intersect: false },
         plugins: {
           legend: { position: 'top' },
-          tooltip: { enabled: true },
+          tooltip: {
+            enabled: true,
+            callbacks: {
+              afterBody: (tooltipItems: { dataIndex: number }[]) => {
+                if (tooltipItems.length === 0) return '';
+                const idx = tooltipItems[0].dataIndex;
+                const point = this.livePriceHistory[idx];
+                if (!point) return '';
+                const openPrice = this.livePriceOpenByDay.get(this.getEtDateKey(point.timestamp));
+                if (openPrice == null || openPrice === 0) return '';
+                const diff = point.livePriceUsd - openPrice;
+                const pct = (diff / openPrice) * 100;
+                const sign = diff >= 0 ? '+' : '';
+                return `Diff from open: ${sign}$${diff.toFixed(2)} (${sign}${pct.toFixed(2)}%)`;
+              },
+            },
+          },
         },
         scales: {
           x: {
@@ -917,10 +1014,17 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
     if (diff !== 0) return { diff, diffPct: (diff / last) * 100 };
     return this.lastShownTotalSharesMovement;
   }
-  /** Movement vs last refresh: live NVDA price; when unchanged show last non-zero diff. */
+  /** Movement vs today's open when available, else vs last refresh; when unchanged show last non-zero diff. */
   get livePriceMovement(): { diffUsd: number; diffPct: number } | null {
-    if (!this.data || !this.lastRefreshHoldings) return null;
+    if (!this.data) return null;
     const cur = this.data.livePriceUsd;
+    const openToday = this.data.openPriceUsd;
+    if (openToday != null && openToday > 0) {
+      const diffUsd = cur - openToday;
+      if (Math.abs(diffUsd) >= 0.01) return { diffUsd, diffPct: (diffUsd / openToday) * 100 };
+      return this.lastShownLivePriceMovement;
+    }
+    if (!this.lastRefreshHoldings) return null;
     const last = this.lastRefreshHoldings.livePriceUsd;
     if (last === 0) return this.lastShownLivePriceMovement;
     const diffUsd = cur - last;
@@ -1147,6 +1251,29 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
     return this.selectedSoldKeys.has(this.getSoldRowKey(row));
   }
 
+  /** Handle select control click on sold table: normal click toggles row; shift+click selects range. */
+  onSoldRowSelectClick(row: SoldRow, event: MouseEvent): void {
+    const rows = this.soldFilteredSorted;
+    const currentKey = this.getSoldRowKey(row);
+    const currentIndex = rows.findIndex((r) => this.getSoldRowKey(r) === currentKey);
+    if (event.shiftKey && this.lastClickedSoldRowKey != null) {
+      const anchorIndex = rows.findIndex((r) => this.getSoldRowKey(r) === this.lastClickedSoldRowKey);
+      if (anchorIndex >= 0 && currentIndex >= 0) {
+        const from = Math.min(anchorIndex, currentIndex);
+        const to = Math.max(anchorIndex, currentIndex);
+        const next = new Set<string>();
+        for (let i = from; i <= to; i++) next.add(this.getSoldRowKey(rows[i]));
+        this.selectedSoldKeys = next;
+      } else {
+        this.toggleSoldRowSelection(row);
+      }
+    } else {
+      this.toggleSoldRowSelection(row);
+    }
+    this.lastClickedSoldRowKey = currentKey;
+    this.cdr.detectChanges();
+  }
+
   toggleSoldRowSelection(row: SoldRow): void {
     const key = this.getSoldRowKey(row);
     if (this.selectedSoldKeys.has(key)) {
@@ -1269,6 +1396,11 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
   formatLastRefreshed(d: Date | null): string {
     if (!d) return '';
     return d.toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' });
+  }
+
+  /** Time with seconds for Overview clock (12-hour, e.g. 2:32:05 PM). */
+  formatClock(d: Date): string {
+    return d.toLocaleTimeString('en-IN', { hour12: true, hour: 'numeric', minute: '2-digit', second: '2-digit' });
   }
 
   parseDate(s: string): number {
@@ -1511,7 +1643,78 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
     });
   }
 
-  /** Totals for selected rows only, scaled by sell qty per row (for sell-strategy simulation). */
+  onHoldingsSimulatePriceChange(value: number | string | null): void {
+    if (value === '' || value == null) {
+      this.holdingsSimulatePriceUsd = null;
+      return;
+    }
+    const n = Number(value);
+    this.holdingsSimulatePriceUsd = Number.isFinite(n) && n >= 0 ? n : null;
+    this.cdr.detectChanges();
+  }
+
+  /** Price (USD) used for Holdings table: override if set, else live. */
+  get holdingsPriceUsd(): number {
+    return this.holdingsSimulatePriceUsd ?? this.data?.livePriceUsd ?? 0;
+  }
+
+  /** When simulating price: difference vs current live price (USD and %). Positive = simulated is above live. */
+  get holdingsSimulatePriceDiffFromLive(): { diffUsd: number; diffPct: number } | null {
+    const sim = this.holdingsSimulatePriceUsd;
+    const live = this.data?.livePriceUsd;
+    if (sim == null || live == null || live <= 0) return null;
+    const diffUsd = sim - live;
+    const diffPct = (diffUsd / live) * 100;
+    return { diffUsd, diffPct };
+  }
+
+  /** USD→INR rate for Holdings simulation. */
+  get holdingsUsdToInr(): number {
+    return this.data?.usdToInrRate ?? 0;
+  }
+
+  /** Tax slab (0–1) derived from row's current tax vs gain; used to recompute tax at simulated price. */
+  private getHoldingTaxSlab(row: HoldingRow): number {
+    const valueTodayGross = row.netIfSellTodayInr + row.taxToPayInr;
+    const gain = valueTodayGross - row.totalPurchaseInr;
+    return gain > 0 ? row.taxToPayInr / gain : 0;
+  }
+
+  /** Value today (INR) for this lot at current or simulated price. */
+  getHoldingValueTodayInr(row: HoldingRow): number {
+    const price = this.holdingsPriceUsd;
+    const rate = this.holdingsUsdToInr;
+    if (price <= 0 || rate <= 0) return row.netIfSellTodayInr + row.taxToPayInr;
+    return row.qty * price * rate;
+  }
+
+  /** Tax to pay (INR) for this lot at current or simulated price. */
+  getHoldingTaxToPayInr(row: HoldingRow): number {
+    const valueToday = this.getHoldingValueTodayInr(row);
+    const gain = valueToday - row.totalPurchaseInr;
+    if (gain <= 0) return 0;
+    const slab = this.getHoldingTaxSlab(row);
+    return Math.round(gain * slab * 100) / 100;
+  }
+
+  /** Net in hand (INR) for this lot at current or simulated price. */
+  getHoldingNetInr(row: HoldingRow): number {
+    const valueToday = this.getHoldingValueTodayInr(row);
+    const tax = this.getHoldingTaxToPayInr(row);
+    return Math.round((valueToday - tax) * 100) / 100;
+  }
+
+  /** Profit % for this lot at current or simulated price. */
+  getHoldingProfitPercent(row: HoldingRow): number {
+    const valueToday = this.getHoldingValueTodayInr(row);
+    const tax = this.getHoldingTaxToPayInr(row);
+    const net = valueToday - tax;
+    const cost = row.totalPurchaseInr;
+    if (cost <= 0) return 0;
+    return Math.round(((net - cost) / cost) * 1000) / 10;
+  }
+
+  /** Totals for selected rows only, scaled by sell qty per row (for sell-strategy simulation). Uses simulated price when set. */
   get holdingsSelectedTotals(): { totalValueTodayInr: number; totalTaxToPayInr: number; totalNetInAccountInr: number; selectedCount: number } {
     const rows = this.holdingsFilteredSorted;
     let totalValueTodayInr = 0;
@@ -1523,12 +1726,41 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
       selectedCount++;
       const sellQty = this.getSellQty(r);
       const ratio = r.qty > 0 ? Math.min(sellQty, r.qty) / r.qty : 0;
-      const valueTodayRow = r.netIfSellTodayInr + r.taxToPayInr;
+      const valueTodayRow = this.getHoldingValueTodayInr(r);
+      const taxRow = this.getHoldingTaxToPayInr(r);
+      const netRow = this.getHoldingNetInr(r);
       totalValueTodayInr += valueTodayRow * ratio;
-      totalTaxToPayInr += r.taxToPayInr * ratio;
-      totalNetInAccountInr += r.netIfSellTodayInr * ratio;
+      totalTaxToPayInr += taxRow * ratio;
+      totalNetInAccountInr += netRow * ratio;
     }
     return { totalValueTodayInr, totalTaxToPayInr, totalNetInAccountInr, selectedCount };
+  }
+
+  /** When simulating price: total Value today and total Net in account vs what they would be at live price (INR). */
+  get holdingsSelectedTotalsDiffFromLive(): { diffValueTodayInr: number; diffNetInAccountInr: number } | null {
+    if (this.holdingsSimulatePriceUsd == null || this.data?.livePriceUsd == null || this.data.livePriceUsd <= 0) return null;
+    const current = this.holdingsSelectedTotals;
+    if (current.selectedCount === 0) return null;
+    const rate = this.holdingsUsdToInr;
+    if (rate <= 0) return null;
+    let valueAtLive = 0;
+    let netAtLive = 0;
+    for (const r of this.holdingsFilteredSorted) {
+      if (!this.selectedRowKeys.has(this.getRowKey(r))) continue;
+      const sellQty = this.getSellQty(r);
+      const ratio = r.qty > 0 ? Math.min(sellQty, r.qty) / r.qty : 0;
+      const valueTodayRow = r.qty * this.data!.livePriceUsd * rate;
+      const gain = valueTodayRow - r.totalPurchaseInr;
+      const slab = this.getHoldingTaxSlab(r);
+      const taxRow = gain > 0 ? Math.round(gain * slab * 100) / 100 : 0;
+      const netRow = Math.round((valueTodayRow - taxRow) * 100) / 100;
+      valueAtLive += valueTodayRow * ratio;
+      netAtLive += netRow * ratio;
+    }
+    return {
+      diffValueTodayInr: Math.round((current.totalValueTodayInr - valueAtLive) * 100) / 100,
+      diffNetInAccountInr: Math.round((current.totalNetInAccountInr - netAtLive) * 100) / 100,
+    };
   }
 
   onColDragStart(event: DragEvent, index: number): void {
@@ -1563,8 +1795,11 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
     return HOLDING_COL_DEFS.find((c) => c.key === key)?.label ?? key;
   }
 
-  /** Display value for a cell (formatted). */
+  /** Display value for a cell (formatted). Uses simulated price when holdingsSimulatePriceUsd is set. */
   formatCell(row: HoldingRow, key: keyof HoldingRow): string {
+    if (key === 'netIfSellTodayInr') return '₹ ' + this.formatInr(this.getHoldingNetInr(row));
+    if (key === 'taxToPayInr') return '₹ ' + this.formatInr(this.getHoldingTaxToPayInr(row));
+    if (key === 'profitPercent') return this.getHoldingProfitPercent(row).toFixed(1) + '%';
     const v = row[key];
     if (key === 'buyPriceUsd') {
       const tdsOrBuy = this.formatUsd(Number(v));
@@ -1574,10 +1809,10 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
       return tdsOrBuy;
     }
     if (key === 'type') return this.typeLabel(String(v));
-    if (key === 'totalPurchaseInr' || key === 'netIfSellTodayInr' || key === 'taxToPayInr') return '₹ ' + this.formatInr(Number(v));
+    if (key === 'totalPurchaseInr') return '₹ ' + this.formatInr(Number(v));
     if (key === 'buyDate') return this.formatDate(String(v));
     if (key === 'qty') return String(v);
-    if (key === 'profitPercent' || key === 'taxPercent') return (Number(v) ?? 0).toFixed(1) + '%';
+    if (key === 'taxPercent') return (Number(v) ?? 0).toFixed(1) + '%';
     return String(v ?? '');
   }
 

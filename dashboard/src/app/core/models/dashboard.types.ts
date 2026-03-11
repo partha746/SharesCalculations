@@ -9,6 +9,8 @@ export interface LivePriceResponse {
   livePriceUsd: number;
   usdToInrRate: number;
   lastUpdated: string;
+  /** Today's market open (USD); when set, Overview and chart use it for "diff from open". */
+  openPriceUsd?: number;
 }
 
 /** One stored point for live price history (chart + diff baseline). */
@@ -27,6 +29,8 @@ export interface MarketStatusResponse {
 export interface DashboardResponse {
   livePriceUsd: number;
   usdToInrRate: number;
+  /** Today's market open (USD); when set, Overview and chart use it for "diff from open". */
+  openPriceUsd?: number;
   totalShares: number;
   totalValueUsd: number;
   totalValueInr: number;

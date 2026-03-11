@@ -34,7 +34,7 @@ class EksHelper:
         self.tax_obj = Tax()
         rupee_conv_obj = RupeeConv()
 
-        self.livePrice, self.todaysRP = rupee_conv_obj.get_live_price()
+        self.livePrice, self.todaysRP, _ = rupee_conv_obj.get_live_price()
 
     def login_eks(self):
         """_summary_
@@ -281,33 +281,47 @@ class RupeeConv:
         Returns:
             float: Latest stock price, or None if not available
         """
-        url = f"https://finnhub.io/api/v1/quote"
-        params = {
-            "symbol": stock_code.upper(),
-            "token": api_key
-        }
+        quote = self.get_quote(stock_code, api_key)
+        if quote is None:
+            return None
+        price = quote.get("c")
+        if price is not None:
+            return round(float(price), 2)
+        return None
 
+    def get_quote(self, stock_code='NVDA', api_key="cvsfdk9r01qhup0qfks0cvsfdk9r01qhup0qfksg"):
+        """Fetches the Finnhub quote (c, o, h, l, pc, t) for the symbol. Returns dict or None."""
+        url = "https://finnhub.io/api/v1/quote"
+        params = {"symbol": stock_code.upper(), "token": api_key}
         try:
             response = requests.get(url, params=params)
             data = response.json()
-            price = data.get("c")  # 'c' is current price
-            if price is not None:
-                return round(float(price), 2)
-            else:
-                print("Price not found in response:", data)
-                return None
+            if isinstance(data, dict) and data.get("c") is not None:
+                return data
+            return None
         except Exception as e:
-            print(f"Error retrieving stock price for {stock_code}:", e)
+            print(f"Error retrieving quote for {stock_code}:", e)
             return None
 
     @retry(wait_random_min=10, stop_max_attempt_number=3)
     def get_live_price(self):
-        live_price = self.get_stock_price(stock_code='nvda')
-        # Use latest endpoint so refresh gets current rate; fallback to date-based for today
+        """Returns (live_price_usd, todays_usd_inr_rate, open_price_usd or None)."""
+        quote = self.get_quote(stock_code='nvda')
+        live_price = None
+        open_price = None
+        if quote:
+            c = quote.get("c")
+            o = quote.get("o")
+            if c is not None:
+                live_price = round(float(c), 2)
+            if o is not None and float(o) > 0:
+                open_price = round(float(o), 2)
+        if live_price is None:
+            live_price = self.get_stock_price(stock_code='nvda')
         todays_rp = self.get_latest_usd_to_inr()
         if todays_rp is None:
             todays_rp = self.get_rupee_rate(self.todays_date)
-        return live_price, todays_rp
+        return live_price, todays_rp, open_price
 
     def print_rupees(self, amt, cur='INR'):
         if cur == 'INR':
@@ -409,7 +423,7 @@ class OwnStockData:
         self.rupeeconv_obj = RupeeConv()
         self.tax_obj = Tax()
         
-        self.livePrice, self.todaysRP = self.rupeeconv_obj.get_live_price()
+        self.livePrice, self.todaysRP, _ = self.rupeeconv_obj.get_live_price()
         self.max_closing_json = {}
 
     @retry(wait_fixed=30000)

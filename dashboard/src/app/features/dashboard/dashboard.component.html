@@ -79,8 +79,18 @@
           }
         </div>
       </div>
+      <div class="overview-clock-block">
+        <div class="overview-clock-block__title">Time</div>
+        <div class="overview-clock-block__time">{{ formatClock(currentTime) }}</div>
+        <div class="overview-clock-block__date">{{ currentTime.toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short' }) }}</div>
+      </div>
     </div>
     <h3 class="section-subtitle">Live price movement</h3>
+    <div class="live-price-label-threshold">
+      <label for="livePriceLabelThreshold">Show data label when |diff from open| ≥</label>
+      <input id="livePriceLabelThreshold" type="number" min="0" step="0.1" class="live-price-threshold-input" [(ngModel)]="livePriceLabelThresholdPct" (ngModelChange)="onLivePriceLabelThresholdChange()" />
+      <span>%</span>
+    </div>
     <div class="live-price-chart-wrap">
       @if (livePriceHistory.length >= 2) {
         <canvas #livePriceChartCanvas class="holdings-chart"></canvas>
@@ -367,11 +377,24 @@
           <span class="holdings-summary__item">Value today ₹ {{ formatInr(holdingsSelectedTotals.totalValueTodayInr) }}</span>
           <span class="holdings-summary__item">Tax to pay ₹ {{ formatInr(holdingsSelectedTotals.totalTaxToPayInr) }}</span>
           <span class="holdings-summary__item">In your account after tax ₹ {{ formatInr(holdingsSelectedTotals.totalNetInAccountInr) }}</span>
+          @if (holdingsSelectedTotalsDiffFromLive) {
+            <span class="holdings-summary__diff">vs live: Value today <span class="holdings-summary__diff-num" [class.holdings-summary__diff--up]="holdingsSelectedTotalsDiffFromLive.diffValueTodayInr > 0" [class.holdings-summary__diff--down]="holdingsSelectedTotalsDiffFromLive.diffValueTodayInr < 0">{{ holdingsSelectedTotalsDiffFromLive.diffValueTodayInr >= 0 ? '↑' : '↓' }} ₹ {{ formatInr(Math.abs(holdingsSelectedTotalsDiffFromLive.diffValueTodayInr)) }}</span> · After tax <span class="holdings-summary__diff-num" [class.holdings-summary__diff--up]="holdingsSelectedTotalsDiffFromLive.diffNetInAccountInr > 0" [class.holdings-summary__diff--down]="holdingsSelectedTotalsDiffFromLive.diffNetInAccountInr < 0">{{ holdingsSelectedTotalsDiffFromLive.diffNetInAccountInr >= 0 ? '↑' : '↓' }} ₹ {{ formatInr(Math.abs(holdingsSelectedTotalsDiffFromLive.diffNetInAccountInr)) }}</span></span>
+          }
         } @else {
           <span class="holdings-summary__hint">Select rows and enter sell qty to simulate your sell strategy.</span>
         }
       </div>
     }
+    <div class="holdings-simulate-price">
+      <label for="holdingsSimulatePrice">Simulate price (USD):</label>
+      <input id="holdingsSimulatePrice" type="number" min="0" step="0.01" class="holdings-simulate-price__input" [ngModel]="holdingsSimulatePriceUsd" (ngModelChange)="onHoldingsSimulatePriceChange($event)" placeholder="Live: {{ data ? formatUsd(data.livePriceUsd) : '–' }}" title="Leave empty to use live price" />
+      <span class="holdings-simulate-price__hint">Leave empty for live price. Table and totals use this price when set.</span>
+      @if (holdingsSimulatePriceDiffFromLive) {
+        <span class="holdings-simulate-price__diff" [class.holdings-simulate-price__diff--up]="holdingsSimulatePriceDiffFromLive.diffUsd > 0" [class.holdings-simulate-price__diff--down]="holdingsSimulatePriceDiffFromLive.diffUsd < 0">
+          vs live: {{ holdingsSimulatePriceDiffFromLive.diffUsd > 0 ? '↑' : (holdingsSimulatePriceDiffFromLive.diffUsd < 0 ? '↓' : '') }} $ {{ formatUsd(Math.abs(holdingsSimulatePriceDiffFromLive.diffUsd)) }} ({{ holdingsSimulatePriceDiffFromLive.diffPct >= 0 ? '+' : '' }}{{ holdingsSimulatePriceDiffFromLive.diffPct | number:'1.2-2' }}%)
+        </span>
+      }
+    </div>
     <p class="holdings-table__hint">Drag column headers to reorder; order is saved. Select rows and set sell qty to see totals above.</p>
     <div class="holdings-table-wrap">
       <table class="holdings-table">
@@ -503,7 +526,7 @@
             @for (row of soldFilteredSorted; track getSoldRowKey(row)) {
               <tr>
                 <td class="holdings-table__cell--center">
-                  <button type="button" class="holdings-table__checkbox-btn" [class.holdings-table__checkbox-btn--checked]="isSoldRowSelected(row)" (click)="toggleSoldRowSelection(row)" [attr.aria-label]="isSoldRowSelected(row) ? 'Deselect row' : 'Select row'">
+                  <button type="button" class="holdings-table__checkbox-btn" [class.holdings-table__checkbox-btn--checked]="isSoldRowSelected(row)" (click)="onSoldRowSelectClick(row, $event)" [attr.aria-label]="isSoldRowSelected(row) ? 'Deselect row' : 'Select row'">
                     @if (isSoldRowSelected(row)) {
                       <span class="holdings-table__checkbox-tick">✓</span>
                     }

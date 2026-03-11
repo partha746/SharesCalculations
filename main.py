@@ -46,7 +46,7 @@ if db_status['SellOut']:
     rupee_conv_obj.update_null_rupees_rate('SellOut', 'Buy_Date', 'BuyRupeeRate')
     rupee_conv_obj.update_null_rupees_rate('SellOut', 'Sell_Date', 'SellRupeeRate')
 
-livePrice, todaysRP = rupee_conv_obj.get_live_price()
+livePrice, todaysRP, _ = rupee_conv_obj.get_live_price()
 
 #XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX#
 arrowRT = u'\u2192'
