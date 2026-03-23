@@ -1,0 +1,60 @@
+.time-card {
+  background: #161b22;
+  border: 1px solid #30363d;
+  border-radius: 8px;
+  padding: 1rem 1.25rem;
+  min-width: 260px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 0.5rem;
+}
+.time-card__title {
+  font-size: 0.85rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #8b949e;
+  margin-bottom: 0.25rem;
+}
+.time-card__clock {
+  font-size: 2rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: #e6edf3;
+  letter-spacing: 0.02em;
+}
+.time-card__date {
+  font-size: 1rem;
+  color: #8b949e;
+  margin-bottom: 0.25rem;
+}
+.time-card__divider {
+  margin: 0.5rem 0 0.35rem;
+  padding-top: 0.5rem;
+  border-top: 1px solid #21262d;
+}
+.time-card__row {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  margin-top: 0.4rem;
+  flex-wrap: wrap;
+  &:first-of-type {
+    margin-top: 0;
+  }
+}
+.time-card__label {
+  font-size: 0.85rem;
+  color: #8b949e;
+  flex-shrink: 0;
+}
+.time-card__value {
+  font-size: 1.05rem;
+  font-weight: 500;
+  color: #e6edf3;
+  &.time-card__value--countdown {
+    font-size: 1rem;
+    font-weight: 400;
+    color: #8b949e;
+  }
+}

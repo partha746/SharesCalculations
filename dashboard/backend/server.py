@@ -5,6 +5,7 @@ Uses repo root (parent of dashboard) for configs/ and helpers/.
 """
 import os
 import sys
+import threading
 import time
 from contextlib import contextmanager
 from datetime import date, datetime
@@ -71,6 +72,23 @@ def get_table_data(table_name):
     return jsonify(rows)
 
 
+def _update_rupee_rates_for_table(table_name):
+    """Run rupee rate update for the given table (NSU, ESPP, SellOut) so new/updated rows get rates."""
+    from helpers import gather_data
+    db_obj = gather_data.DB()
+    if not os.path.isfile(db_obj.db_path):
+        return
+    db_obj.ensure_tables()
+    rupee_conv_obj = gather_data.RupeeConv()
+    if table_name == "NSU":
+        rupee_conv_obj.update_null_rupees_rate("NSU", "Buy_Date", "RupeeRate")
+    elif table_name == "ESPP":
+        rupee_conv_obj.update_null_rupees_rate("ESPP", "Buy_Date", "RupeeRate")
+    elif table_name == "SellOut":
+        rupee_conv_obj.update_null_rupees_rate("SellOut", "Buy_Date", "BuyRupeeRate")
+        rupee_conv_obj.update_null_rupees_rate("SellOut", "Sell_Date", "SellRupeeRate")
+
+
 @app.route("/api/tables/<table_name>", methods=["POST"])
 def add_row(table_name):
     if table_name not in TABLE_COLUMNS:
@@ -83,6 +101,11 @@ def add_row(table_name):
     with get_db() as conn:
         conn.execute(f'INSERT INTO "{table_name}" ({col_list}) VALUES ({placeholders})', values)
         rowid = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+    if table_name in ("NSU", "ESPP", "SellOut"):
+        try:
+            _update_rupee_rates_for_table(table_name)
+        except Exception as e:
+            print(f"[add_row] rupee rate update: {e}", flush=True)
     return jsonify({"rowid": rowid, "message": "Added"}), 201
 
 
@@ -107,6 +130,11 @@ def update_row(table_name, rowid):
         )
         if cur.rowcount == 0:
             return jsonify({"error": "Row not found"}), 404
+    if table_name in ("NSU", "ESPP", "SellOut"):
+        try:
+            _update_rupee_rates_for_table(table_name)
+        except Exception as e:
+            print(f"[update_row] rupee rate update: {e}", flush=True)
     return jsonify({"message": "Updated"})
 
 
@@ -144,6 +172,146 @@ def _is_nasdaq_open_et():
     return open_t <= t < close_t
 
 
+_last_premarket_miss_log = 0.0
+
+
+def _log_premarket_miss_once():
+    """Log once per minute when pre-market has no price (avoids log spam)."""
+    global _last_premarket_miss_log
+    now = time.time()
+    if now - _last_premarket_miss_log >= 60:
+        _last_premarket_miss_log = now
+        print("[live-price] pre-market: no price from yfinance (rate limit, SSL, or no data)", flush=True)
+
+
+def _is_premarket_et():
+    """True if current time in Eastern is Mon-Fri 4:00 AM - 9:30 AM (pre-market session)."""
+    if ZoneInfo is not None:
+        et = datetime.now(ZoneInfo("America/New_York"))
+    else:
+        from datetime import timezone, timedelta
+        et = datetime.now(timezone.utc) - timedelta(hours=5)
+    if et.weekday() >= 5:
+        return False
+    t = et.time()
+    premarket_start = datetime.strptime("04:00", "%H:%M").time()
+    regular_open = datetime.strptime("09:30", "%H:%M").time()
+    return premarket_start <= t < regular_open
+
+
+def _is_postmarket_et():
+    """True if current time in Eastern is Mon-Fri 4:00 PM - 8:00 PM (post-market session)."""
+    if ZoneInfo is not None:
+        et = datetime.now(ZoneInfo("America/New_York"))
+    else:
+        from datetime import timezone, timedelta
+        et = datetime.now(timezone.utc) - timedelta(hours=5)
+    if et.weekday() >= 5:
+        return False
+    t = et.time()
+    close_t = datetime.strptime("16:00", "%H:%M").time()
+    postmarket_end = datetime.strptime("20:00", "%H:%M").time()
+    return close_t <= t < postmarket_end
+
+
+def _seconds_until_next_market_open_et():
+    """Seconds until next 9:30 AM ET (Mon-Fri). Used to sleep when market is closed."""
+    if ZoneInfo is not None:
+        et = datetime.now(ZoneInfo("America/New_York"))
+    else:
+        from datetime import timezone, timedelta
+        et = datetime.now(timezone.utc) - timedelta(hours=5)
+    from datetime import timedelta as td
+    open_t = datetime.strptime("09:30", "%H:%M").time()
+    # next open: today 9:30 if before 9:30 and weekday, else next weekday 9:30
+    if et.weekday() < 5 and et.time() < open_t:
+        next_open = datetime.combine(et.date(), open_t)
+        if ZoneInfo is not None:
+            next_open = next_open.replace(tzinfo=ZoneInfo("America/New_York"))
+        delta = (next_open - et).total_seconds()
+        return max(0, int(delta))
+    # advance to next day (or Monday if Fri evening / weekend)
+    days = 1
+    if et.weekday() == 4 and et.time() >= datetime.strptime("16:00", "%H:%M").time():
+        days = 3  # Fri 4pm -> Monday
+    elif et.weekday() == 5:  # Saturday
+        days = 2  # Monday
+    elif et.weekday() == 6:  # Sunday
+        days = 1  # Monday
+    next_day = et.date() + td(days=days)
+    next_open = datetime.combine(next_day, open_t)
+    if ZoneInfo is not None:
+        next_open = next_open.replace(tzinfo=ZoneInfo("America/New_York"))
+    delta = (next_open - et).total_seconds()
+    return max(0, int(delta))
+
+
+def _next_market_open_close_et():
+    """Return (next_open_utc_ts_sec, next_close_utc_ts_sec, next_premarket_utc_ts_sec) for 9:30 AM, 4:00 PM, and 4:00 AM ET (Mon-Fri). Pre-market = 4:00 AM–9:30 AM ET."""
+    from datetime import timedelta as td
+    if ZoneInfo is not None:
+        et_now = datetime.now(ZoneInfo("America/New_York"))
+        tz_et = ZoneInfo("America/New_York")
+    else:
+        from datetime import timezone
+        et_now = datetime.now(timezone.utc) - td(hours=5)
+        tz_et = None
+    open_t = datetime.strptime("09:30", "%H:%M").time()
+    close_t = datetime.strptime("16:00", "%H:%M").time()
+    premarket_t = datetime.strptime("04:00", "%H:%M").time()
+
+    def to_ts(d_naive_et):
+        if tz_et is not None:
+            d = d_naive_et.replace(tzinfo=tz_et)
+            return int(d.timestamp())
+        from datetime import timezone
+        et_fixed = timezone(td(hours=-5))
+        return int(d_naive_et.replace(tzinfo=et_fixed).timestamp())
+
+    # Next 9:30 AM ET (regular open)
+    if et_now.weekday() < 5 and et_now.time() < open_t:
+        next_open = datetime.combine(et_now.date(), open_t)
+    else:
+        days = 1
+        if et_now.weekday() == 4 and et_now.time() >= close_t:
+            days = 3
+        elif et_now.weekday() == 5:
+            days = 2
+        elif et_now.weekday() == 6:
+            days = 1
+        next_open = datetime.combine(et_now.date() + td(days=days), open_t)
+    next_open_ts = to_ts(next_open)
+
+    # Next 4:00 PM ET (regular close)
+    if et_now.weekday() < 5 and et_now.time() < close_t:
+        next_close = datetime.combine(et_now.date(), close_t)
+    else:
+        days = 1
+        if et_now.weekday() == 4:
+            days = 3
+        elif et_now.weekday() == 5:
+            days = 2
+        elif et_now.weekday() == 6:
+            days = 1
+        next_close = datetime.combine(et_now.date() + td(days=days), close_t)
+    next_close_ts = to_ts(next_close)
+
+    # Next 4:00 AM ET (pre-market start, Mon–Fri)
+    if et_now.weekday() < 5 and et_now.time() < premarket_t:
+        next_pre = datetime.combine(et_now.date(), premarket_t)
+    else:
+        days = 1
+        if et_now.weekday() == 4:
+            days = 3
+        elif et_now.weekday() == 5:
+            days = 2
+        elif et_now.weekday() == 6:
+            days = 1
+        next_pre = datetime.combine(et_now.date() + td(days=days), premarket_t)
+    next_pre_ts = to_ts(next_pre)
+    return (next_open_ts, next_close_ts, next_pre_ts)
+
+
 @app.route("/api/market-status", methods=["GET"])
 def get_market_status():
     """Return whether US market is open. Tries Finnhub first; falls back to ET time window."""
@@ -155,7 +323,6 @@ def get_market_status():
         )
         if r.status_code == 200:
             data = r.json()
-            # Finnhub may return exchange, status, etc.
             if isinstance(data, dict):
                 if data.get("exchange") and "status" in data:
                     status = str(data.get("status", "")).lower()
@@ -170,7 +337,15 @@ def get_market_status():
             market_open = _is_nasdaq_open_et()
     except Exception:
         market_open = _is_nasdaq_open_et()
-    return jsonify({"marketOpen": market_open})
+    next_open_ts, next_close_ts, next_pre_ts = _next_market_open_close_et()
+    return jsonify({
+        "marketOpen": market_open,
+        "isPreMarketSession": _is_premarket_et(),
+        "isPostMarketSession": _is_postmarket_et(),
+        "nextOpen": next_open_ts * 1000,
+        "nextClose": next_close_ts * 1000,
+        "nextPreMarketStart": next_pre_ts * 1000,
+    })
 
 
 def _ensure_live_price_history_table(conn):
@@ -205,6 +380,16 @@ def get_live_price_history():
     return jsonify(out)
 
 
+@app.route("/api/live-price-history", methods=["DELETE"])
+def clear_live_price_history():
+    """Delete all rows from live_price_history (graph data). Returns count of deleted rows."""
+    with get_db() as conn:
+        _ensure_live_price_history_table(conn)
+        cur = conn.execute("DELETE FROM live_price_history")
+        deleted = cur.rowcount
+    return jsonify({"ok": True, "deleted": deleted})
+
+
 @app.route("/api/live-price-history", methods=["POST"])
 def append_live_price_history():
     """Append one live price point (from frontend poll). Body: { timestamp, livePriceUsd, usdToInrRate }."""
@@ -226,9 +411,47 @@ def append_live_price_history():
     return jsonify({"ok": True}), 201
 
 
+def _record_live_price_to_history():
+    """Fetch current NVDA price + USD/INR and append one row to live_price_history. Swallows errors."""
+    try:
+        from helpers import gather_data
+        rupee_conv_obj = gather_data.RupeeConv()
+        live_price, todays_rp, _ = rupee_conv_obj.get_live_price()
+        if live_price is None or todays_rp is None:
+            return
+        ts_ms = int(time.time() * 1000)
+        with get_db() as conn:
+            _ensure_live_price_history_table(conn)
+            conn.execute(
+                "INSERT INTO live_price_history (timestamp_ms, live_price_usd, usd_to_inr_rate) VALUES (?, ?, ?)",
+                (ts_ms, round(float(live_price), 2), round(float(todays_rp), 2)),
+            )
+    except Exception as e:
+        print(f"[live-price-recorder] {e}", flush=True)
+
+
+def _live_price_recorder_loop():
+    """Background loop: only when market is open (ET), record live price every 14s. When closed, sleep until next open."""
+    RECORDER_INTERVAL_SEC = 14
+    while True:
+        try:
+            if _is_nasdaq_open_et():
+                _record_live_price_to_history()
+                time.sleep(RECORDER_INTERVAL_SEC)
+            else:
+                sec = _seconds_until_next_market_open_et()
+                if sec > 0:
+                    time.sleep(sec)
+                else:
+                    time.sleep(60)
+        except Exception as e:
+            print(f"[live-price-recorder] loop error: {e}", flush=True)
+            time.sleep(60)
+
+
 @app.route("/api/live-price", methods=["GET"])
 def get_live_price():
-    """Lightweight endpoint: NVDA price + USD/INR rate only. No cache."""
+    """Lightweight endpoint: NVDA price + USD/INR rate. When in pre-market (4–9:30 AM ET), includes preMarketPriceUsd from yfinance."""
     try:
         from helpers import gather_data
 
@@ -243,6 +466,16 @@ def get_live_price():
         }
         if open_price is not None:
             payload["openPriceUsd"] = round(open_price, 2)
+        if _is_premarket_et():
+            premarket = rupee_conv_obj.get_premarket_price("NVDA")
+            if premarket is not None:
+                payload["preMarketPriceUsd"] = round(premarket, 2)
+            else:
+                _log_premarket_miss_once()
+        if _is_postmarket_et():
+            postmarket = rupee_conv_obj.get_postmarket_price("NVDA")
+            if postmarket is not None:
+                payload["postMarketPriceUsd"] = round(postmarket, 2)
         return jsonify(payload)
     except Exception as e:
         return jsonify({"error": str(e)}), 503
@@ -339,6 +572,14 @@ def _build_dashboard_response():
     }
     if open_price is not None:
         payload["openPriceUsd"] = round(open_price, 2)
+    if _is_premarket_et():
+        premarket = rupee_conv_obj.get_premarket_price("NVDA")
+        if premarket is not None:
+            payload["preMarketPriceUsd"] = round(premarket, 2)
+    if _is_postmarket_et():
+        postmarket = rupee_conv_obj.get_postmarket_price("NVDA")
+        if postmarket is not None:
+            payload["postMarketPriceUsd"] = round(postmarket, 2)
     return payload
 
 
@@ -363,7 +604,10 @@ def _build_holdings_response():
         df, *_ = gather_data.OwnStockData().generate_display_data(type=stock_type)
         price_col = "TDS_Price_raw" if stock_type == "ESPP" else "Price_Bought_raw"
         for _, r in df.iterrows():
-            qty = int(r["Available_Sell"])
+            try:
+                qty = int(float(r["Available_Sell"])) if r["Available_Sell"] is not None else 0
+            except (TypeError, ValueError):
+                qty = 0
             buy_date = r.get("Buy_Date")
             buy_date_str = buy_date.isoformat() if hasattr(buy_date, "isoformat") else (str(buy_date) if buy_date else "")
             value_today_inr = float(r["TodaysValue_raw"])
@@ -421,7 +665,10 @@ def _build_sold_response():
     df = db_obj.get_table_data("SellOut")
     rows = []
     for _, r in df.iterrows():
-        qty = int(r.get("Qty_Sold") or 0)
+        try:
+            qty = int(float(r.get("Qty_Sold") or 0))
+        except (TypeError, ValueError):
+            qty = 0
         price_bought = float(r.get("Price_Bought") or 0)
         price_sell = float(r.get("Price_Sell") or 0)
         buy_rate = float(r.get("BuyRupeeRate") or 0)
@@ -688,5 +935,8 @@ PORT = 8080
 if __name__ == "__main__":
     if not os.path.isfile(DB_PATH):
         sys.exit(f"Database not found: {DB_PATH}")
+    rec = threading.Thread(target=_live_price_recorder_loop, daemon=True)
+    rec.start()
     print(f"Backend API at http://127.0.0.1:{PORT} (configs at {REPO_ROOT})")
+    print("Live price recorder: running in background (records every 14s when market open)")
     app.run(host="0.0.0.0", port=PORT, debug=True)

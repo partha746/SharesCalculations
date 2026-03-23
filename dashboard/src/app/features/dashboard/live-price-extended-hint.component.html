@@ -1,0 +1,10 @@
+<div class="live-price-block__premarket-title">{{ liveCardExtendedHoursClosedTitle }}</div>
+@if (liveCardExtendedHoursClosedText === 'Open') {
+  <div class="live-price-block__premarket-value">
+    {{ liveCardExtendedHoursClosedText }} <span class="live-price-block__premarket-hint">(price unavailable)</span>
+  </div>
+} @else if (liveCardExtendedHoursClosedText.startsWith('Opens in')) {
+  <div class="live-price-block__premarket-value">{{ liveCardExtendedHoursClosedText }}</div>
+} @else {
+  <div class="live-price-block__premarket-placeholder">{{ liveCardExtendedHoursClosedText }}</div>
+}

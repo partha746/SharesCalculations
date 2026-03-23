@@ -16,6 +16,10 @@ from django.utils.encoding import smart_str
 from elasticsearch import Elasticsearch, helpers
 from retrying import retry
 
+# Cache for yfinance pre/post-market price to avoid rate limits (key -> (timestamp, price))
+_yf_extended_price_cache = {}
+_YF_CACHE_TTL_SEC = 90  # reuse result for 90s
+
 
 class EksHelper:
     """_summary_
@@ -303,6 +307,121 @@ class RupeeConv:
             print(f"Error retrieving quote for {stock_code}:", e)
             return None
 
+    def _yf_session(self):
+        """Requests session with SSL verify disabled for environments where cert verification fails (e.g. corporate)."""
+        try:
+            import urllib3
+            urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+        except Exception:
+            pass
+        s = requests.Session()
+        s.verify = False
+        return s
+
+    def get_premarket_price(self, symbol="NVDA"):
+        """Get current pre-market price (USD) via yfinance. Returns float or None. Use when in pre-market (4–9:30 AM ET)."""
+        try:
+            import yfinance as yf
+        except ImportError:
+            return None
+        sym = symbol.upper()
+        cache_key = f"pre_{sym}"
+        now_utc = time.time()
+        cached = _yf_extended_price_cache.get(cache_key)
+        if cached is not None:
+            ts, price = cached
+            if (now_utc - ts) < _YF_CACHE_TTL_SEC and price is not None:
+                return price
+        session = self._yf_session()
+        try:
+            # 1) Try ticker.info preMarketPrice first (one request; works in newer yfinance)
+            ticker = yf.Ticker(sym, session=session)
+            info = ticker.info
+            if isinstance(info, dict):
+                pm = info.get("preMarketPrice")
+                if pm is not None and float(pm) > 0:
+                    price = round(float(pm), 2)
+                    _yf_extended_price_cache[cache_key] = (now_utc, price)
+                    return price
+            # 2) Fallback: download with prepost, use last bar if within 24h (relaxed from 12h for delays)
+            df = yf.download(
+                sym, period="5d", interval="1m", prepost=True, progress=False,
+                timeout=15, auto_adjust=True, threads=False, session=session
+            )
+            if df is None or df.empty:
+                _yf_extended_price_cache[cache_key] = (now_utc, None)
+                return None
+            close_col = df["Close"] if "Close" in df.columns else df.iloc[:, 3]
+            last_close = close_col.iloc[-1]
+            if last_close is None or float(last_close) <= 0:
+                _yf_extended_price_cache[cache_key] = (now_utc, None)
+                return None
+            last_ts = df.index[-1]
+            if hasattr(last_ts, "timestamp"):
+                last_sec = last_ts.timestamp()
+            else:
+                try:
+                    last_sec = pd.Timestamp(last_ts).timestamp()
+                except Exception:
+                    last_sec = now_utc - 3600
+            if (now_utc - last_sec) >= 24 * 3600:
+                _yf_extended_price_cache[cache_key] = (now_utc, None)
+                return None
+            price = round(float(last_close), 2)
+            _yf_extended_price_cache[cache_key] = (now_utc, price)
+            return price
+        except Exception as e:
+            print(f"yfinance pre-market for {sym}: {e}")
+            _yf_extended_price_cache[cache_key] = (now_utc, None)
+            return None
+
+    def get_postmarket_price(self, symbol="NVDA"):
+        """Get current post-market price (USD) via yfinance. Returns float or None. Use when in post-market (4–8 PM ET)."""
+        try:
+            import yfinance as yf
+        except ImportError:
+            return None
+        sym = symbol.upper()
+        cache_key = f"post_{sym}"
+        now_utc = time.time()
+        cached = _yf_extended_price_cache.get(cache_key)
+        if cached is not None:
+            ts, price = cached
+            if (now_utc - ts) < _YF_CACHE_TTL_SEC and price is not None:
+                return price
+        session = self._yf_session()
+        try:
+            df = yf.download(
+                sym, period="5d", interval="1m", prepost=True, progress=False,
+                timeout=15, auto_adjust=True, threads=False, session=session
+            )
+            if df is None or df.empty:
+                _yf_extended_price_cache[cache_key] = (now_utc, None)
+                return None
+            close_col = df["Close"] if "Close" in df.columns else df.iloc[:, 3]
+            last_close = close_col.iloc[-1]
+            if last_close is None or float(last_close) <= 0:
+                _yf_extended_price_cache[cache_key] = (now_utc, None)
+                return None
+            last_ts = df.index[-1]
+            if hasattr(last_ts, "timestamp"):
+                last_sec = last_ts.timestamp()
+            else:
+                try:
+                    last_sec = pd.Timestamp(last_ts).timestamp()
+                except Exception:
+                    last_sec = now_utc - 3600
+            if (now_utc - last_sec) >= 12 * 3600:
+                _yf_extended_price_cache[cache_key] = (now_utc, None)
+                return None
+            price = round(float(last_close), 2)
+            _yf_extended_price_cache[cache_key] = (now_utc, price)
+            return price
+        except Exception as e:
+            print(f"yfinance post-market for {sym}: {e}")
+            _yf_extended_price_cache[cache_key] = (now_utc, None)
+            return None
+
     @retry(wait_random_min=10, stop_max_attempt_number=3)
     def get_live_price(self):
         """Returns (live_price_usd, todays_usd_inr_rate, open_price_usd or None)."""
@@ -519,13 +638,14 @@ class OwnStockData:
             
         currentValue = totalSellable * self.livePrice * self.todaysRP
         tds_paid_on = (df['Available_Sell'].mul(df[Price_Bought]) * df['RupeeRate'])
-        df['Available_Sell'] = df['Available_Sell'].astype(int)
+        df['Available_Sell'] = pd.to_numeric(df['Available_Sell'], errors='coerce').fillna(0).astype(int)
         df['PerShare_INR_raw'] = round(df[Price_Bought].mul(self.todaysRP), 0)
         df['InitialValue_raw'] = (df['Available_Sell'].mul(df[Price_Bought])).mul(df['RupeeRate'])
         df['TodaysValue_raw'] = (df['Available_Sell'].mul(self.livePrice) * self.todaysRP)
         df['CapitalGain'] = df['TodaysValue_raw'] - df['InitialValue_raw']
         # Tax per row: >= 2 years since buy -> 12.5%; else 30%
-        buy_dates = pd.to_datetime(df['Buy_Date'], format='%m/%d/%Y', errors='coerce').dt.date
+        buy_dates_parsed = pd.to_datetime(df['Buy_Date'], errors='coerce')
+        buy_dates = buy_dates_parsed.dt.date
         df['TaxSlab'] = buy_dates.map(lambda d: self.tax_obj.get_tax_slab(d) if pd.notna(d) else self.tax_obj.fix_tax_slab)
         df['TaxNeedtoPay_raw'] = df['CapitalGain'] * df['TaxSlab']
 
@@ -541,16 +661,20 @@ class OwnStockData:
         elif type == 'NSU':
             df['ProfitPercent'] = ((df['CapitalGain'] / df['InitialValue_raw']))*100
 
-        df['Buy_Date_formatted'] = pd.to_datetime(df['Buy_Date'], format='%m/%d/%Y', errors='coerce').dt.strftime("%d/%m/%Y")
-        df['Buy_Year'] = pd.to_datetime(df['Buy_Date'], format='%m/%d/%Y', errors='coerce').dt.strftime("%Y")
-        df['Buy_Month'] = pd.to_datetime(df['Buy_Date'], format='%m/%d/%Y', errors='coerce').dt.strftime("%m")
+        df['Buy_Date_formatted'] = buy_dates_parsed.dt.strftime("%d/%m/%Y")
+        df['Buy_Year'] = buy_dates_parsed.dt.strftime("%Y")
+        df['Buy_Month'] = buy_dates_parsed.dt.strftime("%m")
 
         Max_Price = []
         FY_Closing_Price = []
         
         for cnt in range(len(df['Buy_Year'])):
-            year = int(df['Buy_Year'][cnt])
-            month = int(df['Buy_Month'][cnt])
+            try:
+                yv, mv = df['Buy_Year'].iloc[cnt], df['Buy_Month'].iloc[cnt]
+                year = int(float(yv)) if pd.notna(yv) and str(yv).replace('.', '').isdigit() else 2000
+                month = int(float(mv)) if pd.notna(mv) and str(mv).replace('.', '').isdigit() else 1
+            except (ValueError, TypeError):
+                year, month = 2000, 1
 
             if month > 3:
                 start = f"{year}-04-01"
@@ -580,7 +704,7 @@ class OwnStockData:
         df['FY_Closing_Price'] = FY_Closing_Price
         df['Max_Value_FY_raw'] = (df['Available_Sell'].mul(df['RupeeRate'])).mul(df['Max_Price'])
         df['FY_Closing_Value_raw'] = (df['Available_Sell'].mul(df['RupeeRate'])).mul(df['FY_Closing_Price'])
-        df['Buy_Date'] = pd.to_datetime(df['Buy_Date'], format='%m/%d/%Y', errors='coerce').dt.date
+        df['Buy_Date'] = buy_dates_parsed.dt.date
 
         df['PerShare_INR'] = self.rupeeconv_obj.print_rupees(df['PerShare_INR_raw'])
         df['TaxNeedtoPay'] = self.rupeeconv_obj.print_rupees(df['TaxNeedtoPay_raw'])
@@ -601,7 +725,7 @@ class OwnStockData:
         # Restore TaxSlab after round(1): 0.125 was rounded to 0.1; keep 12.5% / 30% correct
         df['TaxSlab'] = df['Buy_Date'].map(lambda d: self.tax_obj.get_tax_slab(d) if pd.notna(d) else self.tax_obj.fix_tax_slab)
 
-        total_qty = int(df['Available_Sell'].sum())
+        total_qty = int(float(df['Available_Sell'].sum()) or 0)
         total_todays_value = float(df['TodaysValue_raw'].sum())
         # Unrealised profit: gain = TodaysValue - InitialValue (in INR); after tax = gain - tax
         total_gain_before_tax = float(df['CapitalGain'].sum())
@@ -622,16 +746,21 @@ class OwnStockData:
     def generate_sellout_display_data(self):
         dfSellOut = self.db_obj.get_table_data('SellOut')
 
-        dfSellOut['Buy_Date_formatted'] = pd.to_datetime(dfSellOut['Buy_Date']).dt.strftime("%d/%m/%Y")
-        dfSellOut['Buy_Year'] = pd.to_datetime(dfSellOut['Buy_Date'], format='%m/%d/%Y', errors='coerce').dt.strftime("%Y")
-        dfSellOut['Buy_Month'] = pd.to_datetime(dfSellOut['Buy_Date'], format='%m/%d/%Y', errors='coerce').dt.strftime("%m")
+        buy_dates_parsed_so = pd.to_datetime(dfSellOut['Buy_Date'], errors='coerce')
+        dfSellOut['Buy_Date_formatted'] = buy_dates_parsed_so.dt.strftime("%d/%m/%Y")
+        dfSellOut['Buy_Year'] = buy_dates_parsed_so.dt.strftime("%Y")
+        dfSellOut['Buy_Month'] = buy_dates_parsed_so.dt.strftime("%m")
 
         Max_Price = []
         FY_Closing_Price = []
 
         for cnt in range(len(dfSellOut['Buy_Year'])):
-            buy_year = int(dfSellOut['Buy_Year'][cnt])
-            buy_month = int(dfSellOut['Buy_Month'][cnt])
+            try:
+                yv, mv = dfSellOut['Buy_Year'].iloc[cnt], dfSellOut['Buy_Month'].iloc[cnt]
+                buy_year = int(float(yv)) if pd.notna(yv) and str(yv).replace('.', '').isdigit() else 2000
+                buy_month = int(float(mv)) if pd.notna(mv) and str(mv).replace('.', '').isdigit() else 1
+            except (ValueError, TypeError):
+                buy_year, buy_month = 2000, 1
             
             if buy_month > 3:
                 fy_start = f"{buy_year}-04-01"
@@ -663,10 +792,11 @@ class OwnStockData:
         dfSellOut['FY_Closing_Value'] = ((dfSellOut['Qty_Sold'].mul(dfSellOut['BuyRupeeRate'])).mul(dfSellOut['FY_Closing_Price']))
         dfSellOut['InitialValue'] = (dfSellOut['Qty_Sold'].mul(dfSellOut['Price_Bought'])).mul(dfSellOut['BuyRupeeRate'])
 
-        dfSellOut['Buy_Date'] = pd.to_datetime(dfSellOut['Buy_Date'], format='%m/%d/%Y', errors='coerce').dt.date
+        dfSellOut['Buy_Date'] = buy_dates_parsed_so.dt.date
 
-        dfSellOut['Sell_Date_formatted'] = pd.to_datetime(dfSellOut['Sell_Date']).dt.strftime("%d/%m/%Y")
-        dfSellOut['Sell_Date'] = pd.to_datetime(dfSellOut['Sell_Date']).dt.date
+        sell_dates_parsed = pd.to_datetime(dfSellOut['Sell_Date'], errors='coerce')
+        dfSellOut['Sell_Date_formatted'] = sell_dates_parsed.dt.strftime("%d/%m/%Y")
+        dfSellOut['Sell_Date'] = sell_dates_parsed.dt.date
 
         dfSellOut = dfSellOut.sort_values(by=['Sell_Date'], ascending=True)
 
@@ -687,7 +817,7 @@ class OwnStockData:
         total_buy_inr = dfSellOut['Buy@R'].sum()
         total_tax = dfSellOut['TaxNeedToBePaid'].sum()
         sell_profit = (total_sell_inr - total_buy_inr) - total_tax
-        total_qty_sold = int(dfSellOut['Qty_Sold'].sum())
+        total_qty_sold = int(float(dfSellOut['Qty_Sold'].sum()) or 0)
         # Normalize Type (strip, upper) so "NSU", "RSU", "nsu" all count as RSU
         type_norm = dfSellOut['Type'].astype(str).str.strip().str.upper()
         total_sell_rsu_inr = dfSellOut.loc[type_norm.isin(['NSU', 'RSU']), 'Sold@R'].sum()

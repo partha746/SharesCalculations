@@ -32,6 +32,11 @@ export class DashboardService {
     return this.http.post(`${this.apiUrl}/live-price-history`, point);
   }
 
+  /** Clear all stored live price history (graph data). */
+  clearLivePriceHistory(): Observable<{ ok: boolean; deleted: number }> {
+    return this.http.delete<{ ok: boolean; deleted: number }>(`${this.apiUrl}/live-price-history`);
+  }
+
   getHoldings(): Observable<HoldingRow[]> {
     return this.http.get<HoldingRow[]>(`${this.apiUrl}/holdings`);
   }

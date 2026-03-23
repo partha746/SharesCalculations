@@ -8,3 +8,4 @@ retrying
 tabulate
 yahoo_fin
 yahoofinancials
+yfinance

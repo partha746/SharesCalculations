@@ -24,11 +24,23 @@
           <span class="live-price-block__label">NVDA</span>
           <span class="live-price-block__value">$ {{ formatUsd(data.livePriceUsd) }}</span>
           @if (livePriceMovement) {
-            <span class="live-price-block__diff" [class.live-price-block__diff--up]="livePriceMovement.diffUsd > 0" [class.live-price-block__diff--down]="livePriceMovement.diffUsd < 0">
+            <span
+              class="live-price-block__diff"
+              [class.live-price-block__diff--up]="livePriceMovement.diffUsd > 0"
+              [class.live-price-block__diff--down]="livePriceMovement.diffUsd < 0"
+              [attr.title]="livePriceMovementTooltip">
+              <span class="live-price-block__diff-prefix">{{ livePriceMovementDiffPrefix }}</span>
+              <span class="live-price-block__diff-sep">·</span>
               ({{ livePriceMovement.diffUsd > 0 ? '↑' : (livePriceMovement.diffUsd < 0 ? '↓' : '—') }} $ {{ formatUsd(Math.abs(livePriceMovement.diffUsd)) }} ({{ livePriceMovement.diffPct >= 0 ? '+' : '' }}{{ livePriceMovement.diffPct | number:'1.2-2' }}%))
             </span>
           }
         </div>
+        @if (data.openPriceUsd != null && data.openPriceUsd > 0) {
+          <div class="live-price-block__row live-price-block__row--open">
+            <span class="live-price-block__label">Open today</span>
+            <span class="live-price-block__value live-price-block__value--muted">$ {{ formatUsd(data.openPriceUsd) }}</span>
+          </div>
+        }
         <div class="live-price-block__row">
           <span class="live-price-block__label">INR value</span>
           <span class="live-price-block__value">₹ {{ formatInr(liveInrPerShare())}}</span>
@@ -38,15 +50,20 @@
           <span class="live-price-block__label">USD → INR</span>
           <span class="live-price-block__value">{{ formatUsd(data.usdToInrRate) }}</span>
         </div>
-        @if (lastRefreshedAt) {
-          <div class="live-price-block__row live-price-block__row--muted">
-            <span class="live-price-block__label">Last refreshed</span>
-            <span class="live-price-block__value live-price-block__value--muted">{{ formatLastRefreshed(lastRefreshedAt) }}</span>
-          </div>
-        }
-        <div class="live-price-block__row live-price-block__row--muted">
-          <span class="live-price-block__label">Market</span>
-          <span class="live-price-block__value live-price-block__value--muted">{{ marketOpen ? 'Open' : 'Closed' }}</span>
+        <div class="live-price-block__premarket">
+          @if (data.preMarketPriceUsd != null) {
+            <div class="live-price-block__premarket-title">Pre-market</div>
+            <div class="live-price-block__premarket-value">$ {{ formatUsd(data.preMarketPriceUsd) }}</div>
+          } @else if (data.postMarketPriceUsd != null) {
+            <div class="live-price-block__premarket-title">Post-market</div>
+            <div class="live-price-block__premarket-value">$ {{ formatUsd(data.postMarketPriceUsd) }}</div>
+          } @else {
+            <app-live-price-extended-hint
+              [marketOpen]="marketOpen"
+              [isPreMarketSession]="isPreMarketSession"
+              [isPostMarketSession]="isPostMarketSession"
+              [marketNextPreMarketStartMs]="marketNextPreMarketStartMs" />
+          }
         </div>
       </div>
       <div class="total-holdings-block">
@@ -79,19 +96,52 @@
           }
         </div>
       </div>
-      <div class="overview-clock-block">
-        <div class="overview-clock-block__title">Time</div>
-        <div class="overview-clock-block__time">{{ formatClock(currentTime) }}</div>
-        <div class="overview-clock-block__date">{{ currentTime.toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short' }) }}</div>
-      </div>
+      <app-overview-time-card
+        [marketOpen]="marketOpen"
+        [isPreMarketSession]="isPreMarketSession"
+        [isPostMarketSession]="isPostMarketSession"
+        [marketNextOpenMs]="marketNextOpenMs"
+        [marketNextCloseMs]="marketNextCloseMs"
+        [marketNextPreMarketStartMs]="marketNextPreMarketStartMs"
+        [lastRefreshedAt]="lastRefreshedAt" />
     </div>
     <h3 class="section-subtitle">Live price movement</h3>
     <div class="live-price-label-threshold">
       <label for="livePriceLabelThreshold">Show data label when |diff from open| ≥</label>
       <input id="livePriceLabelThreshold" type="number" min="0" step="0.1" class="live-price-threshold-input" [(ngModel)]="livePriceLabelThresholdPct" (ngModelChange)="onLivePriceLabelThresholdChange()" />
       <span>%</span>
+      <button type="button" class="live-price-clear-graph-btn" [disabled]="clearGraphInProgress" (click)="clearGraph()" title="Clear stored graph data (starts fresh)">
+        {{ clearGraphInProgress ? 'Clearing…' : 'Clear graph' }}
+      </button>
     </div>
     <div class="live-price-chart-wrap">
+      @if (livePriceDayTickerItems.length > 0) {
+        <div class="live-price-day-ticker-head">NVDA by session day (ET)</div>
+        <div class="live-price-day-ticker" role="list" aria-label="NVDA last price and change from open by trading day">
+          @for (d of livePriceDayTickerItems; track d.dateKey) {
+            <div
+              class="live-price-day-ticker__item"
+              role="listitem"
+              [class.live-price-day-ticker__item--up]="d.diffUsd > 0"
+              [class.live-price-day-ticker__item--down]="d.diffUsd < 0"
+              [class.live-price-day-ticker__item--flat]="d.diffUsd === 0"
+              [attr.title]="livePriceDayTickerTooltip(d)">
+              <div class="live-price-day-ticker__date">{{ d.label }}</div>
+              <div class="live-price-day-ticker__last">$ {{ formatUsd(d.close) }}</div>
+              <div class="live-price-day-ticker__chg">
+                @if (d.diffUsd > 0) {
+                  <span>↑ $ {{ formatUsd(d.diffUsd) }}</span>
+                } @else if (d.diffUsd < 0) {
+                  <span>↓ $ {{ formatUsd(Math.abs(d.diffUsd)) }}</span>
+                } @else {
+                  <span>—</span>
+                }
+                <span class="live-price-day-ticker__pct"> ({{ d.diffPct >= 0 ? '+' : '' }}{{ d.diffPct | number:'1.2-2' }}%)</span>
+              </div>
+            </div>
+          }
+        </div>
+      }
       @if (livePriceHistory.length >= 2) {
         <canvas #livePriceChartCanvas class="holdings-chart"></canvas>
       } @else {
@@ -177,8 +227,14 @@
       <button type="button" class="tab-btn" [class.tab-btn--active]="activeTab === 'holdings'" (click)="setActiveTab('holdings')">Holdings</button>
       <button type="button" class="tab-btn" [class.tab-btn--active]="activeTab === 'sold'" (click)="setActiveTab('sold')">Sold Shares</button>
       <button type="button" class="tab-btn" [class.tab-btn--active]="activeTab === 'playground'" (click)="setActiveTab('playground')">Playground</button>
+      <button type="button" class="tab-btn tab-btn--data" [class.tab-btn--active]="activeTab === 'data'" (click)="setActiveTab('data')">Data</button>
     </div>
 
+    @if (activeTab === 'data') {
+      <div class="data-tab-wrap">
+        <iframe [src]="webAppIframeSrc" class="data-tab-iframe" title="nvShares.db Data Manager"></iframe>
+      </div>
+    }
     @if (activeTab === 'playground') {
   <div class="playground-section">
     <p class="holdings-table__hint">Use live price and USD→INR rate from the dashboard. Adjust inputs to see how many shares to sell or compare values.</p>
@@ -289,7 +345,7 @@
         @if (playTaxRecommendationShortfall != null && playTaxRecommendationShortfall > 0) {
           <p class="playground-desc playground-desc--warning">Recommended total: {{ playTaxRecommendationTotalShares }} shares. <strong>Short by {{ playTaxRecommendationShortfall }} shares</strong> (try Mixed or include Long-term lots to cover the target).</p>
         }
-        <div class="playground-table-wrap">
+        <div class="playground-table-wrap playground-table-scroll playground-table-scroll--tax" title="Scroll to see more rows">
           <table class="holdings-table playground-table">
             <thead>
               <tr class="holdings-table__header">
@@ -319,6 +375,200 @@
         </div>
         @if (playTaxRecommendationTotalTaxInr != null) {
           <p class="playground-desc"><strong>Total tax at target price (for recommended lots): ₹ {{ formatInr(playTaxRecommendationTotalTaxInr) }}</strong></p>
+        }
+      }
+    </section>
+
+    <section class="dashboard-section playground-card">
+      <h2 class="section-title">Multi-price comparison (selected lots)</h2>
+      <p class="playground-desc">
+        Choose lots and up to five extra USD prices. Each column uses the same <strong>tax slab</strong> as the dashboard (from current gain vs purchase). See totals, tax, and differences vs <strong>live</strong> and between scenarios.
+        Row list uses the same <strong>filters and sort</strong> as the Holdings tab.
+      </p>
+      <div class="playground-form playground-form--multi">
+        @for (i of playMultiPriceSlotIndices; track i) {
+          <label class="playground-label">
+            Scenario {{ i + 1 }} (USD)
+            <input
+              type="number"
+              min="0"
+              step="0.01"
+              class="playground-input playground-input--short"
+              [ngModel]="playMultiScenarioPrices[i]"
+              (ngModelChange)="setPlayMultiScenarioPrice(i, $event)"
+              [placeholder]="'e.g. ' + (i === 0 ? '200' : '190')" />
+          </label>
+        }
+      </div>
+      @if (holdings.length === 0) {
+        <p class="holdings-table__hint">Load holdings from the Holdings tab first.</p>
+      } @else if (playMultiScenarioList.length === 0) {
+        <p class="holdings-table__hint">No scenarios to show. Load dashboard live price and/or enter at least one scenario USD price above.</p>
+      } @else {
+        <div class="playground-multi-actions">
+          <button type="button" class="export-btn" (click)="playMultiSelectAllVisible()">Select all visible lots</button>
+          <button type="button" class="export-btn" (click)="playMultiClearSelection()">Clear selection</button>
+          <span class="playground-multi-meta">USD→INR: ₹ {{ formatPlayNum(playUsdToInr, 2) }}</span>
+        </div>
+        <p class="holdings-table__hint playground-multi-tax-hint">
+          Tax = max(0, value − INR cost basis) × slab. If a scenario USD is at or below break-even at <em>today’s</em> USD→INR, tax shows ₹0 even when live has tax. <strong>ESPP:</strong> cost basis is TDS/FMV × ₹ on the buy date (see Buy $ column: TDS vs paid); live USD can sit between “paid” and TDS—or below TDS—and you can still have INR gain after FX. Hover Tax for details.
+        </p>
+        @if (playMultiSelectedRows.length === 0) {
+          <p class="holdings-table__hint">Select one or more lots in the table below.</p>
+        }
+        <div class="playground-table-scroll playground-table-scroll--multi" title="Scroll to see more rows">
+          <table class="holdings-table playground-table playground-multi-table">
+            <thead>
+              <tr class="holdings-table__header">
+                <th></th>
+                <th>Type</th>
+                <th>Buy date</th>
+                <th [attr.title]="playMultiBuyColumnTitle">Buy $</th>
+                <th>Max</th>
+                <th>Qty sim</th>
+                @for (sc of playMultiScenarioList; track sc.key; let si = $index) {
+                  <th [attr.colspan]="3" class="playground-multi-table__scenario-head">
+                    <div class="playground-multi-table__scenario-head-inner">
+                      <div class="playground-multi-table__scenario-label">{{ sc.label }}</div>
+                      @if (playMultiTotalsByScenario.length > si) {
+                        @let ht = playMultiTotalsByScenario[si];
+                        <div class="playground-multi-table__scenario-totals" title="Totals for selected qty">
+                          <div class="playground-multi-table__scenario-totals-row">
+                            <span><abbr title="Value">V</abbr> ₹ {{ formatInr(ht.totalValueInr) }}</span>
+                            <span><abbr title="Tax">T</abbr> ₹ {{ formatInr(ht.totalTaxInr) }}</span>
+                          </div>
+                          <div class="playground-multi-table__scenario-totals-row">
+                            <span><abbr title="Net">N</abbr> ₹ {{ formatInr(ht.totalNetInr) }}</span>
+                          </div>
+                        </div>
+                      } @else {
+                        <div class="playground-multi-table__scenario-totals playground-multi-table__scenario-totals--empty">Select lots</div>
+                      }
+                    </div>
+                  </th>
+                }
+              </tr>
+              <tr class="holdings-table__header playground-multi-table__subhead">
+                <th colspan="6"></th>
+                @for (sc of playMultiScenarioList; track sc.key) {
+                  <th>Value ₹</th>
+                  <th>Tax ₹</th>
+                  <th>Net ₹</th>
+                }
+              </tr>
+            </thead>
+            <tbody>
+              @for (row of holdingsFilteredSorted; track getRowKey(row)) {
+                <tr [class.playground-multi-table__row--selected]="isPlayMultiSelected(row)">
+                  <td>
+                    <input type="checkbox" [checked]="isPlayMultiSelected(row)" (change)="togglePlayMultiRow(row)" [attr.aria-label]="'Select lot ' + getRowKey(row)" />
+                  </td>
+                  <td>{{ typeLabel(row.type) }}</td>
+                  <td>{{ formatDate(row.buyDate) }}</td>
+                  <td class="playground-multi-table__buy" [attr.title]="playMultiBuyCellTitle(row) ?? null">
+                    @if (row.type === 'ESPP') {
+                      <div class="playground-multi-table__buy-espp">
+                        <div>{{ formatUsd(row.buyPriceUsd) }} <span class="playground-multi-table__buy-tag">TDS</span></div>
+                        @if (row.priceBoughtUsd != null) {
+                          <div>{{ formatUsd(row.priceBoughtUsd) }} <span class="playground-multi-table__buy-tag">paid</span></div>
+                        }
+                        <div class="playground-multi-table__buy-cost">
+                          ₹ {{ formatInr(row.totalPurchaseInr) }} <span class="playground-multi-table__buy-tag">cost</span>
+                        </div>
+                      </div>
+                    } @else {
+                      {{ formatUsd(row.buyPriceUsd) }}
+                    }
+                  </td>
+                  <td>{{ row.qty }}</td>
+                  <td class="holdings-table__cell--sellqty">
+                    <input
+                      type="text"
+                      inputmode="numeric"
+                      class="holdings-table__sellqty-input"
+                      [value]="getPlayMultiQty(row)"
+                      [disabled]="!isPlayMultiSelected(row)"
+                      (focus)="onSellQtyFocus($event)"
+                      (input)="onPlayMultiQtyInput(row, $event)"
+                      [attr.aria-label]="'Playground multi-price qty for lot'"
+                      placeholder="0" />
+                    <span class="holdings-table__sellqty-max">/ {{ row.qty }}</span>
+                  </td>
+                  @for (sc of playMultiScenarioList; track sc.key) {
+                    @let m = playMultiLotMetrics(row, sc.priceUsd);
+                    @let taxHint = playMultiTaxCellHint(row, sc.priceUsd, m.taxInr);
+                    <td>₹ {{ formatInr(m.valueInr) }}</td>
+                    <td [attr.title]="taxHint ?? null">₹ {{ formatInr(m.taxInr) }}</td>
+                    <td>₹ {{ formatInr(m.netInr) }}</td>
+                  }
+                </tr>
+              }
+            </tbody>
+            @if (playMultiSelectedRows.length > 0) {
+              <tfoot>
+                <tr class="playground-multi-table__totals">
+                  <td colspan="6"><strong>Totals (selected qty)</strong></td>
+                  @for (t of playMultiTotalsByScenario; track t.key) {
+                    <td><strong>₹ {{ formatInr(t.totalValueInr) }}</strong></td>
+                    <td><strong>₹ {{ formatInr(t.totalTaxInr) }}</strong></td>
+                    <td><strong>₹ {{ formatInr(t.totalNetInr) }}</strong></td>
+                  }
+                </tr>
+              </tfoot>
+            }
+          </table>
+        </div>
+        @if (playMultiSelectedRows.length > 0 && playMultiDiffFromLive.length > 0) {
+          <h3 class="playground-multi-subtitle">Difference vs live (totals)</h3>
+          <div class="playground-table-wrap">
+            <table class="playground-table">
+              <thead>
+                <tr>
+                  <th>Scenario</th>
+                  <th>Δ Value ₹</th>
+                  <th>Δ Tax ₹</th>
+                  <th>Δ Net ₹</th>
+                </tr>
+              </thead>
+              <tbody>
+                @for (d of playMultiDiffFromLive; track d.label) {
+                  <tr>
+                    <td>{{ d.label }}</td>
+                    <td [class.playground-multi-diff--up]="d.dValueInr > 0" [class.playground-multi-diff--down]="d.dValueInr < 0">{{ d.dValueInr >= 0 ? '+' : '' }}{{ formatInr(d.dValueInr) }}</td>
+                    <td [class.playground-multi-diff--up]="d.dTaxInr < 0" [class.playground-multi-diff--down]="d.dTaxInr > 0">{{ d.dTaxInr >= 0 ? '+' : '' }}{{ formatInr(d.dTaxInr) }}</td>
+                    <td [class.playground-multi-diff--up]="d.dNetInr > 0" [class.playground-multi-diff--down]="d.dNetInr < 0">{{ d.dNetInr >= 0 ? '+' : '' }}{{ formatInr(d.dNetInr) }}</td>
+                  </tr>
+                }
+              </tbody>
+            </table>
+          </div>
+        }
+        @if (playMultiSelectedRows.length > 0 && playMultiPairwiseDiffs.length > 0) {
+          <h3 class="playground-multi-subtitle">Differences between scenarios (totals, second − first)</h3>
+          <div class="playground-table-wrap">
+            <table class="playground-table">
+              <thead>
+                <tr>
+                  <th>From</th>
+                  <th>To</th>
+                  <th>Δ Value ₹</th>
+                  <th>Δ Tax ₹</th>
+                  <th>Δ Net ₹</th>
+                </tr>
+              </thead>
+              <tbody>
+                @for (p of playMultiPairwiseDiffs; track p.fromLabel + '|' + p.toLabel) {
+                  <tr>
+                    <td>{{ p.fromLabel }}</td>
+                    <td>{{ p.toLabel }}</td>
+                    <td [class.playground-multi-diff--up]="p.dValueInr > 0" [class.playground-multi-diff--down]="p.dValueInr < 0">{{ p.dValueInr >= 0 ? '+' : '' }}{{ formatInr(p.dValueInr) }}</td>
+                    <td [class.playground-multi-diff--up]="p.dTaxInr < 0" [class.playground-multi-diff--down]="p.dTaxInr > 0">{{ p.dTaxInr >= 0 ? '+' : '' }}{{ formatInr(p.dTaxInr) }}</td>
+                    <td [class.playground-multi-diff--up]="p.dNetInr > 0" [class.playground-multi-diff--down]="p.dNetInr < 0">{{ p.dNetInr >= 0 ? '+' : '' }}{{ formatInr(p.dNetInr) }}</td>
+                  </tr>
+                }
+              </tbody>
+            </table>
+          </div>
         }
       }
     </section>
@@ -388,16 +638,23 @@
     <div class="holdings-simulate-price">
       <label for="holdingsSimulatePrice">Simulate price (USD):</label>
       <input id="holdingsSimulatePrice" type="number" min="0" step="0.01" class="holdings-simulate-price__input" [ngModel]="holdingsSimulatePriceUsd" (ngModelChange)="onHoldingsSimulatePriceChange($event)" placeholder="Live: {{ data ? formatUsd(data.livePriceUsd) : '–' }}" title="Leave empty to use live price" />
-      <span class="holdings-simulate-price__hint">Leave empty for live price. Table and totals use this price when set.</span>
+      <label for="holdingsSimulateUsdToInr">Simulate USD→INR:</label>
+      <input id="holdingsSimulateUsdToInr" type="number" min="0" step="0.01" class="holdings-simulate-price__input holdings-simulate-price__input--fx" [ngModel]="holdingsSimulateUsdToInr" (ngModelChange)="onHoldingsSimulateUsdToInrChange($event)" placeholder="Live: {{ data ? formatUsd(data.usdToInrRate) : '–' }}" title="Leave empty for dashboard USD→INR. INR columns and totals use this rate when set." />
+      <span class="holdings-simulate-price__hint">Leave empty for live values. Table and totals use simulated price and/or USD→INR when set.</span>
       @if (holdingsSimulatePriceDiffFromLive) {
         <span class="holdings-simulate-price__diff" [class.holdings-simulate-price__diff--up]="holdingsSimulatePriceDiffFromLive.diffUsd > 0" [class.holdings-simulate-price__diff--down]="holdingsSimulatePriceDiffFromLive.diffUsd < 0">
-          vs live: {{ holdingsSimulatePriceDiffFromLive.diffUsd > 0 ? '↑' : (holdingsSimulatePriceDiffFromLive.diffUsd < 0 ? '↓' : '') }} $ {{ formatUsd(Math.abs(holdingsSimulatePriceDiffFromLive.diffUsd)) }} ({{ holdingsSimulatePriceDiffFromLive.diffPct >= 0 ? '+' : '' }}{{ holdingsSimulatePriceDiffFromLive.diffPct | number:'1.2-2' }}%)
+          Price vs live: {{ holdingsSimulatePriceDiffFromLive.diffUsd > 0 ? '↑' : (holdingsSimulatePriceDiffFromLive.diffUsd < 0 ? '↓' : '') }} $ {{ formatUsd(Math.abs(holdingsSimulatePriceDiffFromLive.diffUsd)) }} ({{ holdingsSimulatePriceDiffFromLive.diffPct >= 0 ? '+' : '' }}{{ holdingsSimulatePriceDiffFromLive.diffPct | number:'1.2-2' }}%)
+        </span>
+      }
+      @if (holdingsSimulateUsdToInrDiffFromLive) {
+        <span class="holdings-simulate-price__diff" [class.holdings-simulate-price__diff--up]="holdingsSimulateUsdToInrDiffFromLive.diff > 0" [class.holdings-simulate-price__diff--down]="holdingsSimulateUsdToInrDiffFromLive.diff < 0">
+          FX vs live: {{ holdingsSimulateUsdToInrDiffFromLive.diff > 0 ? '↑' : (holdingsSimulateUsdToInrDiffFromLive.diff < 0 ? '↓' : '') }} {{ formatUsd(Math.abs(holdingsSimulateUsdToInrDiffFromLive.diff)) }} ({{ holdingsSimulateUsdToInrDiffFromLive.diffPct >= 0 ? '+' : '' }}{{ holdingsSimulateUsdToInrDiffFromLive.diffPct | number:'1.2-2' }}%)
         </span>
       }
     </div>
     <p class="holdings-table__hint">Drag column headers to reorder; order is saved. Select rows and set sell qty to see totals above.</p>
     <div class="holdings-table-wrap">
-      <table class="holdings-table">
+      <table class="holdings-table holdings-table--sticky-sell-cols">
         <thead>
           <tr class="holdings-table__header">
             <th class="holdings-table__th--fixed">Select</th>

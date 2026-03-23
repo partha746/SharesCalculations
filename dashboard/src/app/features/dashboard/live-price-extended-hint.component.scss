@@ -1,0 +1,25 @@
+:host {
+  display: block;
+}
+.live-price-block__premarket-title {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #8b949e;
+  margin-bottom: 0.25rem;
+}
+.live-price-block__premarket-value {
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: #e6edf3;
+}
+.live-price-block__premarket-placeholder {
+  font-size: 0.95rem;
+  color: #6e7681;
+  font-style: italic;
+}
+.live-price-block__premarket-hint {
+  font-size: 0.8em;
+  font-weight: normal;
+  color: #6e7681;
+}

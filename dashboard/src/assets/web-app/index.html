@@ -1,0 +1,604 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>nvShares.db – Data Manager</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --bg: #0f1116;
+      --surface: #161b22;
+      --border: #30363d;
+      --text: #e6edf3;
+      --muted: #8b949e;
+      --accent: #58a6ff;
+      --accent-hover: #79b8ff;
+      --danger: #f85149;
+      --danger-hover: #ff7b72;
+      --success: #3fb950;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: 'DM Sans', system-ui, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      line-height: 1.5;
+    }
+    .layout {
+      max-width: 1400px;
+      margin: 0 auto;
+      padding: 1.5rem;
+    }
+    h1 {
+      font-size: 1.5rem;
+      font-weight: 600;
+      margin: 0 0 1rem;
+      color: var(--text);
+    }
+    .tabs {
+      display: flex;
+      gap: 0.25rem;
+      margin-bottom: 1rem;
+      border-bottom: 1px solid var(--border);
+    }
+    .tabs button {
+      font: inherit;
+      padding: 0.6rem 1rem;
+      background: transparent;
+      border: none;
+      border-bottom: 2px solid transparent;
+      color: var(--muted);
+      cursor: pointer;
+      font-weight: 500;
+    }
+    .tabs button:hover { color: var(--text); }
+    .tabs button.active {
+      color: var(--accent);
+      border-bottom-color: var(--accent);
+    }
+    .toolbar {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      margin-bottom: 1rem;
+    }
+    .btn {
+      font: inherit;
+      padding: 0.5rem 1rem;
+      border-radius: 6px;
+      border: 1px solid var(--border);
+      background: var(--surface);
+      color: var(--text);
+      cursor: pointer;
+      font-weight: 500;
+    }
+    .btn:hover { background: #21262d; }
+    .btn.primary {
+      background: var(--accent);
+      border-color: var(--accent);
+      color: #fff;
+    }
+    .btn.primary:hover { background: var(--accent-hover); }
+    .btn.danger {
+      background: transparent;
+      color: var(--danger);
+      border-color: var(--danger);
+    }
+    .btn.danger:hover { background: rgba(248,81,73,0.15); }
+    .table-wrap {
+      overflow-x: auto;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--surface);
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.9rem;
+    }
+    th, td {
+      padding: 0.6rem 0.75rem;
+      text-align: left;
+      border-bottom: 1px solid var(--border);
+    }
+    th {
+      font-weight: 600;
+      color: var(--muted);
+      font-size: 0.75rem;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+    th.sortable {
+      cursor: pointer;
+      user-select: none;
+      white-space: nowrap;
+    }
+    th.sortable:hover { color: var(--accent); }
+    th.sortable .sort-icon {
+      margin-left: 0.25rem;
+      opacity: 0.6;
+    }
+    th.sortable.sorted-asc .sort-icon::after { content: ' ▲'; }
+    th.sortable.sorted-desc .sort-icon::after { content: ' ▼'; }
+    .filter-row th {
+      padding: 0.25rem 0.35rem;
+      vertical-align: middle;
+    }
+    .filter-row input {
+      width: 100%;
+      min-width: 4rem;
+      padding: 0.3rem 0.4rem;
+      font-size: 0.8rem;
+      font: inherit;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      color: var(--text);
+    }
+    .filter-row input::placeholder { color: var(--muted); opacity: 0.8; }
+    tr:last-child td { border-bottom: none; }
+    tr:hover td { background: rgba(255,255,255,0.02); }
+    .cell-actions { white-space: nowrap; }
+    .cell-actions button {
+      font: inherit;
+      padding: 0.25rem 0.5rem;
+      margin-right: 0.25rem;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 0.8rem;
+      background: transparent;
+      color: var(--accent);
+    }
+    .cell-actions button:hover { text-decoration: underline; }
+    .cell-actions .del { color: var(--danger); }
+    .modal-backdrop {
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.6);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 100;
+      padding: 1rem;
+    }
+    .modal-backdrop.hidden { display: none; }
+    .modal {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 1.5rem;
+      min-width: 320px;
+      max-width: 480px;
+      width: 100%;
+    }
+    .modal h2 { margin: 0 0 1rem; font-size: 1.1rem; }
+    .form-row {
+      margin-bottom: 0.75rem;
+    }
+    .form-row label {
+      display: block;
+      font-size: 0.8rem;
+      color: var(--muted);
+      margin-bottom: 0.25rem;
+    }
+    .form-row input, .form-row select {
+      width: 100%;
+      padding: 0.5rem 0.6rem;
+      font: inherit;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      color: var(--text);
+    }
+    .form-row input[type="date"] {
+      color-scheme: light;
+      min-height: 2.25rem;
+      background: #1c2128;
+      color: #e6edf3;
+    }
+    .form-row input[type="date"]::-webkit-calendar-picker-indicator {
+      filter: invert(1);
+      opacity: 0.85;
+      cursor: pointer;
+    }
+    .form-actions {
+      margin-top: 1.25rem;
+      display: flex;
+      gap: 0.5rem;
+      justify-content: flex-end;
+    }
+    .msg {
+      padding: 0.5rem 0.75rem;
+      border-radius: 6px;
+      margin-bottom: 1rem;
+      font-size: 0.9rem;
+    }
+    .msg.error { background: rgba(248,81,73,0.2); color: #ff7b72; }
+    .msg.success { background: rgba(63,185,80,0.2); color: #3fb950; }
+    .loading { color: var(--muted); }
+  </style>
+</head>
+<body>
+  <div class="layout">
+    <h1>nvShares.db – Data Manager</h1>
+    <div id="msg" class="msg hidden"></div>
+    <div class="tabs" id="tabs"></div>
+    <div class="toolbar">
+      <button type="button" class="btn primary" id="btnAdd">Add row</button>
+      <button type="button" class="btn" id="btnRefresh">Refresh</button>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead id="thead"></thead>
+        <tbody id="tbody"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div id="modalBackdrop" class="modal-backdrop hidden">
+    <div class="modal">
+      <h2 id="modalTitle">Add row</h2>
+      <form id="modalForm"></form>
+      <div class="form-actions">
+        <button type="button" class="btn" id="modalCancel">Cancel</button>
+        <button type="submit" form="modalForm" class="btn primary" id="modalSubmit">Save</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const API = '/api';
+    let tables = [];
+    let currentTable = '';
+    let currentRows = [];
+    let currentCols = [];
+    let sortState = { col: null, dir: 1 };
+    let filterState = {};
+    const tableColumns = {
+      NSU: ['Buy_Date', 'Available_Sell', 'Price_Bought', 'RupeeRate'],
+      ESPP: ['Buy_Date', 'Available_Sell', 'Price_Bought', 'RupeeRate', 'TDS_Price'],
+      SellOut: ['Sell_Date', 'Buy_Date', 'Qty_Sold', 'Price_Bought', 'Price_Sell', 'BuyRupeeRate', 'SellRupeeRate', 'Type'],
+      Split: ['date', 'split_ratio']
+    };
+
+    function showMsg(text, type = 'success') {
+      const el = document.getElementById('msg');
+      el.textContent = text;
+      el.className = 'msg ' + type;
+      el.classList.remove('hidden');
+      setTimeout(() => el.classList.add('hidden'), 4000);
+    }
+
+    function showErr(err) {
+      showMsg(err || 'Request failed', 'error');
+    }
+
+    async function api(path, options = {}) {
+      const res = await fetch(API + path, {
+        headers: options.body && !(options.body instanceof FormData) ? { 'Content-Type': 'application/json' } : {},
+        ...options
+      });
+      const data = res.ok ? (await res.json().catch(() => ({}))) : null;
+      if (!res.ok) throw new Error(data?.error || res.statusText);
+      return data;
+    }
+
+    async function loadTables() {
+      tables = await api('/tables');
+      const container = document.getElementById('tabs');
+      container.innerHTML = tables.map(t => 
+        `<button type="button" data-table="${t}">${t}</button>`
+      ).join('');
+      container.querySelectorAll('button').forEach(btn => {
+        btn.addEventListener('click', () => setTable(btn.dataset.table));
+      });
+      if (tables.length && !currentTable) setTable(tables[0]);
+    }
+
+    function setTable(name) {
+      currentTable = name;
+      document.querySelectorAll('#tabs button').forEach(b => {
+        b.classList.toggle('active', b.dataset.table === name);
+      });
+      loadData();
+    }
+
+    const DATE_COLUMNS = ['Buy_Date', 'Sell_Date', 'date'];
+    function isDateCol(col) { return DATE_COLUMNS.indexOf(col) !== -1; }
+    function formatDateForInput(val) {
+      if (val === null || val === undefined || val === '') return '';
+      const s = String(val).trim();
+      if (/^\d{4}-\d{1,2}-\d{1,2}$/.test(s)) return s;
+      const t = parseDate(val);
+      if (isNaN(t)) return s;
+      const d = new Date(t);
+      const y = d.getFullYear(), m = String(d.getMonth() + 1).padStart(2, '0'), day = String(d.getDate()).padStart(2, '0');
+      return y + '-' + m + '-' + day;
+    }
+    /** Convert date from date input (YYYY-MM-DD) to DB format MM/DD/YYYY */
+    function formatDateForDb(val) {
+      if (val === null || val === undefined || val === '') return '';
+      const s = String(val).trim();
+      if (/^\d{4}-\d{1,2}-\d{1,2}$/.test(s)) {
+        const parts = s.split('-');
+        return parts[1] + '/' + parts[2] + '/' + parts[0];
+      }
+      return s;
+    }
+
+    function isNumericVal(x) {
+      if (x === null || x === undefined || x === '') return false;
+      const s = String(x).trim();
+      return /^-?\d+(\.\d+)?$/.test(s);
+    }
+
+    function parseDate(val) {
+      if (val === null || val === undefined || val === '') return NaN;
+      const s = String(val).trim();
+      let m, d, y;
+      if (/^\d{1,2}\/\d{1,2}\/\d{2,4}$/.test(s)) {
+        const parts = s.split('/');
+        m = parseInt(parts[0], 10) - 1;
+        d = parseInt(parts[1], 10);
+        y = parseInt(parts[2], 10);
+        if (y < 100) y += y < 50 ? 2000 : 1900;
+      } else if (/^\d{4}-\d{1,2}-\d{1,2}$/.test(s)) {
+        const parts = s.split('-');
+        y = parseInt(parts[0], 10);
+        m = parseInt(parts[1], 10) - 1;
+        d = parseInt(parts[2], 10);
+      } else {
+        return NaN;
+      }
+      const t = new Date(y, m, d).getTime();
+      return isNaN(t) ? NaN : t;
+    }
+
+
+    function compareVal(a, b, col) {
+      const va = a[col];
+      const vb = b[col];
+      if (isDateCol(col)) {
+        const ta = parseDate(va);
+        const tb = parseDate(vb);
+        if (!isNaN(ta) && !isNaN(tb)) return ta - tb;
+        if (isNaN(ta) && isNaN(tb)) return 0;
+        if (isNaN(ta)) return 1;
+        return -1;
+      }
+      const num = isNumericVal(va) && isNumericVal(vb);
+      if (num) {
+        const na = parseFloat(String(va).trim());
+        const nb = parseFloat(String(vb).trim());
+        return na - nb;
+      }
+      const sa = String(va ?? '').toLowerCase();
+      const sb = String(vb ?? '').toLowerCase();
+      return sa.localeCompare(sb);
+    }
+
+    function applyFilterAndSort() {
+      let rows = currentRows.slice();
+      const cols = currentCols;
+      rows = rows.filter(row => {
+        const fRowid = (filterState['rowid'] || '').trim().toLowerCase();
+        if (fRowid && !String(row.rowid).toLowerCase().includes(fRowid)) return false;
+        for (const c of cols) {
+          const f = (filterState[c] || '').trim().toLowerCase();
+          if (!f) continue;
+          const cell = String(row[c] ?? '').toLowerCase();
+          if (!cell.includes(f)) return false;
+        }
+        return true;
+      });
+      if (sortState.col !== null) {
+        const key = sortState.col;
+        const dir = sortState.dir;
+        rows.sort((a, b) => dir * (key === 'rowid' ? (a.rowid - b.rowid) : compareVal(a, b, key)));
+      }
+      renderTableBody(rows);
+    }
+
+    function renderTableBody(rows) {
+      const tbody = document.getElementById('tbody');
+      const cols = currentCols;
+      if (!rows.length) {
+        tbody.innerHTML = '<tr><td colspan="' + (cols.length + 2) + '">No rows</td></tr>';
+        return;
+      }
+      tbody.innerHTML = rows.map(row => {
+        const cells = cols.map(c => `<td>${escapeHtml(String(row[c] ?? ''))}</td>`).join('');
+        return `
+          <tr data-rowid="${row.rowid}">
+            <td>${row.rowid}</td>
+            ${cells}
+            <td class="cell-actions">
+              <button type="button" class="edit" data-rowid="${row.rowid}">Edit</button>
+              <button type="button" class="del delete" data-rowid="${row.rowid}">Delete</button>
+            </td>
+          </tr>
+        `;
+      }).join('');
+      tbody.querySelectorAll('.edit').forEach(b => b.addEventListener('click', () => openEdit(Number(b.dataset.rowid))));
+      tbody.querySelectorAll('.delete').forEach(b => b.addEventListener('click', () => doDelete(Number(b.dataset.rowid))));
+    }
+
+    function buildHeader() {
+      const cols = currentCols;
+      const thead = document.getElementById('thead');
+      thead.innerHTML = `
+        <tr>
+          <th class="sortable" data-col="rowid" title="Sort by rowid">rowid<span class="sort-icon"></span></th>
+          ${cols.map(c => `<th class="sortable" data-col="${escapeHtml(c)}" title="Sort by ${escapeHtml(c)}">${escapeHtml(c)}<span class="sort-icon"></span></th>`).join('')}
+          <th></th>
+        </tr>
+        <tr class="filter-row">
+          <th><input type="text" data-col="rowid" placeholder="Filter…" aria-label="Filter rowid" /></th>
+          ${cols.map(c => `<th><input type="text" data-col="${escapeHtml(c)}" placeholder="Filter…" aria-label="Filter ${escapeHtml(c)}" /></th>`).join('')}
+          <th></th>
+        </tr>
+      `;
+      thead.querySelectorAll('th.sortable').forEach(th => {
+        th.addEventListener('click', () => {
+          const col = th.dataset.col;
+          if (sortState.col === col) sortState.dir *= -1;
+          else { sortState.col = col; sortState.dir = 1; }
+          thead.querySelectorAll('th.sortable').forEach(h => {
+            h.classList.remove('sorted-asc', 'sorted-desc');
+            if (h.dataset.col === sortState.col) h.classList.add(sortState.dir === 1 ? 'sorted-asc' : 'sorted-desc');
+          });
+          applyFilterAndSort();
+        });
+      });
+      thead.querySelectorAll('.filter-row input').forEach(inp => {
+        const col = inp.dataset.col;
+        if (filterState[col]) inp.value = filterState[col];
+        inp.addEventListener('input', () => {
+          filterState[col] = inp.value;
+          applyFilterAndSort();
+        });
+      });
+      if (sortState.col !== null) {
+        const th = thead.querySelector(`th.sortable[data-col="${sortState.col}"]`);
+        if (th) th.classList.add(sortState.dir === 1 ? 'sorted-asc' : 'sorted-desc');
+      }
+    }
+
+    async function loadData() {
+      if (!currentTable) return;
+      const thead = document.getElementById('thead');
+      const tbody = document.getElementById('tbody');
+      thead.innerHTML = '<tr><th>rowid</th></tr>';
+      tbody.innerHTML = '<tr><td colspan="10" class="loading">Loading…</td></tr>';
+      sortState = { col: null, dir: 1 };
+      filterState = {};
+      try {
+        const rows = await api('/tables/' + encodeURIComponent(currentTable));
+        const cols = tableColumns[currentTable] || Object.keys(rows[0] || {}).filter(k => k !== 'rowid');
+        currentRows = rows;
+        currentCols = cols;
+        buildHeader();
+        applyFilterAndSort();
+      } catch (e) {
+        tbody.innerHTML = '<tr><td colspan="10" class="msg error">' + escapeHtml(e.message) + '</td></tr>';
+      }
+    }
+
+    function escapeHtml(s) {
+      const div = document.createElement('div');
+      div.textContent = s;
+      return div.innerHTML;
+    }
+
+    function openAdd() {
+      if (!currentTable) return;
+      const cols = tableColumns[currentTable] || [];
+      document.getElementById('modalTitle').textContent = 'Add row – ' + currentTable;
+      const form = document.getElementById('modalForm');
+      form.innerHTML = cols.map(c => {
+        const isDate = isDateCol(c);
+        return `
+        <div class="form-row">
+          <label>${escapeHtml(c)}</label>
+          <input name="${escapeHtml(c)}" type="${isDate ? 'date' : 'text'}" placeholder="${escapeHtml(c)}" />
+        </div>
+      `;
+      }).join('');
+      form.dataset.mode = 'add';
+      form.dataset.rowid = '';
+      document.getElementById('modalBackdrop').classList.remove('hidden');
+    }
+
+    function openEdit(rowid) {
+      if (!currentTable) return;
+      const row = document.querySelector(`#tbody tr[data-rowid="${rowid}"]`);
+      if (!row) return;
+      const cols = tableColumns[currentTable] || [];
+      const cells = row.querySelectorAll('td');
+      const values = {};
+      const thead = document.getElementById('thead');
+      const headers = thead.querySelectorAll('th');
+      for (let i = 0; i < cols.length; i++) {
+        const idx = i + 1;
+        if (headers[idx]) values[cols[i]] = cells[idx]?.textContent ?? '';
+      }
+      document.getElementById('modalTitle').textContent = 'Edit row – ' + currentTable;
+      const form = document.getElementById('modalForm');
+      form.innerHTML = cols.map(c => {
+        const isDate = isDateCol(c);
+        const val = values[c] ?? '';
+        const displayVal = isDate ? formatDateForInput(val) : escapeHtml(String(val));
+        return `
+        <div class="form-row">
+          <label>${escapeHtml(c)}</label>
+          <input name="${escapeHtml(c)}" type="${isDate ? 'date' : 'text'}" value="${displayVal}" />
+        </div>
+      `;
+      }).join('');
+      form.dataset.mode = 'edit';
+      form.dataset.rowid = String(rowid);
+      document.getElementById('modalBackdrop').classList.remove('hidden');
+    }
+
+    document.getElementById('modalForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const form = e.target;
+      const mode = form.dataset.mode;
+      const rowid = form.dataset.rowid;
+      const cols = tableColumns[currentTable] || [];
+      const data = {};
+      cols.forEach(c => {
+        data[c] = form.querySelector(`[name="${c}"]`)?.value ?? '';
+        if (isDateCol(c) && data[c]) data[c] = formatDateForDb(data[c]);
+      });
+      try {
+        if (mode === 'add') {
+          await api('/tables/' + encodeURIComponent(currentTable), {
+            method: 'POST',
+            body: JSON.stringify(data)
+          });
+          showMsg('Row added');
+        } else {
+          await api('/tables/' + encodeURIComponent(currentTable) + '/' + rowid, {
+            method: 'PUT',
+            body: JSON.stringify(data)
+          });
+          showMsg('Row updated');
+        }
+        document.getElementById('modalBackdrop').classList.add('hidden');
+        await loadData();
+        if (window.parent !== window) window.parent.postMessage({ type: 'nvSharesDataChanged' }, '*');
+      } catch (err) {
+        showErr(err.message);
+      }
+    });
+
+    document.getElementById('modalCancel').addEventListener('click', () => {
+      document.getElementById('modalBackdrop').classList.add('hidden');
+    });
+
+    async function doDelete(rowid) {
+      if (!confirm('Delete this row?')) return;
+      try {
+        await api('/tables/' + encodeURIComponent(currentTable) + '/' + rowid, { method: 'DELETE' });
+        showMsg('Row deleted');
+        await loadData();
+        if (window.parent !== window) window.parent.postMessage({ type: 'nvSharesDataChanged' }, '*');
+      } catch (err) {
+        showErr(err.message);
+      }
+    }
+
+    document.getElementById('btnAdd').addEventListener('click', openAdd);
+    document.getElementById('btnRefresh').addEventListener('click', () => loadData());
+
+    loadTables();
+  </script>
+</body>
+</html>

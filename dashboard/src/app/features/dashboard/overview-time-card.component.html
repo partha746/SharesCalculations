@@ -1,0 +1,29 @@
+<div class="time-card">
+  <div class="time-card__title">Time</div>
+  <div class="time-card__clock">{{ formatClock(currentTime) }}</div>
+  <div class="time-card__date">{{ currentTime.toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short' }) }}</div>
+  <div class="time-card__divider"></div>
+  @if (lastRefreshedAt) {
+    <div class="time-card__row">
+      <span class="time-card__label">Last refreshed</span>
+      <span class="time-card__value">{{ formatLastRefreshed(lastRefreshedAt) }}</span>
+    </div>
+  }
+  <div class="time-card__row">
+    <span class="time-card__label">Market</span>
+    <span class="time-card__value">{{ marketOpen ? 'Open' : 'Closed' }}</span>
+    @if (marketCountdownText) {
+      <span class="time-card__value time-card__value--countdown">({{ marketCountdownText }})</span>
+    }
+  </div>
+  <div class="time-card__row">
+    <span class="time-card__label">{{ extendedHoursTimeCardLabel }}</span>
+    <span class="time-card__value">{{ extendedHoursTimeCardValue }}</span>
+  </div>
+  @if (showPreMarketStartsCountdown) {
+    <div class="time-card__row">
+      <span class="time-card__label">Pre-market</span>
+      <span class="time-card__value">{{ preMarketCountdownText }}</span>
+    </div>
+  }
+</div>

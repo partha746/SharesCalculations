@@ -11,6 +11,10 @@ export interface LivePriceResponse {
   lastUpdated: string;
   /** Today's market open (USD); when set, Overview and chart use it for "diff from open". */
   openPriceUsd?: number;
+  /** Pre-market price (USD) from yfinance when in pre-market session (4–9:30 AM ET). */
+  preMarketPriceUsd?: number;
+  /** Post-market price (USD) from yfinance when in post-market session (4–8 PM ET). */
+  postMarketPriceUsd?: number;
 }
 
 /** One stored point for live price history (chart + diff baseline). */
@@ -20,10 +24,32 @@ export interface LivePriceHistoryPoint {
   usdToInrRate: number;
 }
 
+/** One row in the live-price “by day” ticker (grouped by US Eastern calendar day). */
+export interface LivePriceDayTickerItem {
+  dateKey: string;
+  /** Short label in America/New_York (e.g. Fri, Mar 20) */
+  label: string;
+  open: number;
+  close: number;
+  high: number;
+  low: number;
+  diffUsd: number;
+  diffPct: number;
+  samples: number;
+}
+
 export interface MarketStatusResponse {
   marketOpen: boolean;
-  nextOpen?: string;
-  nextClose?: string;
+  /** True when 4:00–9:30 AM ET (Mon–Fri) */
+  isPreMarketSession?: boolean;
+  /** True when 4:00–8:00 PM ET (Mon–Fri) */
+  isPostMarketSession?: boolean;
+  /** Next 9:30 AM ET (Mon–Fri) in Unix ms */
+  nextOpen?: number;
+  /** Next 4:00 PM ET (Mon–Fri) in Unix ms */
+  nextClose?: number;
+  /** Next 4:00 AM ET (Mon–Fri) pre-market start in Unix ms */
+  nextPreMarketStart?: number;
 }
 
 export interface DashboardResponse {
@@ -31,6 +57,10 @@ export interface DashboardResponse {
   usdToInrRate: number;
   /** Today's market open (USD); when set, Overview and chart use it for "diff from open". */
   openPriceUsd?: number;
+  /** Pre-market price (USD) from yfinance when in pre-market session. */
+  preMarketPriceUsd?: number;
+  /** Post-market price (USD) from yfinance when in post-market session. */
+  postMarketPriceUsd?: number;
   totalShares: number;
   totalValueUsd: number;
   totalValueInr: number;
