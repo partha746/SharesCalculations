@@ -227,9 +227,15 @@
       <button type="button" class="tab-btn" [class.tab-btn--active]="activeTab === 'holdings'" (click)="setActiveTab('holdings')">Holdings</button>
       <button type="button" class="tab-btn" [class.tab-btn--active]="activeTab === 'sold'" (click)="setActiveTab('sold')">Sold Shares</button>
       <button type="button" class="tab-btn" [class.tab-btn--active]="activeTab === 'playground'" (click)="setActiveTab('playground')">Playground</button>
+      <button type="button" class="tab-btn" [class.tab-btn--active]="activeTab === 'financial'" (click)="setActiveTab('financial')">Financial planning</button>
       <button type="button" class="tab-btn tab-btn--data" [class.tab-btn--active]="activeTab === 'data'" (click)="setActiveTab('data')">Data</button>
     </div>
 
+    @if (activeTab === 'financial') {
+      <div class="financial-planning-tab">
+        <app-financial-planning [dashboardNetInBankIfSellNow]="data.netInBankIfSellNow" />
+      </div>
+    }
     @if (activeTab === 'data') {
       <div class="data-tab-wrap">
         <iframe [src]="webAppIframeSrc" class="data-tab-iframe" title="nvShares.db Data Manager"></iframe>

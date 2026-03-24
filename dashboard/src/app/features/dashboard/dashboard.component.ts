@@ -46,6 +46,7 @@ const SOLD_COL_LABELS: Record<keyof SoldRow, string> = {
 import { StatCardComponent } from './stat-card/stat-card.component';
 import { OverviewTimeCardComponent } from './overview-time-card.component';
 import { LivePriceExtendedHintComponent } from './live-price-extended-hint.component';
+import { FinancialPlanningComponent } from './financial-planning/financial-planning.component';
 
 const HOLDING_COLS = ['buyPriceUsd', 'type', 'totalPurchaseInr', 'netIfSellTodayInr', 'buyDate', 'qty', 'profitPercent', 'taxToPayInr', 'taxPercent'] as const;
 const DATE_COLS = ['buyDate'];
@@ -65,7 +66,7 @@ const HOLDINGS_COLUMN_ORDER_STORAGE_KEY = 'dashboard.holdingsColumnOrder';
 @Component({
   selector: 'app-dashboard',
   standalone: true,
-  imports: [CommonModule, FormsModule, StatCardComponent, OverviewTimeCardComponent, LivePriceExtendedHintComponent],
+  imports: [CommonModule, FormsModule, StatCardComponent, OverviewTimeCardComponent, LivePriceExtendedHintComponent, FinancialPlanningComponent],
   templateUrl: './dashboard.component.html',
   styleUrl: './dashboard.component.scss',
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -105,8 +106,8 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
   holdingsSimulateUsdToInr: number | null = null;
   /** Last row clicked (without shift) for shift-click range selection. */
   private lastClickedRowKey: string | null = null;
-  /** Tab: Holdings vs Sold Shares vs Playground */
-  activeTab: 'holdings' | 'sold' | 'playground' | 'data' = 'holdings';
+  /** Tab: Holdings vs Sold Shares vs Playground vs Financial planning */
+  activeTab: 'holdings' | 'sold' | 'playground' | 'data' | 'financial' = 'holdings';
   /** Cached sanitized URL for Data tab iframe (set once to avoid reload on every change detection). */
   webAppIframeSrc!: SafeResourceUrl;
   soldRows: SoldRow[] = [];
@@ -1168,7 +1169,7 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
     });
   }
 
-  setActiveTab(tab: 'holdings' | 'sold' | 'playground' | 'data'): void {
+  setActiveTab(tab: 'holdings' | 'sold' | 'playground' | 'data' | 'financial'): void {
     this.activeTab = tab;
     if (tab === 'sold') {
       if (this.holdingsChart) {
@@ -1177,7 +1178,7 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
       }
       if (!this.soldLoaded && !this.soldLoading) this.loadSold();
       else if (this.soldRows.length > 0) setTimeout(() => this.initOrUpdateSoldChart(), 0);
-    } else if (tab === 'playground') {
+    } else if (tab === 'playground' || tab === 'financial') {
       if (this.holdingsChart) {
         this.holdingsChart.destroy();
         this.holdingsChart = null;

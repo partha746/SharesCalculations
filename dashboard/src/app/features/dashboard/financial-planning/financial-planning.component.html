@@ -1,0 +1,503 @@
+<div class="fp-root">
+  @let estate = endOfLifeEstate;
+  <header class="fp-hero" aria-label="Estate at end of life">
+    <p class="fp-hero-kicker">End of plan snapshot · age {{ lifeExpectancy }}</p>
+    <div class="fp-hero-grid">
+      <div class="fp-hero-panel fp-hero-panel--nominal">
+        <span class="fp-hero-panel-eyebrow">Nominal rupees</span>
+        @if (estate.croresRounded > 0) {
+          <p class="fp-hero-crores">~{{ formatInr(estate.croresRounded) }} crore</p>
+        } @else if (estate.inr > 0) {
+          <p class="fp-hero-crores">&lt; 1 crore</p>
+        } @else {
+          <p class="fp-hero-crores">0 crore</p>
+        }
+        <p class="fp-hero-words">{{ estate.words }}</p>
+        <p class="fp-hero-digits">₹ {{ formatInr(estate.inr) }}</p>
+        <p class="fp-hero-panel-foot fp-muted">Last projected year (not adjusted for purchasing power)</p>
+      </div>
+      @if (estate.deflateExponent > 0 && inflationPct > 0) {
+        <div class="fp-hero-panel fp-hero-panel--real">
+          <span class="fp-hero-panel-eyebrow">Today’s purchasing power</span>
+          <p class="fp-hero-real-amount">₹ {{ formatInr(estate.todaysInr) }}</p>
+          @if (estate.todaysCroresRounded > 0) {
+            <p class="fp-hero-real-sub">~{{ formatInr(estate.todaysCroresRounded) }} crore · {{ estate.todaysWords }}</p>
+          } @else if (estate.todaysInr > 0) {
+            <p class="fp-hero-real-sub">&lt; 1 crore · {{ estate.todaysWords }}</p>
+          } @else {
+            <p class="fp-hero-real-sub">{{ estate.todaysWords }}</p>
+          }
+          <p class="fp-hero-panel-foot fp-muted">
+            Deflated ÷ (1 + {{ inflationPct | number : '1.0-2' }}%)<sup>{{ estate.deflateExponent }}</sup> vs plan start
+          </p>
+        </div>
+      }
+    </div>
+  </header>
+
+  <aside class="fp-callout" role="note">
+    <span class="fp-callout-title">How this planner works</span>
+    <p class="fp-callout-body">
+      Model income, spending, portfolio mix, retirement, and <strong>life goals</strong> (education, marriage, etc.). <strong>Monthly income</strong> lines can use an
+      <strong>earning cap</strong> (e.g. a job for only the first N years). <strong>Monthly expenses</strong> can end after N plan years (0 = no end). Add
+      <strong>multiple rental</strong> streams with start year and
+      <strong>+%/yr</strong> (on top of inflation). <span class="fp-callout-accent">Green fields</span> mirror typical spreadsheet inputs.
+    </p>
+  </aside>
+
+  <main class="fp-main">
+  <section class="fp-card fp-card--tone-slate">
+    <h2 class="fp-section-title">Assumptions</h2>
+    <div class="fp-grid fp-grid--assumptions">
+      <label>Current age <input type="number" min="0" max="120" class="fp-input fp-input--green" [(ngModel)]="currentAge" /></label>
+      <label>Retirement age <input type="number" min="0" max="120" class="fp-input fp-input--green" [(ngModel)]="retirementAge" /></label>
+      <label>Live to (age) <input type="number" min="0" max="120" class="fp-input fp-input--green" [(ngModel)]="lifeExpectancy" /></label>
+      <label>Inflation (% p.a.) <input type="number" min="0" step="0.1" class="fp-input fp-input--green" [(ngModel)]="inflationPct" /></label>
+      <label>Capital gains tax (%) <input type="number" min="0" step="0.1" class="fp-input" [(ngModel)]="capitalGainsTaxPct" title="Also used as default tax % on each portfolio bucket (you can edit buckets below)" /></label>
+      <label>Income tax (%) <input type="number" min="0" step="0.1" class="fp-input" [(ngModel)]="incomeTaxPct" /></label>
+    </div>
+  </section>
+
+  <section class="fp-card fp-card--tone-mint">
+    <h2 class="fp-section-title">Monthly income <span class="fp-muted">(after tax, INR)</span></h2>
+    <p class="fp-muted fp-hint">
+      Paid only while <strong>earning</strong> (before retirement age). <strong>Earning cap (yrs)</strong>:
+      <strong>0</strong> = every earning year; <strong>N</strong> &gt; 0 = only the first <strong>N</strong> plan years (e.g. second job for a limited time).
+    </p>
+    <div class="fp-table-scroll">
+      <table class="fp-table fp-table--income-streams">
+        <thead>
+          <tr>
+            <th>Label</th>
+            <th>Monthly ₹</th>
+            <th>
+              <abbr title="0 = all earning years until retirement; N = only plan years 0…N−1">Earning cap (yrs)</abbr>
+            </th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          @for (st of incomeStreams; track st.id) {
+            <tr>
+              <td><input type="text" class="fp-input fp-input--wide" [(ngModel)]="st.label" /></td>
+              <td><input type="number" min="0" class="fp-input fp-input--green fp-input--wide" [(ngModel)]="st.monthlyTodaysInr" /></td>
+              <td>
+                <input
+                  type="number"
+                  min="0"
+                  class="fp-input fp-input--green fp-input--end-yrs"
+                  [(ngModel)]="st.earningYearsCap"
+                  title="0 = until retirement; N = stop after N plan years from start" />
+              </td>
+              <td>
+                <button type="button" class="fp-btn-remove" (click)="removeIncomeStream(st.id)">Remove</button>
+              </td>
+            </tr>
+          }
+        </tbody>
+      </table>
+    </div>
+    <button type="button" class="fp-btn-add" (click)="addIncomeStream()">+ Add monthly income</button>
+
+    <h3 class="fp-subtitle">Rental income <span class="fp-muted">(multiple streams, through end of plan)</span></h3>
+    <p class="fp-muted fp-hint">
+      Each line pays from <strong>Starts (yrs)</strong> through your last projected year (working + retired). <strong>+%/yr</strong> compounds on that stream after it starts, in addition to global inflation.
+    </p>
+    <div class="fp-table-scroll">
+      <table class="fp-table fp-table--rentals">
+        <thead>
+          <tr>
+            <th>Label</th>
+            <th>Monthly ₹</th>
+            <th>Starts (yrs)</th>
+            <th>+% / yr</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          @for (st of rentalStreams; track st.id) {
+            <tr>
+              <td><input type="text" class="fp-input fp-input--wide" [(ngModel)]="st.label" /></td>
+              <td><input type="number" min="0" class="fp-input fp-input--green fp-input--wide" [(ngModel)]="st.monthlyTodaysInr" /></td>
+              <td><input type="number" min="0" class="fp-input fp-input--green fp-input--end-yrs" [(ngModel)]="st.startsInYears" title="Plan year index when rent begins (0 = first year)" /></td>
+              <td><input type="number" min="0" step="0.1" class="fp-input fp-input--green" [(ngModel)]="st.incrementPctPerYear" title="Annual rent hike % on this stream, after it starts" /></td>
+              <td>
+                <button type="button" class="fp-btn-remove" (click)="removeRentalStream(st.id)">Remove</button>
+              </td>
+            </tr>
+          }
+        </tbody>
+      </table>
+    </div>
+    <button type="button" class="fp-btn-add" (click)="addRentalStream()">+ Add rental</button>
+
+    <table class="fp-table fp-table--income-totals">
+      <tbody>
+        <tr class="fp-income-breakdown-head">
+          <td colspan="2">Plan year 0 <span class="fp-muted">(age {{ currentAge }}) — monthly breakdown</span></td>
+        </tr>
+        @for (st of incomeStreams; track st.id) {
+          <tr>
+            <td>
+              {{ st.label }}
+              @if (st.monthlyTodaysInr > 0 && monthlyIncomeStreamTodaysInYear(0, st) === 0) {
+                <span class="fp-muted"> — not in year 0 (retired or past cap)</span>
+              }
+            </td>
+            <td>₹ {{ formatInr(monthlyIncomeStreamTodaysInYear(0, st)) }}</td>
+          </tr>
+        }
+        <tr>
+          <td>Rentals (started by year 0)</td>
+          <td>₹ {{ formatInr(rentalMonthlyTodaysTotalAtYear0()) }}</td>
+        </tr>
+        <tr class="fp-row-total">
+          <td>Total / month</td>
+          <td>₹ {{ formatInr(totalMonthlyIncomeInr) }}</td>
+        </tr>
+        @if (hasRentalStartingAfterYear0) {
+          <tr class="fp-row-total fp-row-total--note">
+            <td>Total / month when every rental line has started <span class="fp-muted">(today’s ₹, before +%/yr)</span></td>
+            <td>₹ {{ formatInr(totalMonthlyIncomeFullRunRateInr) }}</td>
+          </tr>
+        }
+      </tbody>
+    </table>
+
+    <h3 class="fp-subtitle">Yearly income <span class="fp-muted">(bonuses etc., INR)</span></h3>
+    <p class="fp-muted fp-hint">Annual amounts in today’s ₹; grow with inflation in the surplus calculation.</p>
+    <div class="fp-table-scroll">
+      <table class="fp-table fp-table--yearly-streams">
+        <thead>
+          <tr>
+            <th>Label</th>
+            <th>Yearly ₹</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          @for (st of yearlyIncomeStreams; track st.id) {
+            <tr>
+              <td><input type="text" class="fp-input fp-input--wide" [(ngModel)]="st.label" /></td>
+              <td><input type="number" min="0" class="fp-input fp-input--green fp-input--wide" [(ngModel)]="st.yearlyTodaysInr" /></td>
+              <td>
+                <button type="button" class="fp-btn-remove" (click)="removeYearlyIncomeStream(st.id)">Remove</button>
+              </td>
+            </tr>
+          }
+          <tr class="fp-row-total">
+            <td>Yearly income subtotal</td>
+            <td colspan="2">₹ {{ formatInr(totalYearlyExtraIncomeInr) }}</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <button type="button" class="fp-btn-add" (click)="addYearlyIncomeStream()">+ Add yearly income</button>
+    <table class="fp-table fp-table--income-totals fp-table--grand-inline">
+      <tbody>
+        <tr class="fp-row-grand">
+          <td><strong>Total yearly income</strong> <span class="fp-muted">(12 × month + yearly lines)</span></td>
+          <td><strong>₹ {{ formatInr(grandTotalYearlyIncomeInr) }}</strong></td>
+        </tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section class="fp-card fp-card--tone-amber">
+    <h2 class="fp-section-title">Monthly expenses <span class="fp-muted">(INR)</span></h2>
+    <p class="fp-muted fp-hint">
+      Add or remove lines like rental income. <strong>End (yrs)</strong>: <strong>0</strong> = runs the full projection;
+      <strong>N</strong> &gt; 0 = only the first <strong>N</strong> plan years. Amounts are in today’s ₹ and grow with inflation.
+    </p>
+    <div class="fp-table-scroll">
+      <table class="fp-table fp-table--exp-streams">
+        <thead>
+          <tr>
+            <th>Label</th>
+            <th>Monthly ₹</th>
+            <th>Category</th>
+            <th>
+              <abbr title="Stop after N plan years from start; 0 = continues entire projection">End (yrs)</abbr>
+            </th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          @for (st of expenseStreams; track st.id) {
+            <tr>
+              <td><input type="text" class="fp-input fp-input--wide" [(ngModel)]="st.label" /></td>
+              <td><input type="number" min="0" class="fp-input fp-input--green fp-input--wide" [(ngModel)]="st.monthlyTodaysInr" /></td>
+              <td>
+                <select class="fp-select" [(ngModel)]="st.category">
+                  @for (c of expenseCategoryOptions; track c) {
+                    <option [ngValue]="c">{{ c }}</option>
+                  }
+                </select>
+              </td>
+              <td>
+                <input
+                  type="number"
+                  min="0"
+                  class="fp-input fp-input--green fp-input--end-yrs"
+                  [(ngModel)]="st.endsAfterYears"
+                  title="0 = never ends; N = only first N plan years (indices 0…N−1)" />
+              </td>
+              <td>
+                <button type="button" class="fp-btn-remove" (click)="removeExpenseStream(st.id)">Remove</button>
+              </td>
+            </tr>
+          }
+          <tr class="fp-row-total">
+            <td>Total / month <span class="fp-muted">(streams active in year 0)</span></td>
+            <td colspan="4">₹ {{ formatInr(totalMonthlyExpenseInr) }}</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <button type="button" class="fp-btn-add" (click)="addExpenseStream()">+ Add expense</button>
+
+    <h3 class="fp-subtitle">Yearly expenses</h3>
+    <p class="fp-muted fp-hint">Lump sums in today’s ₹ (travel, insurance, etc.); inflated like monthly expenses.</p>
+    <div class="fp-table-scroll">
+      <table class="fp-table fp-table--yearly-streams">
+        <thead>
+          <tr>
+            <th>Label</th>
+            <th>Yearly ₹</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          @for (st of yearlyExpenseStreams; track st.id) {
+            <tr>
+              <td><input type="text" class="fp-input fp-input--wide" [(ngModel)]="st.label" /></td>
+              <td><input type="number" min="0" class="fp-input fp-input--green fp-input--wide" [(ngModel)]="st.yearlyTodaysInr" /></td>
+              <td>
+                <button type="button" class="fp-btn-remove" (click)="removeYearlyExpenseStream(st.id)">Remove</button>
+              </td>
+            </tr>
+          }
+          <tr class="fp-row-total">
+            <td>Yearly lump-sum total</td>
+            <td colspan="2">₹ {{ formatInr(totalYearlyLumpyExpenseInr) }}</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <button type="button" class="fp-btn-add" (click)="addYearlyExpenseStream()">+ Add yearly expense</button>
+
+    <div class="fp-summary fp-summary--yellow">
+      <div class="fp-summary-row">
+        <span>Total yearly expense</span>
+        <strong>₹ {{ formatInr(totalYearlyExpenseInr) }}</strong>
+        <span class="fp-muted">(12 × monthly + yearly)</span>
+      </div>
+      <div class="fp-summary-row">
+        <span>Monthly excess</span>
+        <strong>₹ {{ formatInr(monthlySurplusInr) }}</strong>
+        <span>{{ monthlySurplusPctOfIncome | number : '1.0-0' }}%</span>
+        <span class="fp-pill">{{ surplusQuality(monthlySurplusPctOfIncome) }}</span>
+      </div>
+      <div class="fp-summary-row">
+        <span>Yearly excess</span>
+        <strong>₹ {{ formatInr(yearlySurplusInr) }}</strong>
+        <span>{{ yearlySurplusPctOfIncome | number : '1.0-0' }}%</span>
+        <span class="fp-pill">{{ surplusQuality(yearlySurplusPctOfIncome) }}</span>
+      </div>
+    </div>
+  </section>
+
+  <section class="fp-card fp-card--tone-violet">
+    <h2 class="fp-section-title">Savings & retirement</h2>
+    <p class="fp-muted fp-hint">
+      Starting money is <strong>cash + Indian market + NVIDIA (net if sell)</strong>. <strong>% keep in NVIDIA</strong> splits the starting corpus: the <strong>kept</strong> slice grows at <strong>NVIDIA growth %</strong> (below); <strong>cash + Indian + the sold NVDA portion</strong> grow with your working/retired portfolio mix. Surplus while earning is added to that mix. The <strong>total</strong> below is what the year-by-year table uses.
+    </p>
+    <div class="fp-grid fp-grid--savings">
+      <label>Cash / liquid savings (INR) <input type="number" min="0" class="fp-input fp-input--green fp-input--wide" [(ngModel)]="startingCashSavingsInr" /></label>
+      <label>Indian market investments (INR) <input type="number" min="0" class="fp-input fp-input--green fp-input--wide" [(ngModel)]="startingIndianMarketInr" /></label>
+      <div class="fp-field fp-field--nvidia">
+        <label>NVIDIA — net if sell now (INR) <input type="number" min="0" class="fp-input fp-input--green fp-input--wide" [(ngModel)]="nvidiaNetIfSellInr" title="Total NVDA position in INR after tax if liquidated today" /></label>
+        @if (dashboardNetInBankIfSellNow != null && dashboardNetInBankIfSellNow > 0) {
+          <button type="button" class="fp-sync-overview" (click)="applyDashboardNvidiaNet()">Use Overview “In bank if you sell now” (₹ {{ formatInr(dashboardNetInBankIfSellNow) }})</button>
+        }
+      </div>
+      <label>% keep in NVIDIA <input type="number" min="0" max="100" step="1" class="fp-input fp-input--green" [(ngModel)]="percentKeepInNvidia" title="Rest is treated as cash in the breakdown; total starting capital is unchanged" /></label>
+      <label
+        >NVIDIA growth (% p.a.)
+        <input
+          type="number"
+          min="0"
+          step="0.1"
+          class="fp-input fp-input--green"
+          [(ngModel)]="nvidiaGrowthPct"
+          title="Nominal return on the kept NVIDIA tranche; net of capital gains tax % from Assumptions" /></label>
+    </div>
+    <table class="fp-table fp-table--corpus">
+      <tbody>
+        <tr>
+          <td>Effective cash <span class="fp-muted">(incl. NVDA sold portion; grows with portfolio mix)</span></td>
+          <td>₹ {{ formatInr(effectiveCashIncludingNvidiaSoldInr) }}</td>
+        </tr>
+        <tr>
+          <td>Indian market <span class="fp-muted">(grows with portfolio mix)</span></td>
+          <td>₹ {{ formatInr(startingIndianMarketInr) }}</td>
+        </tr>
+        <tr>
+          <td>NVIDIA kept <span class="fp-muted">(net × keep %; {{ nvidiaGrowthPct | number : '1.0-1' }}% p.a. nominal, net of CG tax)</span></td>
+          <td>₹ {{ formatInr(nvidiaKeptInr) }}</td>
+        </tr>
+        <tr class="fp-row-total">
+          <td><strong>Starting portfolio total</strong> <span class="fp-muted">(used in simulation)</span></td>
+          <td><strong>₹ {{ formatInr(portfolioStartingTotalInr) }}</strong></td>
+        </tr>
+      </tbody>
+    </table>
+    <div class="fp-grid fp-grid--savings">
+      <label>Post-retirement monthly need (today’s INR) <input type="number" min="0" class="fp-input fp-input--green fp-input--wide" [(ngModel)]="postRetirementMonthlyTodaysInr" /></label>
+      <label>Step-up on annual savings (% p.a.) <input type="number" min="0" step="0.1" class="fp-input fp-input--green" [(ngModel)]="stepUpSavingsPct" /></label>
+      <label class="fp-check">
+        <input type="checkbox" [(ngModel)]="useComputedAnnualContribution" />
+        Use yearly excess as annual contribution while earning
+      </label>
+      @if (!useComputedAnnualContribution) {
+        <label>Manual annual contribution (INR) <input type="number" min="0" class="fp-input fp-input--green fp-input--wide" [(ngModel)]="manualAnnualContributionInr" /></label>
+      }
+    </div>
+  </section>
+
+  <section class="fp-card fp-card--tone-sky">
+    <h2 class="fp-section-title">Requirements & goals</h2>
+    <p class="fp-muted fp-hint">
+      Add events (e.g. education, marriage). <strong>Start in years</strong> = years from now when spending begins (0 = first projection year). <strong>Duration</strong> = how many years that yearly amount applies. Amounts are in today’s INR and grow with inflation.
+    </p>
+    <table class="fp-table fp-table--req">
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Start in years</th>
+          <th>Duration (yrs)</th>
+          <th>Yearly spend (today’s ₹)</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        @for (req of requirements; track req.id) {
+          <tr>
+            <td><input type="text" class="fp-input" [(ngModel)]="req.name" /></td>
+            <td><input type="number" min="0" class="fp-input fp-input--green" [(ngModel)]="req.yearsFromNow" /></td>
+            <td><input type="number" min="1" class="fp-input fp-input--green" [(ngModel)]="req.durationYears" /></td>
+            <td><input type="number" min="0" class="fp-input fp-input--green fp-input--wide" [(ngModel)]="req.yearlyAmountTodaysInr" /></td>
+            <td><button type="button" class="fp-btn-remove" (click)="removeRequirement(req.id)">Remove</button></td>
+          </tr>
+        }
+      </tbody>
+    </table>
+    <button type="button" class="fp-btn-add" (click)="addRequirement()">+ Add requirement</button>
+  </section>
+
+  <section class="fp-card fp-card--tone-teal">
+    <h2 class="fp-section-title">Investment mix — while earning</h2>
+    @if (Math.abs(portfolioShareSum(workingPortfolio) - 100) > 0.5) {
+      <p class="fp-warn">Share % should sum to 100 (currently {{ portfolioShareSum(workingPortfolio) | number : '1.1-1' }}%). Projection uses normalized weights.</p>
+    }
+    <table class="fp-table">
+      <thead>
+        <tr>
+          <th></th>
+          <th>Return %</th>
+          <th>Tax %</th>
+          <th>Share %</th>
+        </tr>
+      </thead>
+      <tbody>
+        @for (b of workingPortfolio; track b.label) {
+          <tr>
+            <td>{{ b.label }}</td>
+            <td><input type="number" min="0" step="0.1" class="fp-input fp-input--green" [(ngModel)]="b.returnPct" /></td>
+            <td><input type="number" min="0" step="0.1" class="fp-input fp-input--green" [(ngModel)]="b.taxPct" /></td>
+            <td><input type="number" min="0" step="0.1" class="fp-input fp-input--green" [(ngModel)]="b.sharePct" /></td>
+          </tr>
+        }
+        <tr class="fp-row-total">
+          <td>Weighted (display)</td>
+          <td>{{ workingStats.ret | number : '1.2-2' }}%</td>
+          <td>{{ workingStats.tax | number : '1.2-2' }}%</td>
+          <td>Net growth ≈ {{ workingStats.netGrowth | number : '1.2-2' }}% on balance</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h3 class="fp-subtitle">Investment mix — retired</h3>
+    @if (Math.abs(portfolioShareSum(retiredPortfolio) - 100) > 0.5) {
+      <p class="fp-warn">Share % sum {{ portfolioShareSum(retiredPortfolio) | number : '1.1-1' }}% (normalized in math).</p>
+    }
+    <table class="fp-table">
+      <thead>
+        <tr>
+          <th></th>
+          <th>Return %</th>
+          <th>Tax %</th>
+          <th>Share %</th>
+        </tr>
+      </thead>
+      <tbody>
+        @for (b of retiredPortfolio; track b.label) {
+          <tr>
+            <td>{{ b.label }}</td>
+            <td><input type="number" min="0" step="0.1" class="fp-input fp-input--green" [(ngModel)]="b.returnPct" /></td>
+            <td><input type="number" min="0" step="0.1" class="fp-input fp-input--green" [(ngModel)]="b.taxPct" /></td>
+            <td><input type="number" min="0" step="0.1" class="fp-input fp-input--green" [(ngModel)]="b.sharePct" /></td>
+          </tr>
+        }
+        <tr class="fp-row-total">
+          <td>Weighted (display)</td>
+          <td>{{ retiredStats.ret | number : '1.2-2' }}%</td>
+          <td>{{ retiredStats.tax | number : '1.2-2' }}%</td>
+          <td>Net growth ≈ {{ retiredStats.netGrowth | number : '1.2-2' }}% on balance</td>
+        </tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section class="fp-card fp-card--table fp-card--tone-sim">
+    <h2 class="fp-section-title">Year-by-year simulation</h2>
+    <p class="fp-muted fp-hint">
+      Each row’s <strong>Starting ₹</strong> / <strong>Ending ₹</strong> is the <strong>combined</strong> portfolio. The model starts with
+      <strong>{{ percentKeepInNvidia | number : '1.0-0' }}%</strong> of NVIDIA net in the <strong>kept</strong> slice (grows at
+      {{ nvidiaGrowthPct | number : '1.0-1' }}% p.a. nominal, net of CG tax) and the rest in the <strong>mix</strong> pool (cash + Indian + NVDA sold portion; working/retired returns above). Spending is shared between the two pools in proportion after growth and inflows.
+    </p>
+    <div class="fp-table-scroll">
+      <table class="fp-table fp-table--sim">
+        <thead>
+          <tr>
+            <th>Age</th>
+            <th>Starting ₹</th>
+            <th>Planned expenses ₹</th>
+            <th>Goals / extra ₹</th>
+            <th>Rental income ₹</th>
+            <th>Added savings ₹</th>
+            <th>Ending ₹</th>
+            <th>Status</th>
+            <th>Note</th>
+          </tr>
+        </thead>
+        <tbody>
+          @for (row of simulationRows; track row.age) {
+            <tr [class.fp-sim--warn]="row.warning">
+              <td>{{ row.age }}</td>
+              <td>₹ {{ formatInr(row.startingInr) }}</td>
+              <td>₹ {{ formatInr(row.plannedExpensesInr) }}</td>
+              <td>₹ {{ formatInr(row.additionalExpensesInr) }}</td>
+              <td>₹ {{ formatInr(row.rentalIncomeAnnualInr) }}</td>
+              <td>₹ {{ formatInr(row.additionalSavingsInr) }}</td>
+              <td><strong>₹ {{ formatInr(row.endingInr) }}</strong></td>
+              <td>{{ row.status }}</td>
+              <td class="fp-sim-note">{{ row.warning }}</td>
+            </tr>
+          }
+        </tbody>
+      </table>
+    </div>
+  </section>
+  </main>
+</div>
