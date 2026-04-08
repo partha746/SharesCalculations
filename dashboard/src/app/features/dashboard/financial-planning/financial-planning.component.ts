@@ -192,8 +192,8 @@ export class FinancialPlanningComponent {
    * `earningYearsCap`: 0 = all earning years until retirement; N &gt; 0 = only first N plan years (while earning).
    */
   incomeStreams: MonthlyIncomeStream[] = [
-    { id: 'mi1', label: 'Salary', monthlyTodaysInr: 240_000, earningYearsCap: 0 },
-    { id: 'mi2', label: 'Second salary', monthlyTodaysInr: 170_000, earningYearsCap: 8 },
+    { id: 'mi1', label: 'My Salary', monthlyTodaysInr: 240_000, earningYearsCap: 0 },
+    { id: 'mi2', label: 'Wife Salary', monthlyTodaysInr: 170_000, earningYearsCap: 8 },
   ];
 
   /**
@@ -201,8 +201,8 @@ export class FinancialPlanningComponent {
    * plus optional `incrementPctPerYear` compounded from the first rent year.
    */
   rentalStreams: RentalIncomeStream[] = [
-    { id: 'r1', label: 'Rental 1', monthlyTodaysInr: 25_000, startsInYears: 0, incrementPctPerYear: 10 },
-    { id: 'r2', label: 'Rental 2', monthlyTodaysInr: 50_000, startsInYears: 3, incrementPctPerYear: 5 },
+    { id: 'r1', label: 'Palladium Homes', monthlyTodaysInr: 25_000, startsInYears: 0, incrementPctPerYear: 10 },
+    { id: 'r2', label: 'Godrej Elaris Shop 36', monthlyTodaysInr: 50_000, startsInYears: 3, incrementPctPerYear: 5 },
   ];
 
   /** Yearly income lines (bonuses etc.); add/remove. Today’s INR, inflated in surplus. */
@@ -239,14 +239,14 @@ export class FinancialPlanningComponent {
   requirements: FinancialRequirement[] = [
     {
       id: '1',
-      name: "Daughter's education",
+      name: "Daughter's Education",
       yearsFromNow: 7,
       durationYears: 1,
       yearlyAmountTodaysInr: 2_500_000,
     },
     {
       id: '2',
-      name: "Daughter's marriage",
+      name: "Daughter's Marriage",
       yearsFromNow: 15,
       durationYears: 1,
       yearlyAmountTodaysInr: 5_000_000,
@@ -338,14 +338,22 @@ export class FinancialPlanningComponent {
     return this.rentalStreams.some((s) => Math.floor(s.startsInYears) > 0 && s.monthlyTodaysInr > 0);
   }
 
-  /** One stream’s nominal monthly ₹ in simulation year y */
+  /**
+   * One stream’s nominal monthly ₹ in simulation year y.
+   * incrementPctPerYear is the TOTAL nominal annual growth rate.
+   * If 0, rent keeps up with global inflation only (real value preserved).
+   * If > 0, rent grows at this rate per year from its start (e.g. 10% = 10% total nominal growth).
+   */
   rentalStreamMonthlyNominal(y: number, st: RentalIncomeStream): number {
     const start = Math.max(0, Math.floor(st.startsInYears));
     if (y < start) return 0;
     const base = Math.max(0, st.monthlyTodaysInr);
     const inc = Math.max(0, st.incrementPctPerYear) / 100;
     const yrsSince = y - start;
-    return base * this.inflFactor(y) * Math.pow(1 + inc, yrsSince);
+    if (inc <= 0) {
+      return base * this.inflFactor(y);
+    }
+    return base * this.inflFactor(start) * Math.pow(1 + inc, yrsSince);
   }
 
   rentalMonthlyNominalTotalForYear(y: number): number {
@@ -528,6 +536,82 @@ export class FinancialPlanningComponent {
     this.requirements = this.requirements.filter((r) => r.id !== id);
   }
 
+  /**
+   * Binary-search the highest `postRetirementMonthlyTodaysInr` (in today's ₹) that keeps
+   * the portfolio ending balance ≥ 0 at end of the last projected year (age = lifeExpectancy).
+   * Returns the value rounded down to nearest ₹1,000 for safety margin.
+   */
+  get maxSustainableMonthlyWithdrawal(): number {
+    const ca = Math.max(0, Math.floor(this.currentAge));
+    const ra = Math.max(ca, Math.floor(this.retirementAge));
+    const le = Math.max(ra, Math.floor(this.lifeExpectancy));
+    const years = le - ca + 1;
+    if (years <= 0 || years > 120) return 0;
+
+    const step = Math.max(0, this.stepUpSavingsPct) / 100;
+    const gWork = netPortfolioGrowthFactor(this.workingPortfolio);
+    const gRet = netPortfolioGrowthFactor(this.retiredPortfolio);
+    const gNv = this.nvidiaNetGrowthFactor;
+    const manualBase = Math.max(0, this.manualAnnualContributionInr);
+
+    const simulate = (monthlyDraw: number): number => {
+      let bR = Math.max(0, this.startingRestPortfolioInr);
+      let bN = Math.max(0, this.nvidiaKeptInr);
+      for (let y = 0; y < years; y++) {
+        const age = ca + y;
+        const retired = age >= ra;
+        const f = this.inflFactor(y);
+        const rentalAnnual = this.rentalAnnualNominalInr(y);
+
+        let planned = 0;
+        if (retired) planned = monthlyDraw * 12 * f;
+
+        let addl = 0;
+        for (const req of this.requirements) {
+          const s = Math.max(0, Math.floor(req.yearsFromNow));
+          const d = Math.max(1, Math.floor(req.durationYears));
+          if (y >= s && y < s + d) addl += Math.max(0, req.yearlyAmountTodaysInr) * f;
+        }
+
+        let contrib = 0;
+        if (!retired) {
+          if (this.useComputedAnnualContribution) {
+            contrib = Math.max(0, this.yearlySurplusNominalForYear(y)) * Math.pow(1 + step, y);
+          } else {
+            contrib = manualBase * f * Math.pow(1 + step, y);
+          }
+        }
+
+        const gR = retired ? gRet : gWork;
+        let R = bR * (1 + gR) + contrib;
+        if (retired) R += rentalAnnual;
+        const N = bN * (1 + gNv);
+
+        const E = planned + addl;
+        const total = R + N;
+        if (total <= 0 || E >= total) return -1;
+        const rend = R - (E * R) / total;
+        const nend = N - (E * N) / total;
+        bR = Math.max(0, rend);
+        bN = Math.max(0, nend);
+      }
+      return bR + bN;
+    };
+
+    let lo = 0;
+    let hi = 100_000_000;
+    for (let i = 0; i < 60; i++) {
+      const mid = (lo + hi) / 2;
+      if (simulate(mid) > 0) lo = mid;
+      else hi = mid;
+    }
+    return Math.floor(lo / 1000) * 1000;
+  }
+
+  applyMaxWithdrawal(): void {
+    this.postRetirementMonthlyTodaysInr = this.maxSustainableMonthlyWithdrawal;
+  }
+
   /** Inflation factor from simulation start to year index y (0-based) */
   private inflFactor(y: number): number {
     const inf = Math.max(0, this.inflationPct) / 100;
@@ -624,7 +708,7 @@ export class FinancialPlanningComponent {
           const sur = this.yearlySurplusNominalForYear(y);
           contrib = Math.max(0, sur) * Math.pow(1 + step, y);
         } else {
-          contrib = manualBase * Math.pow(1 + step, y);
+          contrib = manualBase * f * Math.pow(1 + step, y);
         }
       }
 

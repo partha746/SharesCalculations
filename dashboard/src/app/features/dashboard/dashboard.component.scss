@@ -370,6 +370,46 @@
 .total-holdings-block__diff--down {
   color: #f85149;
 }
+.total-holdings-block__breakdown {
+  margin: 0.3rem 0 0;
+  padding: 0.35rem 0.6rem;
+  background: rgba(255, 255, 255, 0.03);
+  border-radius: 6px;
+  border: 1px solid #21262d;
+}
+.total-holdings-block__breakdown-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.15rem 0;
+  font-size: 0.82rem;
+}
+.total-holdings-block__breakdown-label {
+  color: #8b949e;
+}
+.total-holdings-block__breakdown-value {
+  font-weight: 600;
+  white-space: nowrap;
+}
+.total-holdings-block__rate-hint {
+  font-size: 0.78em;
+  color: #6e7681;
+}
+.total-holdings-block__divider {
+  border-top: 1px solid #30363d;
+  margin: 0.35rem 0;
+}
+.total-holdings-block__value--up {
+  color: #3fb950;
+}
+.total-holdings-block__value--down {
+  color: #f85149;
+}
+.total-holdings-block__pct {
+  font-size: 0.85em;
+  opacity: 0.85;
+}
 .stat-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
@@ -561,6 +601,219 @@
 .tab-section {
   margin-top: 0.5rem;
 }
+.tax-tab {
+  padding: 1rem 0;
+  max-width: 60rem;
+}
+.tax-tab__section {
+  margin-bottom: 1.75rem;
+  padding-bottom: 1.5rem;
+  border-bottom: 1px solid #21262d;
+  &:last-child {
+    border-bottom: none;
+    margin-bottom: 0;
+    padding-bottom: 0;
+  }
+}
+.tax-tab__title {
+  font-size: 1.1rem;
+  font-weight: 600;
+  margin: 0 0 0.5rem;
+}
+.tax-tab__hint {
+  font-size: 0.85rem;
+  color: #8b949e;
+  margin: 0 0 1rem;
+  line-height: 1.5;
+  code {
+    background: #21262d;
+    padding: 0.15rem 0.35rem;
+    border-radius: 4px;
+    font-size: 0.85em;
+  }
+}
+.tax-tab__status {
+  color: #8b949e;
+  font-size: 0.9rem;
+}
+.tax-tab__error {
+  color: #f85149;
+  font-size: 0.88rem;
+  margin: 0 0 0.75rem;
+  padding: 0.5rem 0.75rem;
+  background: rgba(248, 81, 73, 0.1);
+  border: 1px solid rgba(248, 81, 73, 0.35);
+  border-radius: 6px;
+}
+.tax-tab__saved {
+  color: #3fb950;
+  font-size: 0.88rem;
+  margin: 0 0 0.75rem;
+  padding: 0.5rem 0.75rem;
+  background: rgba(46, 160, 67, 0.1);
+  border: 1px solid rgba(46, 160, 67, 0.35);
+  border-radius: 6px;
+}
+.tax-tab__editor-wrap {
+  margin-bottom: 0.75rem;
+}
+.tax-tab__editor {
+  width: 100%;
+  min-height: 12rem;
+  font-family: ui-monospace, monospace;
+  font-size: 0.88rem;
+  background: #0d1117;
+  color: #e6edf3;
+  border: 1px solid #30363d;
+  border-radius: 8px;
+  padding: 0.75rem 1rem;
+  resize: vertical;
+  tab-size: 2;
+  line-height: 1.5;
+}
+.tax-tab__editor:focus {
+  outline: none;
+  border-color: #58a6ff;
+  box-shadow: 0 0 0 3px rgba(88, 166, 255, 0.15);
+}
+.tax-tab__actions {
+  display: flex;
+  gap: 0.65rem;
+  margin-bottom: 1.5rem;
+}
+.tax-tab__btn {
+  font: inherit;
+  font-size: 0.88rem;
+  font-weight: 500;
+  padding: 0.45rem 1rem;
+  border-radius: 6px;
+  cursor: pointer;
+  border: 1px solid #30363d;
+  background: #21262d;
+  color: #e6edf3;
+}
+.tax-tab__btn--save {
+  background: rgba(46, 160, 67, 0.15);
+  border-color: rgba(46, 160, 67, 0.5);
+  color: #7ee787;
+}
+.tax-tab__btn--save:hover {
+  background: rgba(46, 160, 67, 0.25);
+}
+.tax-tab__btn--generate {
+  background: rgba(88, 166, 255, 0.12);
+  border-color: rgba(88, 166, 255, 0.45);
+  color: #79c0ff;
+}
+.tax-tab__btn--generate:hover {
+  background: rgba(88, 166, 255, 0.22);
+}
+.tax-tab__btn--copy {
+  color: #d2a8ff;
+  border-color: rgba(163, 113, 247, 0.4);
+}
+.tax-tab__btn--copy:hover {
+  border-color: #a371f7;
+  background: rgba(163, 113, 247, 0.12);
+}
+.tax-tab__btn--download {
+  color: #7ee787;
+  border-color: rgba(46, 160, 67, 0.4);
+}
+.tax-tab__btn--download:hover {
+  border-color: #3fb950;
+  background: rgba(46, 160, 67, 0.12);
+}
+.tax-tab__btn--reload:hover {
+  border-color: #58a6ff;
+}
+.tax-tab__editor--readonly {
+  background: #0a0e14;
+  color: #7ee787;
+  cursor: default;
+}
+.tax-tab__fy-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 0.65rem;
+  margin-bottom: 0.85rem;
+}
+.tax-tab__fy-label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-size: 0.82rem;
+  font-weight: 500;
+  color: #8b949e;
+}
+.tax-tab__fy-select {
+  padding: 0.4rem 0.55rem;
+  border-radius: 6px;
+  border: 1px solid #30363d;
+  background: #21262d;
+  color: #e6edf3;
+  font-size: 0.88rem;
+  min-width: 14rem;
+}
+.tax-tab__fy-badge {
+  display: inline-block;
+  margin: 0 0 0.5rem;
+  padding: 0.25rem 0.6rem;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: #79c0ff;
+  background: rgba(88, 166, 255, 0.1);
+  border: 1px solid rgba(88, 166, 255, 0.35);
+  border-radius: 999px;
+}
+.tax-tab__btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.tax-tab__format-ref {
+  margin-top: 1rem;
+  padding: 1rem 1.15rem;
+  background: #161b22;
+  border: 1px solid #30363d;
+  border-radius: 8px;
+}
+.tax-tab__format-title {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: #8b949e;
+  margin: 0 0 0.65rem;
+}
+.tax-tab__format-pre {
+  background: #0d1117;
+  color: #7ee787;
+  border: 1px solid #21262d;
+  border-radius: 6px;
+  padding: 0.75rem 1rem;
+  font-family: ui-monospace, monospace;
+  font-size: 0.82rem;
+  overflow-x: auto;
+  margin: 0 0 0.75rem;
+  line-height: 1.45;
+}
+.tax-tab__format-list {
+  margin: 0;
+  padding: 0 0 0 1.25rem;
+  font-size: 0.84rem;
+  color: #8b949e;
+  line-height: 1.6;
+  li {
+    margin-bottom: 0.25rem;
+  }
+  code {
+    background: #21262d;
+    padding: 0.1rem 0.3rem;
+    border-radius: 3px;
+    font-size: 0.9em;
+    color: #e6edf3;
+  }
+}
+
 .data-tab-wrap {
   min-height: 480px;
   border: 1px solid #30363d;

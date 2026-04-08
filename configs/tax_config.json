@@ -1,0 +1,33 @@
+{
+  "description": "ITR foreign-asset schedule template + tax slab config. Edit via the Tax Config tab or directly in this file.",
+  "foreignAssetTemplate": {
+    "CountryName": "2-United States Of America",
+    "CountryCodeExcludingIndia": "2",
+    "NameOfEntity": "NVIDIA",
+    "AddressOfEntity": "2788 San Tomas Expressway Santa Clara,CA",
+    "ZipCode": "95051",
+    "NatureOfEntity": "Shares",
+    "TotGrossAmtPaidCredited": 0,
+    "TotGrossProceeds": 0
+  },
+  "slabs": [
+    {
+      "id": "ltcg",
+      "label": "Long-term capital gains (≥ 2 years)",
+      "holdingPeriodMinYears": 2,
+      "taxPercent": 12.5
+    },
+    {
+      "id": "stcg",
+      "label": "Short-term capital gains (< 2 years)",
+      "holdingPeriodMinYears": 0,
+      "taxPercent": 30
+    }
+  ],
+  "notes": [
+    "foreignAssetTemplate: default key-values merged into each row of the generated ITR JSON. Per-share fields (InterestAcquiringDate, InitialValOfInvstmnt, PeakBalanceDuringPeriod, ClosingBalance) are computed from holdings data.",
+    "slabs: evaluated top-to-bottom; first matching holdingPeriodMinYears wins.",
+    "holdingPeriodMinYears: minimum years held for this slab to apply.",
+    "taxPercent: flat rate applied to capital gain (value today − cost basis)."
+  ]
+}

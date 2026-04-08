@@ -68,4 +68,17 @@ export class DashboardService {
   getMarkSoldCanUndo(): Observable<{ canUndo: boolean }> {
     return this.http.get<{ canUndo: boolean }>(`${this.apiUrl}/mark-sold-can-undo?t=${Date.now()}`);
   }
+
+  getTaxConfig(): Observable<any> {
+    return this.http.get<any>(`${this.apiUrl}/tax-config?t=${Date.now()}`);
+  }
+
+  putTaxConfig(body: any): Observable<{ success: boolean }> {
+    return this.http.put<{ success: boolean }>(`${this.apiUrl}/tax-config`, body);
+  }
+
+  generateTaxDoc(fy?: number): Observable<{ fyLabel: string; rows: any[] }> {
+    const params = fy ? `fy=${fy}&t=${Date.now()}` : `t=${Date.now()}`;
+    return this.http.get<{ fyLabel: string; rows: any[] }>(`${this.apiUrl}/generate-tax-doc?${params}`);
+  }
 }

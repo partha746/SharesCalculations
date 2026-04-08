@@ -84,6 +84,7 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
   private lastShownTotalValueUsdMovement: { diffUsd: number; diffPct: number } | null = null;
   private lastShownTotalValueInrMovement: { diffInr: number; diffPct: number } | null = null;
   private lastShownTotalSharesMovement: { diff: number; diffPct: number } | null = null;
+  private lastShownInrChangeBreakdown: { priceEffectInr: number; fxEffectInr: number; prevRate: number; curRate: number } | null = null;
   holdings: HoldingRow[] = [];
   loading = true;
   error: string | null = null;
@@ -107,7 +108,25 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
   /** Last row clicked (without shift) for shift-click range selection. */
   private lastClickedRowKey: string | null = null;
   /** Tab: Holdings vs Sold Shares vs Playground vs Financial planning */
-  activeTab: 'holdings' | 'sold' | 'playground' | 'data' | 'financial' = 'holdings';
+  activeTab: 'holdings' | 'sold' | 'playground' | 'data' | 'financial' | 'tax' = 'holdings';
+
+  taxConfig: any = null;
+  taxConfigRaw = '';
+  taxConfigLoading = false;
+  taxConfigError: string | null = null;
+  taxConfigSaving = false;
+  taxConfigSaved = false;
+  taxDocOutput = '';
+  taxDocFyLabel = '';
+  taxDocLoading = false;
+  taxDocError: string | null = null;
+  taxDocSelectedFy: number = new Date().getFullYear();
+  readonly taxDocFyOptions: number[] = (() => {
+    const cur = new Date().getFullYear();
+    const opts: number[] = [];
+    for (let y = cur + 1; y >= cur - 5; y--) opts.push(y);
+    return opts;
+  })();
   /** Cached sanitized URL for Data tab iframe (set once to avoid reload on every change detection). */
   webAppIframeSrc!: SafeResourceUrl;
   soldRows: SoldRow[] = [];
@@ -1155,6 +1174,88 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
     });
   }
 
+  loadTaxConfig(): void {
+    this.taxConfigLoading = true;
+    this.taxConfigError = null;
+    this.taxConfigSaved = false;
+    this.dashboardService.getTaxConfig().subscribe({
+      next: (data: any) => {
+        this.taxConfig = data;
+        this.taxConfigRaw = JSON.stringify(data, null, 2);
+        this.taxConfigLoading = false;
+        this.cdr.markForCheck();
+      },
+      error: (err: any) => {
+        this.taxConfigError = err?.error?.error || 'Failed to load tax config';
+        this.taxConfigLoading = false;
+        this.cdr.markForCheck();
+      },
+    });
+  }
+
+  saveTaxConfig(): void {
+    this.taxConfigSaving = true;
+    this.taxConfigSaved = false;
+    this.taxConfigError = null;
+    let parsed: any;
+    try {
+      parsed = JSON.parse(this.taxConfigRaw);
+    } catch {
+      this.taxConfigError = 'Invalid JSON — fix syntax errors before saving';
+      this.taxConfigSaving = false;
+      return;
+    }
+    this.dashboardService.putTaxConfig(parsed).subscribe({
+      next: () => {
+        this.taxConfig = parsed;
+        this.taxConfigSaving = false;
+        this.taxConfigSaved = true;
+        this.cdr.markForCheck();
+      },
+      error: (err: any) => {
+        this.taxConfigError = err?.error?.error || 'Failed to save';
+        this.taxConfigSaving = false;
+        this.cdr.markForCheck();
+      },
+    });
+  }
+
+  generateTaxDoc(): void {
+    this.taxDocLoading = true;
+    this.taxDocError = null;
+    this.dashboardService.generateTaxDoc(this.taxDocSelectedFy).subscribe({
+      next: (resp) => {
+        this.taxDocFyLabel = resp.fyLabel;
+        this.taxDocOutput = JSON.stringify(resp.rows, null, 2);
+        this.taxDocLoading = false;
+        this.cdr.markForCheck();
+      },
+      error: (err: any) => {
+        this.taxDocError = err?.error?.error || 'Failed to generate tax doc';
+        this.taxDocLoading = false;
+        this.cdr.markForCheck();
+      },
+    });
+  }
+
+  taxDocFyDisplayLabel(fy: number): string {
+    return `FY ${fy - 1}\u2013${String(fy).slice(-2)} (AY ${fy}\u2013${String(fy + 1).slice(-2)})`;
+  }
+
+  copyTaxDoc(): void {
+    navigator.clipboard.writeText(this.taxDocOutput).catch(() => {});
+  }
+
+  downloadTaxDoc(): void {
+    const blob = new Blob([this.taxDocOutput], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `AY_${this.taxDocSelectedFy}_Shares.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
   loadSold(): void {
     this.soldLoading = true;
     this.dashboardService.getSold().subscribe({
@@ -1169,9 +1270,13 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
     });
   }
 
-  setActiveTab(tab: 'holdings' | 'sold' | 'playground' | 'data' | 'financial'): void {
+  setActiveTab(tab: 'holdings' | 'sold' | 'playground' | 'data' | 'financial' | 'tax'): void {
     this.activeTab = tab;
-    if (tab === 'sold') {
+    if (tab === 'tax') {
+      if (!this.taxConfig && !this.taxConfigLoading) this.loadTaxConfig();
+      if (this.holdingsChart) { this.holdingsChart.destroy(); this.holdingsChart = null; }
+      if (this.soldChart) { this.soldChart.destroy(); this.soldChart = null; }
+    } else if (tab === 'sold') {
       if (this.holdingsChart) {
         this.holdingsChart.destroy();
         this.holdingsChart = null;
@@ -1217,6 +1322,44 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
     return this.lastShownTotalValueUsdMovement;
   }
   /** Movement vs last refresh: shares; when unchanged show last non-zero diff. */
+  /**
+   * Decompose the INR value change into price effect vs FX effect.
+   * Price effect = (curValueUsd − lastValueUsd) × curRate  (stock price moved)
+   * FX effect    = lastValueUsd × (curRate − lastRate)      (exchange rate moved)
+   * Total        = price effect + FX effect = INR diff       (always adds up)
+   */
+  get totalValueInrChangeBreakdown(): { priceEffectInr: number; fxEffectInr: number; prevRate: number; curRate: number } | null {
+    if (!this.data || !this.lastRefreshHoldings) return this.lastShownInrChangeBreakdown;
+    const curUsd = this.data.totalValueUsd;
+    const lastUsd = this.lastRefreshHoldings.totalValueUsd;
+    const lastInr = this.lastRefreshHoldings.totalValueInr;
+    if (lastUsd <= 0 || lastInr <= 0) return this.lastShownInrChangeBreakdown;
+    const curRate = this.data.usdToInrRate;
+    const prevRate = lastInr / lastUsd;
+    const priceEffectInr = (curUsd - lastUsd) * curRate;
+    const fxEffectInr = lastUsd * (curRate - prevRate);
+    if (Math.abs(priceEffectInr) >= 1 || Math.abs(fxEffectInr) >= 1) {
+      this.lastShownInrChangeBreakdown = { priceEffectInr, fxEffectInr, prevRate, curRate };
+      return this.lastShownInrChangeBreakdown;
+    }
+    return this.lastShownInrChangeBreakdown;
+  }
+
+  /** Sum of all holdings' totalPurchaseInr = your total INR cost basis (what you paid). */
+  get totalCostBasisInr(): number {
+    return this.holdings.reduce((s, r) => s + Math.round(Number(r.totalPurchaseInr) || 0), 0);
+  }
+
+  /** Unrealised gain/loss = current total value INR − cost basis INR. */
+  get totalGainLossInr(): number {
+    return (this.data?.totalValueInr ?? 0) - this.totalCostBasisInr;
+  }
+
+  get totalGainLossPct(): number {
+    const cost = this.totalCostBasisInr;
+    return cost > 0 ? (this.totalGainLossInr / cost) * 100 : 0;
+  }
+
   get totalSharesMovement(): { diff: number; diffPct: number } | null {
     if (!this.data || !this.lastRefreshHoldings) return null;
     const cur = this.data.totalShares;

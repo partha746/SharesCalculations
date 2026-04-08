@@ -95,6 +95,39 @@
             </span>
           }
         </div>
+        @if (totalValueInrChangeBreakdown) {
+          @let bd = totalValueInrChangeBreakdown;
+          <div class="total-holdings-block__breakdown">
+            <div class="total-holdings-block__breakdown-row">
+              <span class="total-holdings-block__breakdown-label">Share price effect</span>
+              <span class="total-holdings-block__breakdown-value"
+                [class.total-holdings-block__value--up]="bd.priceEffectInr > 0"
+                [class.total-holdings-block__value--down]="bd.priceEffectInr < 0">
+                {{ bd.priceEffectInr >= 0 ? '+' : '−' }}₹ {{ formatInr(Math.abs(bd.priceEffectInr)) }}
+              </span>
+            </div>
+            <div class="total-holdings-block__breakdown-row">
+              <span class="total-holdings-block__breakdown-label">USD→INR rate effect <span class="total-holdings-block__rate-hint">({{ bd.prevRate | number:'1.2-2' }} → {{ bd.curRate | number:'1.2-2' }})</span></span>
+              <span class="total-holdings-block__breakdown-value"
+                [class.total-holdings-block__value--up]="bd.fxEffectInr > 0"
+                [class.total-holdings-block__value--down]="bd.fxEffectInr < 0">
+                {{ bd.fxEffectInr >= 0 ? '+' : '−' }}₹ {{ formatInr(Math.abs(bd.fxEffectInr)) }}
+              </span>
+            </div>
+          </div>
+        }
+        <div class="total-holdings-block__divider"></div>
+        <div class="total-holdings-block__row">
+          <span class="total-holdings-block__label">INR contributed (cost basis)</span>
+          <span class="total-holdings-block__value">₹ {{ formatInr(totalCostBasisInr) }}</span>
+        </div>
+        <div class="total-holdings-block__row">
+          <span class="total-holdings-block__label">Unrealised gain / loss</span>
+          <span class="total-holdings-block__value" [class.total-holdings-block__value--up]="totalGainLossInr > 0" [class.total-holdings-block__value--down]="totalGainLossInr < 0">
+            {{ totalGainLossInr >= 0 ? '+' : '' }}₹ {{ formatInr(Math.abs(totalGainLossInr)) }}
+            <span class="total-holdings-block__pct">({{ totalGainLossPct >= 0 ? '+' : '' }}{{ totalGainLossPct | number:'1.2-2' }}%)</span>
+          </span>
+        </div>
       </div>
       <app-overview-time-card
         [marketOpen]="marketOpen"
@@ -228,9 +261,101 @@
       <button type="button" class="tab-btn" [class.tab-btn--active]="activeTab === 'sold'" (click)="setActiveTab('sold')">Sold Shares</button>
       <button type="button" class="tab-btn" [class.tab-btn--active]="activeTab === 'playground'" (click)="setActiveTab('playground')">Playground</button>
       <button type="button" class="tab-btn" [class.tab-btn--active]="activeTab === 'financial'" (click)="setActiveTab('financial')">Financial planning</button>
+      <button type="button" class="tab-btn" [class.tab-btn--active]="activeTab === 'tax'" (click)="setActiveTab('tax')">Tax Config</button>
       <button type="button" class="tab-btn tab-btn--data" [class.tab-btn--active]="activeTab === 'data'" (click)="setActiveTab('data')">Data</button>
     </div>
 
+    @if (activeTab === 'tax') {
+      <div class="tax-tab">
+        <section class="tax-tab__section">
+          <h2 class="tax-tab__title">Generated ITR Foreign-Asset JSON</h2>
+          <p class="tax-tab__hint">
+            Uses your <strong>foreignAssetTemplate</strong> keys merged with per-share data (buy date, initial value, peak, closing balance)
+            for holdings bought on or before 31 Mar of the selected FY.
+          </p>
+          <div class="tax-tab__fy-row">
+            <label class="tax-tab__fy-label">
+              Tax year
+              <select class="tax-tab__fy-select" [(ngModel)]="taxDocSelectedFy">
+                @for (fy of taxDocFyOptions; track fy) {
+                  <option [ngValue]="fy">{{ taxDocFyDisplayLabel(fy) }}</option>
+                }
+              </select>
+            </label>
+            <button type="button" class="tax-tab__btn tax-tab__btn--generate" [disabled]="taxDocLoading" (click)="generateTaxDoc()">
+              {{ taxDocLoading ? 'Generating…' : 'Generate' }}
+            </button>
+            @if (taxDocOutput) {
+              <button type="button" class="tax-tab__btn tax-tab__btn--copy" (click)="copyTaxDoc()">Copy JSON</button>
+              <button type="button" class="tax-tab__btn tax-tab__btn--download" (click)="downloadTaxDoc()">Download JSON</button>
+            }
+          </div>
+          @if (taxDocError) {
+            <p class="tax-tab__error">{{ taxDocError }}</p>
+          }
+          @if (taxDocOutput) {
+            <p class="tax-tab__fy-badge">{{ taxDocFyLabel }}</p>
+            <div class="tax-tab__editor-wrap">
+              <textarea class="tax-tab__editor tax-tab__editor--readonly" rows="24" [value]="taxDocOutput" readonly spellcheck="false"></textarea>
+            </div>
+          }
+        </section>
+
+        <section class="tax-tab__section">
+          <h2 class="tax-tab__title">Tax & ITR Config</h2>
+          <p class="tax-tab__hint">
+            Edit the <strong>foreignAssetTemplate</strong> (key names for each ITR row) and <strong>slabs</strong> (capital gains tax rates).
+            Click <strong>Save</strong> to write back to <code>configs/tax_config.json</code>.
+          </p>
+          @if (taxConfigLoading) {
+            <p class="tax-tab__status">Loading…</p>
+          }
+          @if (taxConfigError) {
+            <p class="tax-tab__error">{{ taxConfigError }}</p>
+          }
+          @if (taxConfigSaved) {
+            <p class="tax-tab__saved">Saved successfully.</p>
+          }
+          @if (!taxConfigLoading && taxConfigRaw) {
+            <div class="tax-tab__editor-wrap">
+              <textarea class="tax-tab__editor" rows="28" [(ngModel)]="taxConfigRaw" spellcheck="false"></textarea>
+            </div>
+            <div class="tax-tab__actions">
+              <button type="button" class="tax-tab__btn tax-tab__btn--save" [disabled]="taxConfigSaving" (click)="saveTaxConfig()">
+                {{ taxConfigSaving ? 'Saving…' : 'Save' }}
+              </button>
+              <button type="button" class="tax-tab__btn tax-tab__btn--reload" [disabled]="taxConfigLoading" (click)="loadTaxConfig()">Reload from file</button>
+            </div>
+          }
+        </section>
+
+        <section class="tax-tab__section tax-tab__format-ref">
+          <h3 class="tax-tab__format-title">Config JSON format reference</h3>
+          <pre class="tax-tab__format-pre">{{'{
+  "foreignAssetTemplate": {
+    "CountryName": "2-United States Of America",
+    "CountryCodeExcludingIndia": "2",
+    "NameOfEntity": "NVIDIA",
+    "AddressOfEntity": "2788 San Tomas Expressway Santa Clara,CA",
+    "ZipCode": "95051",
+    "NatureOfEntity": "Shares",
+    "TotGrossAmtPaidCredited": 0,
+    "TotGrossProceeds": 0
+  },
+  "slabs": [
+    { "id": "ltcg", "holdingPeriodMinYears": 2, "taxPercent": 12.5 },
+    { "id": "stcg", "holdingPeriodMinYears": 0, "taxPercent": 30 }
+  ]
+}'}}</pre>
+          <ul class="tax-tab__format-list">
+            <li><strong>foreignAssetTemplate</strong> — default key-values merged into each generated ITR row. Change <code>CountryName</code>, <code>AddressOfEntity</code>, <code>ZipCode</code> etc. here.</li>
+            <li>Per-share fields (<code>InterestAcquiringDate</code>, <code>InitialValOfInvstmnt</code>, <code>PeakBalanceDuringPeriod</code>, <code>ClosingBalance</code>) are computed automatically from your holdings.</li>
+            <li><strong>slabs</strong> — evaluated top-to-bottom; first matching <code>holdingPeriodMinYears</code> wins.</li>
+            <li><strong>taxPercent</strong> — flat rate applied to capital gain (value today − cost basis).</li>
+          </ul>
+        </section>
+      </div>
+    }
     @if (activeTab === 'financial') {
       <div class="financial-planning-tab">
         <app-financial-planning [dashboardNetInBankIfSellNow]="data.netInBankIfSellNow" />

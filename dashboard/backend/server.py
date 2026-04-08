@@ -930,6 +930,91 @@ def mark_sold_undo():
     return jsonify({"success": True, "undone": len(sellout_rowids)})
 
 
+_TAX_CONFIG_PATH = os.path.join(REPO_ROOT, "configs", "tax_config.json")
+
+
+@app.route("/api/tax-config", methods=["GET"])
+def get_tax_config():
+    import json as _json
+
+    if not os.path.isfile(_TAX_CONFIG_PATH):
+        return jsonify({"error": "tax_config.json not found"}), 404
+    try:
+        with open(_TAX_CONFIG_PATH, "r") as f:
+            data = _json.load(f)
+        return jsonify(data)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/tax-config", methods=["PUT"])
+def put_tax_config():
+    import json as _json
+
+    body = request.get_json()
+    if not body:
+        return jsonify({"error": "JSON body required"}), 400
+    try:
+        with open(_TAX_CONFIG_PATH, "w") as f:
+            _json.dump(body, f, indent=2)
+        return jsonify({"success": True})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/generate-tax-doc", methods=["GET"])
+def generate_tax_doc():
+    """Generate the ITR foreign-asset schedule JSON from holdings data + tax_config template.
+    Query param `fy` = assessment year (e.g. 2026 for AY 2026–27, FY starting 1 Apr 2025).
+    Defaults to current calendar year.
+    """
+    import json as _json
+    from helpers import gather_data
+
+    fy_year = request.args.get("fy", type=int) or date.today().year
+    fy_start = datetime(fy_year - 1, 4, 1)
+    fy_end = datetime(fy_year, 3, 31)
+
+    db_obj = gather_data.DB()
+    if not os.path.isfile(db_obj.db_path):
+        return jsonify({"error": "Database not found"}), 404
+    db_obj.ensure_tables()
+    db_status = db_obj.check_for_empty_db()
+    rupee_conv_obj = gather_data.RupeeConv()
+    if db_status.get("NSU"):
+        rupee_conv_obj.update_null_rupees_rate("NSU", "Buy_Date", "RupeeRate")
+    if db_status.get("ESPP"):
+        rupee_conv_obj.update_null_rupees_rate("ESPP", "Buy_Date", "RupeeRate")
+
+    template = {}
+    try:
+        with open(_TAX_CONFIG_PATH, "r") as f:
+            cfg = _json.load(f)
+        template = cfg.get("foreignAssetTemplate", {})
+    except Exception:
+        pass
+
+    datacleaner_obj = gather_data.DataCleaner()
+    shares_list = []
+
+    for stock_type in ("NSU", "ESPP"):
+        if not db_status.get(stock_type):
+            continue
+        df, *_ = gather_data.OwnStockData().generate_display_data(type=stock_type)
+        for _, row in df.iterrows():
+            invest_date = datetime.strptime(row["Buy_Date_formatted"], "%d/%m/%Y")
+            if invest_date > fy_end:
+                continue
+            entry = dict(template)
+            entry["InterestAcquiringDate"] = invest_date.strftime("%Y-%m-%d")
+            entry["InitialValOfInvstmnt"] = int(round(float(datacleaner_obj.convert_from_symbol(row["InitialValue"])), 0))
+            entry["PeakBalanceDuringPeriod"] = int(round(float(datacleaner_obj.convert_from_symbol(row["Max_Value_FY"])), 0))
+            entry["ClosingBalance"] = int(round(float(datacleaner_obj.convert_from_symbol(row["FY_Closing_Value"])), 0))
+            shares_list.append(entry)
+
+    return jsonify({"fyLabel": f"FY {fy_year - 1}–{str(fy_year)[-2:]} (AY {fy_year}–{str(fy_year + 1)[-2:]})", "rows": shares_list})
+
+
 PORT = 8080
 
 if __name__ == "__main__":

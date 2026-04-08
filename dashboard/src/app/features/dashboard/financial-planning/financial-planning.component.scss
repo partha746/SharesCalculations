@@ -332,6 +332,24 @@
   border-color: rgba(46, 160, 67, 0.55);
 }
 
+.fp-field--withdrawal {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.fp-max-withdrawal {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.fp-max-withdrawal-hint {
+  font-size: 0.7rem;
+  line-height: 1.35;
+  max-width: 32rem;
+}
+
 .fp-check {
   flex-direction: row !important;
   align-items: center;

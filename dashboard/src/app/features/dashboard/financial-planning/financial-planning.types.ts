@@ -40,7 +40,7 @@ export interface RentalIncomeStream {
   monthlyTodaysInr: number;
   /** First plan year index when rent is received (0 = year 1 of table) */
   startsInYears: number;
-  /** Annual step-up % on that stream, compounded each year after it starts (0 = only global inflation applies) */
+  /** Total nominal annual growth rate % (0 = grows with inflation only; 10 = 10% per year total) */
   incrementPctPerYear: number;
 }
 

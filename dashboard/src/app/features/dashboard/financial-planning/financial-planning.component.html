@@ -41,7 +41,7 @@
       Model income, spending, portfolio mix, retirement, and <strong>life goals</strong> (education, marriage, etc.). <strong>Monthly income</strong> lines can use an
       <strong>earning cap</strong> (e.g. a job for only the first N years). <strong>Monthly expenses</strong> can end after N plan years (0 = no end). Add
       <strong>multiple rental</strong> streams with start year and
-      <strong>+%/yr</strong> (on top of inflation). <span class="fp-callout-accent">Green fields</span> mirror typical spreadsheet inputs.
+      <strong>Growth %/yr</strong> (total nominal increase). <span class="fp-callout-accent">Green fields</span> mirror typical spreadsheet inputs.
     </p>
   </aside>
 
@@ -101,7 +101,7 @@
 
     <h3 class="fp-subtitle">Rental income <span class="fp-muted">(multiple streams, through end of plan)</span></h3>
     <p class="fp-muted fp-hint">
-      Each line pays from <strong>Starts (yrs)</strong> through your last projected year (working + retired). <strong>+%/yr</strong> compounds on that stream after it starts, in addition to global inflation.
+      Each line pays from <strong>Starts (yrs)</strong> through your last projected year (working + retired). <strong>Growth %/yr</strong> is the <strong>total nominal</strong> annual increase (e.g. 10% = rent goes up 10% per year). Set <strong>0</strong> to track inflation only.
     </p>
     <div class="fp-table-scroll">
       <table class="fp-table fp-table--rentals">
@@ -110,7 +110,7 @@
             <th>Label</th>
             <th>Monthly ₹</th>
             <th>Starts (yrs)</th>
-            <th>+% / yr</th>
+            <th>Growth %/yr</th>
             <th></th>
           </tr>
         </thead>
@@ -120,7 +120,7 @@
               <td><input type="text" class="fp-input fp-input--wide" [(ngModel)]="st.label" /></td>
               <td><input type="number" min="0" class="fp-input fp-input--green fp-input--wide" [(ngModel)]="st.monthlyTodaysInr" /></td>
               <td><input type="number" min="0" class="fp-input fp-input--green fp-input--end-yrs" [(ngModel)]="st.startsInYears" title="Plan year index when rent begins (0 = first year)" /></td>
-              <td><input type="number" min="0" step="0.1" class="fp-input fp-input--green" [(ngModel)]="st.incrementPctPerYear" title="Annual rent hike % on this stream, after it starts" /></td>
+              <td><input type="number" min="0" step="0.1" class="fp-input fp-input--green" [(ngModel)]="st.incrementPctPerYear" title="Total nominal annual growth rate on this stream from its start year; 0 = grows with inflation only" /></td>
               <td>
                 <button type="button" class="fp-btn-remove" (click)="removeRentalStream(st.id)">Remove</button>
               </td>
@@ -157,7 +157,7 @@
         </tr>
         @if (hasRentalStartingAfterYear0) {
           <tr class="fp-row-total fp-row-total--note">
-            <td>Total / month when every rental line has started <span class="fp-muted">(today’s ₹, before +%/yr)</span></td>
+            <td>Total / month when every rental line has started <span class="fp-muted">(today’s ₹, before growth)</span></td>
             <td>₹ {{ formatInr(totalMonthlyIncomeFullRunRateInr) }}</td>
           </tr>
         }
@@ -353,7 +353,13 @@
       </tbody>
     </table>
     <div class="fp-grid fp-grid--savings">
-      <label>Post-retirement monthly need (today’s INR) <input type="number" min="0" class="fp-input fp-input--green fp-input--wide" [(ngModel)]="postRetirementMonthlyTodaysInr" /></label>
+      <div class="fp-field fp-field--withdrawal">
+        <label>Post-retirement monthly need (today’s INR) <input type="number" min="0" class="fp-input fp-input--green fp-input--wide" [(ngModel)]="postRetirementMonthlyTodaysInr" /></label>
+        <div class="fp-max-withdrawal">
+          <button type="button" class="fp-sync-overview" (click)="applyMaxWithdrawal()">Use max sustainable: ₹ {{ formatInr(maxSustainableMonthlyWithdrawal) }} / month</button>
+          <span class="fp-muted fp-max-withdrawal-hint">Highest monthly draw (today’s ₹) that keeps portfolio ≥ 0 at age {{ lifeExpectancy }}, rounded down to ₹1,000</span>
+        </div>
+      </div>
       <label>Step-up on annual savings (% p.a.) <input type="number" min="0" step="0.1" class="fp-input fp-input--green" [(ngModel)]="stepUpSavingsPct" /></label>
       <label class="fp-check">
         <input type="checkbox" [(ngModel)]="useComputedAnnualContribution" />
