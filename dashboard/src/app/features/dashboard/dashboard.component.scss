@@ -33,40 +33,76 @@
   margin: 1.25rem 0 0.5rem;
   color: #8b949e;
 }
-.live-price-label-threshold {
+.live-price-chart-controls {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
-  margin-bottom: 0.5rem;
-  font-size: 0.9rem;
+  gap: 0.75rem;
+  margin-bottom: 0.65rem;
+}
+
+.live-price-chart-meta {
+  display: flex;
+  align-items: center;
+}
+
+.live-price-chart-meta__pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.28rem 0.6rem;
+  border-radius: 999px;
+  background: rgba(56, 139, 253, 0.1);
+  border: 1px solid rgba(56, 139, 253, 0.25);
   color: #8b949e;
-  label { white-space: nowrap; }
-  .live-price-threshold-input {
-    width: 4rem;
-    padding: 0.25rem 0.5rem;
-    background: #21262d;
-    border: 1px solid #30363d;
-    border-radius: 4px;
-    color: #e6edf3;
-    font-size: 0.9rem;
+  font-size: 0.76rem;
+  white-space: nowrap;
+}
+
+.live-price-chart-toggle {
+  display: flex;
+  gap: 0;
+  border: 1px solid #30363d;
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.chart-mode-btn {
+  font: inherit;
+  font-size: 0.82rem;
+  font-weight: 500;
+  padding: 0.35rem 0.85rem;
+  cursor: pointer;
+  border: none;
+  background: #21262d;
+  color: #8b949e;
+  transition: background 0.12s ease, color 0.12s ease;
+  &:hover:not(.chart-mode-btn--active) {
+    background: #30363d;
+    color: #c9d1d9;
   }
-  .live-price-clear-graph-btn {
-    margin-left: auto;
-    padding: 0.35rem 0.6rem;
-    font-size: 0.8rem;
-    background: #21262d;
-    border: 1px solid #30363d;
-    border-radius: 4px;
-    color: #8b949e;
-    cursor: pointer;
-    &:hover:not(:disabled) {
-      border-color: #58a6ff;
-      color: #58a6ff;
-    }
-    &:disabled {
-      opacity: 0.7;
-      cursor: not-allowed;
-    }
+}
+
+.chart-mode-btn--active {
+  background: #388bfd;
+  color: #fff;
+}
+
+.live-price-clear-graph-btn {
+  margin-left: auto;
+  padding: 0.35rem 0.6rem;
+  font-size: 0.8rem;
+  font-family: inherit;
+  background: #21262d;
+  border: 1px solid #30363d;
+  border-radius: 4px;
+  color: #8b949e;
+  cursor: pointer;
+  &:hover:not(:disabled) {
+    border-color: #58a6ff;
+    color: #58a6ff;
+  }
+  &:disabled {
+    opacity: 0.7;
+    cursor: not-allowed;
   }
 }
 .live-price-day-ticker-head {
@@ -137,9 +173,9 @@
   border: 1px solid #30363d;
   border-radius: 8px;
   padding: 1rem;
-  height: 280px;
-  margin-bottom: 1rem;
-  overflow: visible;
+  height: 440px;
+  margin-bottom: 1.5rem;
+  overflow: hidden;
   position: relative;
   .holdings-chart {
     display: block;
@@ -183,7 +219,7 @@
   border: 1px solid #30363d;
   border-radius: 8px;
   padding: 1rem 1.25rem;
-  min-width: 260px;
+  min-width: 280px;
   min-height: 170px;
   display: flex;
   flex-direction: column;
@@ -214,7 +250,8 @@
 .live-price-block__row {
   display: flex;
   align-items: baseline;
-  gap: 0.5rem;
+  flex-wrap: wrap;
+  gap: 0.35rem 0.5rem;
   font-size: 1.1rem;
   margin-top: 0.5rem;
   &:first-of-type { margin-top: 0; }
@@ -241,7 +278,8 @@
   font-size: 0.9em;
   font-weight: 500;
   color: #8b949e;
-  white-space: nowrap;
+  white-space: normal;
+  line-height: 1.35;
 }
 .live-price-block__diff--up {
   color: #3fb950;

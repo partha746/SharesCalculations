@@ -13,10 +13,12 @@ import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { DomSanitizer, SafeResourceUrl } from '@angular/platform-browser';
 import { Chart } from 'chart.js/auto';
+import 'chartjs-adapter-date-fns';
+import { CandlestickController, CandlestickElement, OhlcController, OhlcElement } from 'chartjs-chart-financial';
 import ChartDataLabels from 'chartjs-plugin-datalabels';
 import { DashboardService } from '../../core/services/dashboard.service';
 
-Chart.register(ChartDataLabels);
+Chart.register(ChartDataLabels, CandlestickController, CandlestickElement, OhlcController, OhlcElement);
 import { DashboardResponse, HoldingRow, LivePriceDayTickerItem, SoldRow } from '../../core/models/dashboard.types';
 
 /** Recommendation row: lot with tax at simulation target price and qty to sell (may be partial). */
@@ -226,7 +228,7 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
   marketNextCloseMs: number | null = null;
   marketNextPreMarketStartMs: number | null = null;
   /** Show data label when |diff from open %| is at least this (e.g. 1.6). */
-  livePriceLabelThresholdPct = 1.6;
+  livePriceChartMode: 'line' | 'candlestick' = 'line';
   /** True while clearing the live price history (graph) from the backend. */
   clearGraphInProgress = false;
   private livePricePollingInterval: ReturnType<typeof setInterval> | null = null;
@@ -684,42 +686,84 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
     });
   }
 
-  /** Called when user changes the data-label threshold; redraw chart so labels use new value. */
-  onLivePriceLabelThresholdChange(): void {
-    const n = Number(this.livePriceLabelThresholdPct);
-    if (!Number.isFinite(n) || n < 0) this.livePriceLabelThresholdPct = 0;
-    if (this.livePriceChart) this.livePriceChart.update('none');
-    this.cdr.markForCheck();
+  setLivePriceChartMode(mode: 'line' | 'candlestick'): void {
+    if (this.livePriceChartMode === mode) return;
+    this.livePriceChartMode = mode;
+    if (this.livePriceChart) { this.livePriceChart.destroy(); this.livePriceChart = null; }
+    this.initOrUpdateLivePriceChart();
+  }
+
+  get livePriceLineSessionLabel(): string {
+    return this.livePriceDayTickerItems[0]?.label ?? 'Latest session';
+  }
+
+  private getLatestLivePriceSessionHistory(): { timestamp: number; livePriceUsd: number; usdToInrRate: number }[] {
+    if (!this.livePriceHistory.length) return [];
+    const lastKey = this.getEtDateKey(this.livePriceHistory[this.livePriceHistory.length - 1].timestamp);
+    return this.livePriceHistory.filter((p) => this.getEtDateKey(p.timestamp) === lastKey);
   }
 
   private updateLivePriceChartData(): void {
     if (!this.livePriceChart || this.livePriceHistory.length < 2) return;
-    const h = this.livePriceHistory;
-    this.livePriceOpenByDay = this.buildLivePriceOpenByDay(h, this.data?.openPriceUsd);
+    this.livePriceOpenByDay = this.buildLivePriceOpenByDay(this.livePriceHistory, this.data?.openPriceUsd);
     this.buildLivePriceDayBoundaryIndices();
-    this.livePriceChart.data.labels = h.map((p) => {
-      const d = new Date(p.timestamp);
-      return d.toLocaleString('en-IN', { month: 'short', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false });
-    });
-    const nvdaPrices = h.map((p) => p.livePriceUsd);
-    const avg = nvdaPrices.reduce((a, b) => a + b, 0) / nvdaPrices.length;
-    (this.livePriceChart.data.datasets[0] as { data: number[] }).data = nvdaPrices;
-    (this.livePriceChart.data.datasets[1] as { data: number[] }).data = nvdaPrices.map(() => avg);
+    if (this.livePriceChartMode === 'candlestick') {
+      (this.livePriceChart.data.datasets[0] as any).data = this.buildCandlestickData();
+    } else {
+      const h = this.getLatestLivePriceSessionHistory();
+      const open = h.length ? (this.livePriceOpenByDay.get(this.getEtDateKey(h[0].timestamp)) ?? h[0].livePriceUsd) : null;
+      this.livePriceChart.data.labels = h.map((p) => this.formatXLabel(p.timestamp, true));
+      (this.livePriceChart.data.datasets[0] as any).data = h.map((p) => p.livePriceUsd);
+      (this.livePriceChart.data.datasets[1] as any).data = h.map(() => open);
+    }
     this.livePriceChart.update('none');
+  }
+
+  private formatXLabel(ts: number, intraday = false): string {
+    return new Date(ts).toLocaleString('en-US', intraday ? {
+      hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'America/New_York',
+    } : {
+      month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
+      hour12: false, timeZone: 'America/New_York',
+    });
+  }
+
+  private buildCandlestickData(): { x: number; o: number; h: number; l: number; c: number }[] {
+    const items = [...this.livePriceDayTickerItems].reverse();
+    return items.map((d) => {
+      const dayMs = new Date(d.dateKey + 'T12:00:00').getTime();
+      return { x: dayMs, o: d.open, h: d.high, l: d.low, c: d.close };
+    });
   }
 
   private createLivePriceChart(): void {
     const canvas = this.livePriceChartCanvas?.nativeElement;
     if (!canvas || this.livePriceHistory.length < 2 || this.livePriceChart) return;
-    const h = this.livePriceHistory;
-    this.livePriceOpenByDay = this.buildLivePriceOpenByDay(h, this.data?.openPriceUsd);
+    this.livePriceOpenByDay = this.buildLivePriceOpenByDay(this.livePriceHistory, this.data?.openPriceUsd);
     this.buildLivePriceDayBoundaryIndices();
-    const labels = h.map((p) => {
-      const d = new Date(p.timestamp);
-      return d.toLocaleString('en-IN', { month: 'short', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false });
-    });
-    const nvdaPrices = h.map((p) => p.livePriceUsd);
-    const avg = nvdaPrices.reduce((a, b) => a + b, 0) / nvdaPrices.length;
+
+    if (this.livePriceChartMode === 'candlestick') {
+      this.createCandlestickChart(canvas);
+    } else {
+      this.createLineChart(canvas);
+    }
+  }
+
+  private createLineChart(canvas: HTMLCanvasElement): void {
+    const h = this.getLatestLivePriceSessionHistory();
+    if (h.length < 2) return;
+    const labels = h.map((p) => this.formatXLabel(p.timestamp, true));
+    const prices = h.map((p) => p.livePriceUsd);
+    const dayKey = this.getEtDateKey(h[0].timestamp);
+    const open = this.livePriceOpenByDay.get(dayKey) ?? h[0].livePriceUsd;
+    const avg = prices.reduce((a, b) => a + b, 0) / prices.length;
+
+    const ctx2d = canvas.getContext('2d')!;
+    const gradient = ctx2d.createLinearGradient(0, 0, 0, canvas.parentElement?.clientHeight || 400);
+    gradient.addColorStop(0, 'rgba(56, 139, 253, 0.22)');
+    gradient.addColorStop(0.68, 'rgba(56, 139, 253, 0.05)');
+    gradient.addColorStop(1, 'rgba(56, 139, 253, 0)');
+
     this.livePriceChart = new Chart(canvas, {
       type: 'line',
       data: {
@@ -727,81 +771,38 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
         datasets: [
           {
             label: 'NVDA (USD)',
-            data: nvdaPrices,
+            data: prices,
             borderColor: '#388bfd',
-            pointRadius: 1,
-            pointHoverRadius: 2,
-            backgroundColor: 'rgba(56, 139, 253, 0.1)',
+            borderWidth: 2,
+            pointRadius: (ctx: any) => ctx.dataIndex === prices.length - 1 ? 3 : 0,
+            pointHoverRadius: 5,
+            pointBackgroundColor: '#388bfd',
+            pointHoverBackgroundColor: '#58a6ff',
+            backgroundColor: gradient,
+            fill: true,
+            tension: 0.25,
+            datalabels: { display: false },
+          },
+          {
+            label: 'Session open',
+            data: prices.map(() => open),
+            borderColor: 'rgba(139, 148, 158, 0.75)',
+            borderDash: [5, 4],
+            borderWidth: 1,
+            pointRadius: 0,
             fill: false,
-            yAxisID: 'y',
-            tension: 0.2,
-            datalabels: {
-              display: (ctx: { dataIndex: number }) => {
-                const i = ctx.dataIndex;
-                const point = this.livePriceHistory[i];
-                if (!point) return false;
-                const isFirst = this.livePriceFirstOfDayIndices.has(i);
-                const isLast = this.livePriceLastOfDayIndices.has(i);
-                if (isFirst && isLast) return false;
-                if (isFirst || isLast) return true;
-                const openPrice = this.livePriceOpenByDay.get(this.getEtDateKey(point.timestamp));
-                if (openPrice == null || openPrice === 0) return false;
-                const diffPct = ((point.livePriceUsd - openPrice) / openPrice) * 100;
-                const threshold = this.livePriceLabelThresholdPct;
-                return Math.abs(diffPct) >= threshold;
-              },
-              formatter: (value: number, ctx: { dataIndex: number }) => {
-                const i = ctx.dataIndex;
-                const v = '$' + Number(value).toFixed(2);
-                const isFirst = this.livePriceFirstOfDayIndices.has(i);
-                const isLast = this.livePriceLastOfDayIndices.has(i);
-                if (isFirst && isLast) return 'Start/End ' + v;
-                if (isFirst) return 'Start ' + v;
-                if (isLast) return 'End ' + v;
-                return v;
-              },
-              anchor: (ctx: { dataIndex: number }) => {
-                const i = ctx.dataIndex;
-                const isFirst = this.livePriceFirstOfDayIndices.has(i);
-                const isLast = this.livePriceLastOfDayIndices.has(i);
-                if (isFirst && !isLast) return 'end';
-                if (isLast && !isFirst) return 'start';
-                return 'center';
-              },
-              align: (ctx: { dataIndex: number }) => {
-                const i = ctx.dataIndex;
-                const isFirst = this.livePriceFirstOfDayIndices.has(i);
-                const isLast = this.livePriceLastOfDayIndices.has(i);
-                if (isFirst && !isLast) return 'top';
-                if (isLast && !isFirst) return 'bottom';
-                if (isFirst && isLast) return 'top';
-                return 'bottom';
-              },
-              offset: (ctx: { dataIndex: number }) => {
-                const i = ctx.dataIndex;
-                const isFirst = this.livePriceFirstOfDayIndices.has(i);
-                const isLast = this.livePriceLastOfDayIndices.has(i);
-                if (isFirst && !isLast) return 4;
-                if (isLast && !isFirst) return 4;
-                if (isFirst && isLast) return 6;
-                return 2;
-              },
-              color: '#e6edf3',
-              font: { size: 10 },
-              clip: false,
-            },
+            tension: 0,
+            datalabels: { display: false },
           },
           {
             label: 'Average',
-            data: nvdaPrices.map(() => avg),
-            borderColor: '#7ee787',
-            backgroundColor: 'transparent',
-            fill: false,
-            yAxisID: 'y',
-            borderDash: [6, 4],
-            tension: 0,
+            data: prices.map(() => avg),
+            borderColor: 'rgba(126, 231, 135, 0.95)',
+            borderDash: [3, 3],
+            borderWidth: 1,
             pointRadius: 0,
-            pointHoverRadius: 4,
+            fill: false,
+            tension: 0,
             datalabels: { display: false },
           },
         ],
@@ -810,38 +811,158 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
         animation: false,
         responsive: true,
         maintainAspectRatio: false,
-        layout: { padding: { top: 40, right: 72, bottom: 40, left: 56 } },
+        layout: { padding: { top: 8, right: 8, bottom: 4, left: 4 } },
         interaction: { mode: 'index', intersect: false },
         plugins: {
-          legend: { position: 'top' },
+          legend: {
+            display: true,
+            position: 'top',
+            align: 'start',
+            labels: { color: '#8b949e', boxWidth: 14, usePointStyle: false, padding: 14 },
+          },
           tooltip: {
             enabled: true,
+            backgroundColor: 'rgba(22, 27, 34, 0.95)',
+            borderColor: '#30363d',
+            borderWidth: 1,
+            titleColor: '#e6edf3',
+            bodyColor: '#c9d1d9',
+            padding: 10,
+            cornerRadius: 6,
+            displayColors: false,
             callbacks: {
-              afterBody: (tooltipItems: { dataIndex: number }[]) => {
-                if (tooltipItems.length === 0) return '';
-                const idx = tooltipItems[0].dataIndex;
-                const point = this.livePriceHistory[idx];
-                if (!point) return '';
-                const openPrice = this.livePriceOpenByDay.get(this.getEtDateKey(point.timestamp));
-                if (openPrice == null || openPrice === 0) return '';
-                const diff = point.livePriceUsd - openPrice;
-                const pct = (diff / openPrice) * 100;
+              title: (items: any[]) => {
+                if (!items.length) return '';
+                const p = h[items[0].dataIndex];
+                return new Date(p.timestamp).toLocaleString('en-US', {
+                  weekday: 'short', month: 'short', day: 'numeric',
+                  hour: '2-digit', minute: '2-digit', hour12: true, timeZone: 'America/New_York',
+                }) + ' ET';
+              },
+              label: (item: any) => {
+                if (item.datasetIndex === 0) return `NVDA: $${Number(item.raw).toFixed(2)}`;
+                if (item.datasetIndex === 1) return `Session open: $${open.toFixed(2)}`;
+                return `Average: $${avg.toFixed(2)}`;
+              },
+              afterBody: (items: any[]) => {
+                if (!items.length) return '';
+                const p = h[items[0].dataIndex];
+                const diff = p.livePriceUsd - open;
+                const pct = open ? (diff / open) * 100 : 0;
                 const sign = diff >= 0 ? '+' : '';
-                return `Diff from open: ${sign}$${diff.toFixed(2)} (${sign}${pct.toFixed(2)}%)`;
+                return `Change from open: ${sign}$${diff.toFixed(2)} (${sign}${pct.toFixed(2)}%)`;
               },
             },
           },
         },
         scales: {
           x: {
-            ticks: { color: '#8b949e', maxRotation: 45, maxTicksLimit: 12 },
-            title: { display: true, text: 'Time', color: '#8b949e' },
+            ticks: {
+              color: '#8b949e',
+              maxRotation: 0,
+              autoSkip: true,
+              maxTicksLimit: 10,
+              font: { size: 10 },
+            },
+            grid: { display: false },
           },
           y: {
-            position: 'left',
-            title: { display: true, text: 'NVDA ($)', color: '#8b949e' },
-            ticks: { color: '#8b949e' },
-            grid: { drawOnChartArea: true },
+            position: 'right' as const,
+            ticks: {
+              color: '#8b949e',
+              font: { size: 11 },
+              padding: 8,
+              callback: (value: any) => '$' + Number(value).toFixed(2),
+            },
+            grid: { color: 'rgba(48, 54, 61, 0.4)', drawTicks: false },
+            border: { display: false },
+            grace: '4%',
+          },
+        },
+      },
+    });
+  }
+
+  private createCandlestickChart(canvas: HTMLCanvasElement): void {
+    const ohlcData = this.buildCandlestickData();
+    if (!ohlcData.length) return;
+
+    this.livePriceChart = new Chart(canvas, {
+      type: 'candlestick' as any,
+      data: {
+        datasets: [
+          {
+            label: 'NVDA OHLC',
+            data: ohlcData as any,
+            backgroundColors: { up: 'rgba(63, 185, 80, 0.45)', down: 'rgba(248, 81, 73, 0.45)', unchanged: 'rgba(139, 148, 158, 0.45)' },
+            borderColors: { up: '#3fb950', down: '#f85149', unchanged: '#8b949e' },
+            borderWidth: 1,
+            parsing: false,
+            datalabels: { display: false },
+          } as any,
+        ],
+      },
+      options: {
+        animation: false,
+        responsive: true,
+        maintainAspectRatio: false,
+        layout: { padding: { top: 12, right: 12, bottom: 4, left: 4 } },
+        plugins: {
+          legend: {
+            display: true,
+            position: 'top',
+            align: 'start',
+            labels: { color: '#8b949e', boxWidth: 14, padding: 14 },
+          },
+          tooltip: {
+            enabled: true,
+            backgroundColor: 'rgba(22, 27, 34, 0.95)',
+            borderColor: '#30363d',
+            borderWidth: 1,
+            titleColor: '#e6edf3',
+            bodyColor: '#c9d1d9',
+            padding: 10,
+            cornerRadius: 6,
+            displayColors: false,
+            callbacks: {
+              title: (items: any[]) => {
+                if (!items.length) return '';
+                const raw = items[0].raw as { x: number };
+                return new Date(raw.x).toLocaleDateString('en-US', {
+                  weekday: 'short', month: 'short', day: 'numeric', timeZone: 'America/New_York',
+                });
+              },
+              label: (item: any) => {
+                const r = item.raw as { o: number; h: number; l: number; c: number };
+                return [
+                  `Open: $${r.o.toFixed(2)}`,
+                  `High: $${r.h.toFixed(2)}`,
+                  `Low:  $${r.l.toFixed(2)}`,
+                  `Close: $${r.c.toFixed(2)}`,
+                ] as any;
+              },
+            },
+          },
+        },
+        scales: {
+          x: {
+            type: 'timeseries' as any,
+            offset: true,
+            time: { unit: 'day', displayFormats: { day: 'MMM d' }, tooltipFormat: 'MMM d, yyyy' },
+            ticks: { color: '#8b949e', font: { size: 11 }, maxRotation: 0, source: 'data' as any },
+            grid: { display: false },
+          },
+          y: {
+            type: 'linear' as any,
+            position: 'right' as const,
+            ticks: {
+              color: '#8b949e',
+              font: { size: 11 },
+              padding: 8,
+              callback: (value: any) => '$' + Number(value).toFixed(2),
+            },
+            grid: { color: 'rgba(48, 54, 61, 0.4)', drawTicks: false },
+            border: { display: false },
           },
         },
       },
@@ -1301,46 +1422,76 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
     }
   }
 
-  /** Movement vs last refresh: total value INR; when unchanged show last non-zero diff. */
-  get totalValueInrMovement(): { diffInr: number; diffPct: number } | null {
-    if (!this.data || !this.lastRefreshHoldings) return null;
-    const cur = this.data.totalValueInr;
-    const last = this.lastRefreshHoldings.totalValueInr;
-    if (last === 0) return this.lastShownTotalValueInrMovement;
-    const diffInr = cur - last;
-    if (Math.abs(diffInr) >= 1) return { diffInr, diffPct: (diffInr / last) * 100 };
-    return this.lastShownTotalValueInrMovement;
-  }
-  /** Movement vs last refresh: total value USD; when unchanged show last non-zero diff. */
+  /** Movement vs previous day close: total value USD. Falls back to last refresh if prev close unavailable. */
   get totalValueUsdMovement(): { diffUsd: number; diffPct: number } | null {
-    if (!this.data || !this.lastRefreshHoldings) return null;
+    if (!this.data) return this.lastShownTotalValueUsdMovement;
     const cur = this.data.totalValueUsd;
+    const prevCloseValUsd = this.data.previousCloseValueUsd;
+    if (prevCloseValUsd != null && prevCloseValUsd > 0) {
+      const diffUsd = cur - prevCloseValUsd;
+      if (Math.abs(diffUsd) >= 0.01) {
+        this.lastShownTotalValueUsdMovement = { diffUsd, diffPct: (diffUsd / prevCloseValUsd) * 100 };
+      }
+      return this.lastShownTotalValueUsdMovement;
+    }
+    if (!this.lastRefreshHoldings) return this.lastShownTotalValueUsdMovement;
     const last = this.lastRefreshHoldings.totalValueUsd;
     if (last === 0) return this.lastShownTotalValueUsdMovement;
     const diffUsd = cur - last;
     if (Math.abs(diffUsd) >= 0.01) return { diffUsd, diffPct: (diffUsd / last) * 100 };
     return this.lastShownTotalValueUsdMovement;
   }
-  /** Movement vs last refresh: shares; when unchanged show last non-zero diff. */
+
+  /** Movement vs previous day close: total value INR. Falls back to last refresh if prev close unavailable. */
+  get totalValueInrMovement(): { diffInr: number; diffPct: number } | null {
+    if (!this.data) return this.lastShownTotalValueInrMovement;
+    const cur = this.data.totalValueInr;
+    const prevCloseValInr = this.data.previousCloseValueInr;
+    if (prevCloseValInr != null && prevCloseValInr > 0) {
+      const diffInr = cur - prevCloseValInr;
+      if (Math.abs(diffInr) >= 1) {
+        this.lastShownTotalValueInrMovement = { diffInr, diffPct: (diffInr / prevCloseValInr) * 100 };
+      }
+      return this.lastShownTotalValueInrMovement;
+    }
+    if (!this.lastRefreshHoldings) return this.lastShownTotalValueInrMovement;
+    const last = this.lastRefreshHoldings.totalValueInr;
+    if (last === 0) return this.lastShownTotalValueInrMovement;
+    const diffInr = cur - last;
+    if (Math.abs(diffInr) >= 1) return { diffInr, diffPct: (diffInr / last) * 100 };
+    return this.lastShownTotalValueInrMovement;
+  }
+
   /**
-   * Decompose the INR value change into price effect vs FX effect.
-   * Price effect = (curValueUsd − lastValueUsd) × curRate  (stock price moved)
-   * FX effect    = lastValueUsd × (curRate − lastRate)      (exchange rate moved)
-   * Total        = price effect + FX effect = INR diff       (always adds up)
+   * Decompose the INR value change (vs previous day close) into price effect vs FX effect.
+   * Price effect = (curValueUsd − prevCloseValueUsd) × curRate  (stock price moved)
+   * FX effect    = prevCloseValueUsd × (curRate − prevRate)      (exchange rate moved)
+   * Uses previous close from Finnhub `pc` field; falls back to last refresh if unavailable.
    */
   get totalValueInrChangeBreakdown(): { priceEffectInr: number; fxEffectInr: number; prevRate: number; curRate: number } | null {
-    if (!this.data || !this.lastRefreshHoldings) return this.lastShownInrChangeBreakdown;
-    const curUsd = this.data.totalValueUsd;
-    const lastUsd = this.lastRefreshHoldings.totalValueUsd;
-    const lastInr = this.lastRefreshHoldings.totalValueInr;
-    if (lastUsd <= 0 || lastInr <= 0) return this.lastShownInrChangeBreakdown;
+    if (!this.data) return this.lastShownInrChangeBreakdown;
     const curRate = this.data.usdToInrRate;
-    const prevRate = lastInr / lastUsd;
+    const curUsd = this.data.totalValueUsd;
+
+    const prevCloseUsd = this.data.previousCloseValueUsd;
+    const prevCloseRate = this.data.previousCloseUsdToInrRate;
+    let lastUsd: number;
+    let prevRate: number;
+
+    if (prevCloseUsd != null && prevCloseUsd > 0 && prevCloseRate != null && prevCloseRate > 0) {
+      lastUsd = prevCloseUsd;
+      prevRate = prevCloseRate;
+    } else if (this.lastRefreshHoldings && this.lastRefreshHoldings.totalValueUsd > 0 && this.lastRefreshHoldings.totalValueInr > 0) {
+      lastUsd = this.lastRefreshHoldings.totalValueUsd;
+      prevRate = this.lastRefreshHoldings.totalValueInr / lastUsd;
+    } else {
+      return this.lastShownInrChangeBreakdown;
+    }
+
     const priceEffectInr = (curUsd - lastUsd) * curRate;
     const fxEffectInr = lastUsd * (curRate - prevRate);
     if (Math.abs(priceEffectInr) >= 1 || Math.abs(fxEffectInr) >= 1) {
       this.lastShownInrChangeBreakdown = { priceEffectInr, fxEffectInr, prevRate, curRate };
-      return this.lastShownInrChangeBreakdown;
     }
     return this.lastShownInrChangeBreakdown;
   }
@@ -1369,10 +1520,18 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
     if (diff !== 0) return { diff, diffPct: (diff / last) * 100 };
     return this.lastShownTotalSharesMovement;
   }
-  /** Movement vs today's open when available, else vs last refresh; when unchanged show last non-zero diff. */
+  /** Movement vs previous day close when available, else today's open, else last refresh. */
   get livePriceMovement(): { diffUsd: number; diffPct: number } | null {
     if (!this.data) return null;
     const cur = this.data.livePriceUsd;
+    const prevClose = this.data.previousCloseUsd;
+    if (prevClose != null && prevClose > 0) {
+      const diffUsd = cur - prevClose;
+      if (Math.abs(diffUsd) >= 0.01) {
+        this.lastShownLivePriceMovement = { diffUsd, diffPct: (diffUsd / prevClose) * 100 };
+      }
+      return this.lastShownLivePriceMovement;
+    }
     const openToday = this.data.openPriceUsd;
     if (openToday != null && openToday > 0) {
       const diffUsd = cur - openToday;
@@ -1387,22 +1546,29 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
     return this.lastShownLivePriceMovement;
   }
 
-  /** True when today's session open is known (live card diff is vs open). */
-  get livePriceUsesOpenBaseline(): boolean {
-    const o = this.data?.openPriceUsd;
-    return o != null && o > 0;
+  /** True when previous close is known (live card diff is vs prev close). */
+  get livePriceUsesPrevCloseBaseline(): boolean {
+    const pc = this.data?.previousCloseUsd;
+    return pc != null && pc > 0;
   }
 
   /** Short label before the $ / % change on the live card. */
   get livePriceMovementDiffPrefix(): string {
-    return this.livePriceUsesOpenBaseline ? 'vs open' : 'vs last quote';
+    if (this.livePriceUsesPrevCloseBaseline) return 'vs prev close';
+    const o = this.data?.openPriceUsd;
+    if (o != null && o > 0) return 'vs open';
+    return 'vs last quote';
   }
 
   /** Tooltip for the live price change span. */
   get livePriceMovementTooltip(): string {
     if (!this.data) return '';
-    if (this.livePriceUsesOpenBaseline) {
-      const o = this.data.openPriceUsd!;
+    if (this.livePriceUsesPrevCloseBaseline) {
+      const pc = this.data.previousCloseUsd!;
+      return `Previous close $${this.formatUsd(pc)}. Change from last day's closing price.`;
+    }
+    const o = this.data.openPriceUsd;
+    if (o != null && o > 0) {
       return `Session open $${this.formatUsd(o)}. Change from today's open.`;
     }
     return 'Change since the previous live quote (session open unavailable).';

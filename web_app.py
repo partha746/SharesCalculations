@@ -193,7 +193,7 @@ def _build_dashboard_response():
         rupee_conv_obj.update_null_rupees_rate("SellOut", "Buy_Date", "BuyRupeeRate")
         rupee_conv_obj.update_null_rupees_rate("SellOut", "Sell_Date", "SellRupeeRate")
 
-    live_price, todays_rp, _ = rupee_conv_obj.get_live_price()
+    live_price, todays_rp, *_ = rupee_conv_obj.get_live_price()
     if live_price is None or todays_rp is None:
         raise ValueError("Could not fetch live price or USD/INR rate")
 

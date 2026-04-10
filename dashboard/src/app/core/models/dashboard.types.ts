@@ -67,6 +67,14 @@ export interface DashboardResponse {
   unrealisedProfitAfterTax: number;
   unrealisedProfitBeforeTax: number;
   totalTaxToPay: number;
+  /** Previous day's closing price (USD) from Finnhub quote `pc` field */
+  previousCloseUsd?: number;
+  /** Total portfolio value at previous close price in USD (shares × prevClose) */
+  previousCloseValueUsd?: number;
+  /** Total portfolio value at previous close price in INR (shares × prevClose × prevRate) */
+  previousCloseValueInr?: number;
+  /** USD→INR rate from the previous day (last stored rate before today midnight) */
+  previousCloseUsdToInrRate?: number;
   /** Proceeds after tax if you sell everything now (total value − tax) = amount in bank */
   netInBankIfSellNow: number;
   realisedProfit: number | null;

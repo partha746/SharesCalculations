@@ -139,10 +139,18 @@
         [lastRefreshedAt]="lastRefreshedAt" />
     </div>
     <h3 class="section-subtitle">Live price movement</h3>
-    <div class="live-price-label-threshold">
-      <label for="livePriceLabelThreshold">Show data label when |diff from open| ≥</label>
-      <input id="livePriceLabelThreshold" type="number" min="0" step="0.1" class="live-price-threshold-input" [(ngModel)]="livePriceLabelThresholdPct" (ngModelChange)="onLivePriceLabelThresholdChange()" />
-      <span>%</span>
+    <div class="live-price-chart-controls">
+      <div class="live-price-chart-toggle">
+        <button type="button" class="chart-mode-btn" [class.chart-mode-btn--active]="livePriceChartMode === 'line'" (click)="setLivePriceChartMode('line')">Line</button>
+        <button type="button" class="chart-mode-btn" [class.chart-mode-btn--active]="livePriceChartMode === 'candlestick'" (click)="setLivePriceChartMode('candlestick')">Candlestick</button>
+      </div>
+      <div class="live-price-chart-meta">
+        @if (livePriceChartMode === 'line') {
+          <span class="live-price-chart-meta__pill">Latest ET session: {{ livePriceLineSessionLabel }}</span>
+        } @else {
+          <span class="live-price-chart-meta__pill">Multi-day OHLC view</span>
+        }
+      </div>
       <button type="button" class="live-price-clear-graph-btn" [disabled]="clearGraphInProgress" (click)="clearGraph()" title="Clear stored graph data (starts fresh)">
         {{ clearGraphInProgress ? 'Clearing…' : 'Clear graph' }}
       </button>

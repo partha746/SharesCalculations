@@ -348,6 +348,26 @@ def get_market_status():
     })
 
 
+def _get_previous_day_inr_rate():
+    """Get the last stored USD→INR rate from before today (UTC midnight). Returns float or None."""
+    import calendar
+    today_start_ms = int(
+        calendar.timegm(date.today().timetuple())
+    ) * 1000
+    try:
+        with get_db() as conn:
+            _ensure_live_price_history_table(conn)
+            row = conn.execute(
+                "SELECT usd_to_inr_rate FROM live_price_history WHERE timestamp_ms < ? ORDER BY timestamp_ms DESC LIMIT 1",
+                (today_start_ms,),
+            ).fetchone()
+            if row:
+                return float(row[0])
+    except Exception:
+        pass
+    return None
+
+
 def _ensure_live_price_history_table(conn):
     conn.execute(
         """CREATE TABLE IF NOT EXISTS live_price_history (
@@ -416,7 +436,7 @@ def _record_live_price_to_history():
     try:
         from helpers import gather_data
         rupee_conv_obj = gather_data.RupeeConv()
-        live_price, todays_rp, _ = rupee_conv_obj.get_live_price()
+        live_price, todays_rp, *_ = rupee_conv_obj.get_live_price()
         if live_price is None or todays_rp is None:
             return
         ts_ms = int(time.time() * 1000)
@@ -456,7 +476,7 @@ def get_live_price():
         from helpers import gather_data
 
         rupee_conv_obj = gather_data.RupeeConv()
-        live_price, todays_rp, open_price = rupee_conv_obj.get_live_price()
+        live_price, todays_rp, open_price, prev_close = rupee_conv_obj.get_live_price()
         if live_price is None or todays_rp is None:
             return jsonify({"error": "Could not fetch live price or USD/INR rate"}), 503
         payload = {
@@ -466,6 +486,8 @@ def get_live_price():
         }
         if open_price is not None:
             payload["openPriceUsd"] = round(open_price, 2)
+        if prev_close is not None:
+            payload["previousCloseUsd"] = round(prev_close, 2)
         if _is_premarket_et():
             premarket = rupee_conv_obj.get_premarket_price("NVDA")
             if premarket is not None:
@@ -498,7 +520,7 @@ def _build_dashboard_response():
         rupee_conv_obj.update_null_rupees_rate("SellOut", "Buy_Date", "BuyRupeeRate")
         rupee_conv_obj.update_null_rupees_rate("SellOut", "Sell_Date", "SellRupeeRate")
 
-    live_price, todays_rp, open_price = rupee_conv_obj.get_live_price()
+    live_price, todays_rp, open_price, prev_close = rupee_conv_obj.get_live_price()
     if live_price is None or todays_rp is None:
         raise ValueError("Could not fetch live price or USD/INR rate")
 
@@ -572,6 +594,12 @@ def _build_dashboard_response():
     }
     if open_price is not None:
         payload["openPriceUsd"] = round(open_price, 2)
+    if prev_close is not None:
+        prev_inr_rate = _get_previous_day_inr_rate() or todays_rp
+        payload["previousCloseUsd"] = round(prev_close, 2)
+        payload["previousCloseValueUsd"] = round(all_qty * prev_close, 2)
+        payload["previousCloseValueInr"] = round(all_qty * prev_close * prev_inr_rate, 2)
+        payload["previousCloseUsdToInrRate"] = round(prev_inr_rate, 2)
     if _is_premarket_et():
         premarket = rupee_conv_obj.get_premarket_price("NVDA")
         if premarket is not None:

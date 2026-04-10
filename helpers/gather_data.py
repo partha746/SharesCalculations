@@ -38,7 +38,7 @@ class EksHelper:
         self.tax_obj = Tax()
         rupee_conv_obj = RupeeConv()
 
-        self.livePrice, self.todaysRP, _ = rupee_conv_obj.get_live_price()
+        self.livePrice, self.todaysRP, *_ = rupee_conv_obj.get_live_price()
 
     def login_eks(self):
         """_summary_
@@ -424,23 +424,27 @@ class RupeeConv:
 
     @retry(wait_random_min=10, stop_max_attempt_number=3)
     def get_live_price(self):
-        """Returns (live_price_usd, todays_usd_inr_rate, open_price_usd or None)."""
+        """Returns (live_price_usd, todays_usd_inr_rate, open_price_usd or None, prev_close_usd or None)."""
         quote = self.get_quote(stock_code='nvda')
         live_price = None
         open_price = None
+        prev_close = None
         if quote:
             c = quote.get("c")
             o = quote.get("o")
+            pc = quote.get("pc")
             if c is not None:
                 live_price = round(float(c), 2)
             if o is not None and float(o) > 0:
                 open_price = round(float(o), 2)
+            if pc is not None and float(pc) > 0:
+                prev_close = round(float(pc), 2)
         if live_price is None:
             live_price = self.get_stock_price(stock_code='nvda')
         todays_rp = self.get_latest_usd_to_inr()
         if todays_rp is None:
             todays_rp = self.get_rupee_rate(self.todays_date)
-        return live_price, todays_rp, open_price
+        return live_price, todays_rp, open_price, prev_close
 
     def print_rupees(self, amt, cur='INR'):
         if cur == 'INR':
@@ -542,7 +546,7 @@ class OwnStockData:
         self.rupeeconv_obj = RupeeConv()
         self.tax_obj = Tax()
         
-        self.livePrice, self.todaysRP, _ = self.rupeeconv_obj.get_live_price()
+        self.livePrice, self.todaysRP, *_ = self.rupeeconv_obj.get_live_price()
         self.max_closing_json = {}
 
     @retry(wait_fixed=30000)
