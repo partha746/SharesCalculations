@@ -148,15 +148,15 @@
         @if (livePriceChartMode === 'line') {
           <span class="live-price-chart-meta__pill">Latest ET session: {{ livePriceLineSessionLabel }}</span>
         } @else {
-          <span class="live-price-chart-meta__pill">Multi-day OHLC view</span>
+          <span class="live-price-chart-meta__pill">{{ livePriceCandlestickSummary }}</span>
         }
       </div>
       <button type="button" class="live-price-clear-graph-btn" [disabled]="clearGraphInProgress" (click)="clearGraph()" title="Clear stored graph data (starts fresh)">
         {{ clearGraphInProgress ? 'Clearing…' : 'Clear graph' }}
       </button>
     </div>
-    <div class="live-price-chart-wrap">
-      @if (livePriceDayTickerItems.length > 0) {
+    @if (livePriceDayTickerItems.length > 0) {
+      <div class="live-price-session-strip">
         <div class="live-price-day-ticker-head">NVDA by session day (ET)</div>
         <div class="live-price-day-ticker" role="list" aria-label="NVDA last price and change from open by trading day">
           @for (d of livePriceDayTickerItems; track d.dateKey) {
@@ -167,26 +167,30 @@
               [class.live-price-day-ticker__item--down]="d.diffUsd < 0"
               [class.live-price-day-ticker__item--flat]="d.diffUsd === 0"
               [attr.title]="livePriceDayTickerTooltip(d)">
-              <div class="live-price-day-ticker__date">{{ d.label }}</div>
-              <div class="live-price-day-ticker__last">$ {{ formatUsd(d.close) }}</div>
-              <div class="live-price-day-ticker__chg">
-                @if (d.diffUsd > 0) {
-                  <span>↑ $ {{ formatUsd(d.diffUsd) }}</span>
-                } @else if (d.diffUsd < 0) {
-                  <span>↓ $ {{ formatUsd(Math.abs(d.diffUsd)) }}</span>
-                } @else {
-                  <span>—</span>
-                }
-                <span class="live-price-day-ticker__pct"> ({{ d.diffPct >= 0 ? '+' : '' }}{{ d.diffPct | number:'1.2-2' }}%)</span>
+              <div class="live-price-day-ticker__card">
+                <div class="live-price-day-ticker__date">{{ d.label }}</div>
+                <div class="live-price-day-ticker__last">$ {{ formatUsd(d.close) }}</div>
+                <div class="live-price-day-ticker__chg">
+                  @if (d.diffUsd > 0) {
+                    <span>↑ $ {{ formatUsd(d.diffUsd) }}</span>
+                  } @else if (d.diffUsd < 0) {
+                    <span>↓ $ {{ formatUsd(Math.abs(d.diffUsd)) }}</span>
+                  } @else {
+                    <span>—</span>
+                  }
+                  <span class="live-price-day-ticker__pct"> ({{ d.diffPct >= 0 ? '+' : '' }}{{ d.diffPct | number:'1.2-2' }}%)</span>
+                </div>
               </div>
             </div>
           }
         </div>
-      }
+      </div>
+    }
+    <div class="live-price-chart-wrap">
       @if (livePriceHistory.length >= 2) {
         <canvas #livePriceChartCanvas class="holdings-chart"></canvas>
       } @else {
-        <p class="holdings-table__hint">Polling when market is open… Need at least 2 points to show the chart.</p>
+        <p class="live-price-chart-wrap__hint holdings-table__hint">Polling when market is open… Need at least 2 points to show the chart.</p>
       }
     </div>
   </section>

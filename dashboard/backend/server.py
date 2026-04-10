@@ -219,8 +219,10 @@ def _seconds_until_next_market_open_et():
     if ZoneInfo is not None:
         et = datetime.now(ZoneInfo("America/New_York"))
     else:
+        # Naive "ET" wall clock (UTC−5, no DST) so next_open from combine() matches for subtraction.
         from datetime import timezone, timedelta
-        et = datetime.now(timezone.utc) - timedelta(hours=5)
+
+        et = (datetime.now(timezone.utc) - timedelta(hours=5)).replace(tzinfo=None)
     from datetime import timedelta as td
     open_t = datetime.strptime("09:30", "%H:%M").time()
     # next open: today 9:30 if before 9:30 and weekday, else next weekday 9:30
@@ -324,11 +326,16 @@ def get_market_status():
         if r.status_code == 200:
             data = r.json()
             if isinstance(data, dict):
-                if data.get("exchange") and "status" in data:
+                # Finnhub returns isOpen + session (see /stock/market-status); older clients used marketOpen/status.
+                if "isOpen" in data:
+                    market_open = bool(data["isOpen"])
+                elif data.get("exchange") and "status" in data:
                     status = str(data.get("status", "")).lower()
                     market_open = status == "open"
                 elif "marketOpen" in data:
                     market_open = bool(data["marketOpen"])
+                elif data.get("session") in ("pre-market", "regular", "post-market"):
+                    market_open = True
                 else:
                     market_open = _is_nasdaq_open_et()
             else:
@@ -595,7 +602,12 @@ def _build_dashboard_response():
     if open_price is not None:
         payload["openPriceUsd"] = round(open_price, 2)
     if prev_close is not None:
-        prev_inr_rate = _get_previous_day_inr_rate() or todays_rp
+        # Prefer Frankfurter historical (same family as live INR) for "yesterday's" rate; then DB; else today.
+        prev_inr_rate = (
+            rupee_conv_obj.get_usd_to_inr_for_prior_calendar_day()
+            or _get_previous_day_inr_rate()
+            or todays_rp
+        )
         payload["previousCloseUsd"] = round(prev_close, 2)
         payload["previousCloseValueUsd"] = round(all_qty * prev_close, 2)
         payload["previousCloseValueInr"] = round(all_qty * prev_close * prev_inr_rate, 2)

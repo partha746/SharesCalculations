@@ -241,8 +241,10 @@ class RupeeConv:
         if isinstance(date, pd.Series):
             return [self.get_rupee_rate(d) for d in date]
 
-        # Handle single date
+        # Handle single date (check datetime before dt.date — datetime subclasses date).
         if isinstance(date, datetime):
+            date_str = date.strftime('%Y-%m-%d')
+        elif isinstance(date, dt.date):
             date_str = date.strftime('%Y-%m-%d')
         elif isinstance(date, str):
             try:
@@ -272,6 +274,21 @@ class RupeeConv:
                 return round(float(rate), 2)
         except Exception as e:
             print(f"Error retrieving latest USD/INR rate: {e}")
+        return None
+
+    def get_usd_to_inr_for_prior_calendar_day(self, max_days_back=7):
+        """USD→INR for a day before today, same Frankfurter source as get_rupee_rate (not the live/latest tick).
+
+        Steps back through calendar days (handles weekends/holidays where a given date has no fix).
+        """
+        from datetime import date, timedelta
+
+        today = date.today()
+        for days_back in range(1, max_days_back + 1):
+            d = today - timedelta(days=days_back)
+            r = self.get_rupee_rate(d)
+            if r is not None:
+                return round(float(r), 2)
         return None
 
     def get_stock_price(self, stock_code='NVDA', api_key="cvsfdk9r01qhup0qfks0cvsfdk9r01qhup0qfksg"):

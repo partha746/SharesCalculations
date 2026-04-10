@@ -105,21 +105,31 @@
     cursor: not-allowed;
   }
 }
+/* Session-day cards: above the chart, not inside the graph panel */
+.live-price-session-strip {
+  background: #161b22;
+  border: 1px solid #30363d;
+  border-radius: 8px;
+  padding: 0.85rem 1rem;
+  margin-bottom: 0.75rem;
+}
 .live-price-day-ticker-head {
   font-size: 0.75rem;
   text-transform: uppercase;
   letter-spacing: 0.04em;
   color: #8b949e;
-  margin-bottom: 0.35rem;
+  margin: 0 0 0.5rem;
 }
 .live-price-day-ticker {
   display: flex;
   flex-direction: row;
   flex-wrap: nowrap;
   gap: 0.5rem;
+  /* overflow-x: auto alone makes overflow-y compute to auto in browsers, which can show a vertical scrollbar. */
   overflow-x: auto;
-  padding-bottom: 0.65rem;
-  margin-bottom: 0.5rem;
+  overflow-y: hidden;
+  padding-bottom: 0.15rem;
+  margin-bottom: 0;
   scrollbar-width: thin;
   scrollbar-color: #484f58 #21262d;
   &::-webkit-scrollbar {
@@ -132,32 +142,39 @@
 }
 .live-price-day-ticker__item {
   flex: 0 0 auto;
-  min-width: 118px;
-  max-width: 140px;
-  padding: 0.45rem 0.65rem;
+  min-width: 188px;
+  max-width: 236px;
+  cursor: default;
+}
+.live-price-day-ticker__card {
+  width: 100%;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: 0.22rem;
+  padding: 0.75rem 0.85rem;
   border-radius: 8px;
   border: 1px solid #30363d;
   background: #161b22;
-  cursor: default;
 }
 .live-price-day-ticker__date {
   font-size: 0.72rem;
   color: #8b949e;
-  margin-bottom: 0.2rem;
   white-space: nowrap;
 }
 .live-price-day-ticker__last {
   font-size: 1rem;
   font-weight: 600;
   color: #e6edf3;
-  line-height: 1.2;
+  line-height: 1.15;
 }
 .live-price-day-ticker__chg {
   font-size: 0.78rem;
   font-weight: 500;
   color: #8b949e;
-  margin-top: 0.15rem;
-  white-space: nowrap;
+  line-height: 1.2;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 .live-price-day-ticker__pct {
   font-weight: 400;
@@ -172,15 +189,32 @@
   background: #161b22;
   border: 1px solid #30363d;
   border-radius: 8px;
-  padding: 1rem;
+  padding: 0.75rem 1rem 1rem;
   height: 440px;
   margin-bottom: 1.5rem;
   overflow: hidden;
   position: relative;
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
   .holdings-chart {
     display: block;
-    height: 100%;
+    width: 100%;
+    flex: 1 1 auto;
+    min-height: 0;
   }
+}
+.live-price-chart-wrap__hint {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  margin: 0;
+  padding: 1rem;
+  color: #8b949e;
+  font-size: 0.88rem;
+  line-height: 1.45;
 }
 .section-title-row {
   display: flex;
@@ -221,6 +255,8 @@
   padding: 1rem 1.25rem;
   min-width: 280px;
   min-height: 170px;
+  height: 100%;
+  box-sizing: border-box;
   display: flex;
   flex-direction: column;
   justify-content: center;
@@ -360,6 +396,7 @@
   min-width: 320px;
   min-height: 170px;
   height: 100%;
+  box-sizing: border-box;
   display: flex;
   flex-direction: column;
   justify-content: center;

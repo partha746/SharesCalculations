@@ -626,10 +626,12 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
     this.livePriceDayTickerItems = keys.map((dateKey) => {
       const pts = dayToPoints.get(dateKey)!;
       const prices = pts.map((p) => p.livePriceUsd);
-      const low = Math.min(...prices);
-      const high = Math.max(...prices);
       const close = pts[pts.length - 1]!.livePriceUsd;
       const open = openByDay.get(dateKey) ?? pts[0]!.livePriceUsd;
+      // Keep OHLC internally consistent even when polling started after the official session open.
+      // If we mix an exchange-reported open with sampled intraday points, high/low must still bound open/close.
+      const low = Math.min(...prices, open, close);
+      const high = Math.max(...prices, open, close);
       const diffUsd = close - open;
       const diffPct = open !== 0 ? (diffUsd / open) * 100 : 0;
       return {
@@ -697,6 +699,12 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
     return this.livePriceDayTickerItems[0]?.label ?? 'Latest session';
   }
 
+  get livePriceCandlestickSummary(): string {
+    const latest = this.livePriceDayTickerItems[0];
+    if (!latest) return 'Multi-day OHLC view';
+    return `O $${this.formatUsd(latest.open)} | H $${this.formatUsd(latest.high)} | L $${this.formatUsd(latest.low)} | C $${this.formatUsd(latest.close)}`;
+  }
+
   private getLatestLivePriceSessionHistory(): { timestamp: number; livePriceUsd: number; usdToInrRate: number }[] {
     if (!this.livePriceHistory.length) return [];
     const lastKey = this.getEtDateKey(this.livePriceHistory[this.livePriceHistory.length - 1].timestamp);
@@ -708,7 +716,12 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
     this.livePriceOpenByDay = this.buildLivePriceOpenByDay(this.livePriceHistory, this.data?.openPriceUsd);
     this.buildLivePriceDayBoundaryIndices();
     if (this.livePriceChartMode === 'candlestick') {
-      (this.livePriceChart.data.datasets[0] as any).data = this.buildCandlestickData();
+      const canvas = this.livePriceChartCanvas?.nativeElement;
+      if (!canvas) return;
+      this.livePriceChart.destroy();
+      this.livePriceChart = null;
+      this.createCandlestickChart(canvas);
+      return;
     } else {
       const h = this.getLatestLivePriceSessionHistory();
       const open = h.length ? (this.livePriceOpenByDay.get(this.getEtDateKey(h[0].timestamp)) ?? h[0].livePriceUsd) : null;
@@ -728,12 +741,50 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
     });
   }
 
-  private buildCandlestickData(): { x: number; o: number; h: number; l: number; c: number }[] {
+  private buildCandlestickData(): { labels: string[]; data: { x: number; o: number; h: number; l: number; c: number }[] } {
     const items = [...this.livePriceDayTickerItems].reverse();
-    return items.map((d) => {
-      const dayMs = new Date(d.dateKey + 'T12:00:00').getTime();
-      return { x: dayMs, o: d.open, h: d.high, l: d.low, c: d.close };
-    });
+    return {
+      labels: items.map((d) => d.label),
+      // Financial controller runs with parsing disabled, so each candle still needs a raw x value.
+      data: items.map((d, index) => ({ x: index, o: d.open, h: d.high, l: d.low, c: d.close })),
+    };
+  }
+
+  private getCandlestickYBounds(data: { o: number; h: number; l: number; c: number }[]): { min: number; max: number } {
+    if (!data.length) return { min: 0, max: 1 };
+
+    let low = Number.POSITIVE_INFINITY;
+    let high = Number.NEGATIVE_INFINITY;
+    for (const candle of data) {
+      low = Math.min(low, candle.l);
+      high = Math.max(high, candle.h);
+    }
+
+    const span = Math.max(high - low, 0.01);
+    const midpoint = (high + low) / 2;
+    const reference = Math.max(Math.abs(midpoint), 1);
+    const halfRange = Math.max(
+      span * (data.length <= 3 ? 1.4 : 0.78),
+      reference * 0.008,
+      0.9,
+    );
+
+    return {
+      min: Math.max(0, midpoint - halfRange),
+      max: midpoint + halfRange,
+    };
+  }
+
+  private getCandlestickFillColor(candle: { o: number; c: number }): string {
+    if (candle.c > candle.o) return 'rgba(63, 185, 80, 0.65)';
+    if (candle.c < candle.o) return 'rgba(248, 81, 73, 0.65)';
+    return 'rgba(139, 148, 158, 0.65)';
+  }
+
+  private getCandlestickStrokeColor(candle: { o: number; c: number }): string {
+    if (candle.c > candle.o) return '#3fb950';
+    if (candle.c < candle.o) return '#f85149';
+    return '#8b949e';
   }
 
   private createLivePriceChart(): void {
@@ -884,29 +935,180 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
   }
 
   private createCandlestickChart(canvas: HTMLCanvasElement): void {
-    const ohlcData = this.buildCandlestickData();
-    if (!ohlcData.length) return;
+    const ohlc = this.buildCandlestickData();
+    if (!ohlc.data.length) return;
+    const bounds = this.getCandlestickYBounds(ohlc.data);
+    const candleCount = ohlc.data.length;
+    const maxBodyThickness = candleCount === 1 ? 84 : candleCount <= 4 ? 48 : 28;
+    const barPercentage = candleCount === 1 ? 0.96 : candleCount <= 4 ? 0.82 : 0.58;
+    const categoryPercentage = candleCount === 1 ? 0.42 : candleCount <= 4 ? 0.64 : 0.76;
+    const decorationPlugin = {
+      id: 'live-price-candlestick-decoration',
+      afterDatasetsDraw: (chart: Chart) => {
+        const meta = chart.getDatasetMeta(0);
+        const yScale = chart.scales['y'];
+        const chartArea = chart.chartArea;
+        if (!meta?.data?.length || !yScale || !chartArea) return;
+
+        const ctx = chart.ctx;
+        ctx.save();
+        ctx.lineWidth = 1.5;
+        ctx.font = '600 11px Inter, system-ui, sans-serif';
+        ctx.textBaseline = 'middle';
+
+        ohlc.data.forEach((candle, index) => {
+          const bar = meta.data[index] as any;
+          if (!bar) return;
+
+          const x = bar.x;
+          const openPx = yScale.getPixelForValue(candle.o);
+          const closePx = yScale.getPixelForValue(candle.c);
+          const highPx = yScale.getPixelForValue(candle.h);
+          const lowPx = yScale.getPixelForValue(candle.l);
+          const bodyTop = Math.min(openPx, closePx);
+          const bodyBottom = Math.max(openPx, closePx);
+
+          ctx.strokeStyle = this.getCandlestickStrokeColor(candle);
+          ctx.beginPath();
+          ctx.moveTo(x, highPx);
+          ctx.lineTo(x, bodyTop);
+          ctx.moveTo(x, bodyBottom);
+          ctx.lineTo(x, lowPx);
+          ctx.stroke();
+        });
+
+        const latestIndex = ohlc.data.length - 1;
+        const latest = ohlc.data[latestIndex];
+        const latestBar = meta.data[latestIndex] as any;
+        if (!latest || !latestBar) {
+          ctx.restore();
+          return;
+        }
+
+        const accent = this.getCandlestickStrokeColor(latest);
+        const neutral = '#8b949e';
+        const bodyHalfWidth = Math.max(14, Math.min(maxBodyThickness / 2, Number(latestBar.width ?? maxBodyThickness) / 2));
+        const centerX = Number(latestBar.x ?? 0);
+        const openPx = yScale.getPixelForValue(latest.o);
+        const closePx = yScale.getPixelForValue(latest.c);
+        const highPx = yScale.getPixelForValue(latest.h);
+        const lowPx = yScale.getPixelForValue(latest.l);
+        const bullish = latest.c >= latest.o;
+
+        const annotations: Array<{
+          key: 'O' | 'H' | 'L' | 'C';
+          value: number;
+          targetY: number;
+          y?: number;
+          side: 'left' | 'right';
+          anchorX: number;
+          color: string;
+        }> = bullish
+          ? [
+              { key: 'H', value: latest.h, targetY: highPx, side: 'right', anchorX: centerX + bodyHalfWidth, color: neutral },
+              { key: 'C', value: latest.c, targetY: closePx, side: 'right', anchorX: centerX + bodyHalfWidth, color: accent },
+              { key: 'O', value: latest.o, targetY: openPx, side: 'left', anchorX: centerX - bodyHalfWidth, color: accent },
+              { key: 'L', value: latest.l, targetY: lowPx, side: 'left', anchorX: centerX - bodyHalfWidth, color: neutral },
+            ]
+          : [
+              { key: 'H', value: latest.h, targetY: highPx, side: 'right', anchorX: centerX + bodyHalfWidth, color: neutral },
+              { key: 'O', value: latest.o, targetY: openPx, side: 'right', anchorX: centerX + bodyHalfWidth, color: accent },
+              { key: 'C', value: latest.c, targetY: closePx, side: 'left', anchorX: centerX - bodyHalfWidth, color: accent },
+              { key: 'L', value: latest.l, targetY: lowPx, side: 'left', anchorX: centerX - bodyHalfWidth, color: neutral },
+            ];
+
+        const layoutSide = (side: 'left' | 'right'): void => {
+          const items = annotations.filter((ann) => ann.side === side).sort((a, b) => a.targetY - b.targetY);
+          if (!items.length) return;
+
+          const minY = chartArea.top + 14;
+          const maxY = chartArea.bottom - 14;
+          const gap = 18;
+
+          for (let i = 0; i < items.length; i++) {
+            const current = items[i];
+            current.y = Math.min(maxY, Math.max(minY, current.targetY));
+            if (i > 0 && current.y < (items[i - 1].y ?? minY) + gap) {
+              current.y = (items[i - 1].y ?? minY) + gap;
+            }
+          }
+
+          const overflow = (items[items.length - 1].y ?? maxY) - maxY;
+          if (overflow > 0) {
+            items.forEach((item) => item.y = (item.y ?? maxY) - overflow);
+          }
+
+          const underflow = minY - (items[0].y ?? minY);
+          if (underflow > 0) {
+            items.forEach((item) => item.y = (item.y ?? minY) + underflow);
+          }
+        };
+
+        const drawAnnotation = (ann: typeof annotations[number]): void => {
+          const lineEndX = ann.side === 'right' ? ann.anchorX + 18 : ann.anchorX - 18;
+          const text = `${ann.key} $${ann.value.toFixed(2)}`;
+          const boxPaddingX = 6;
+          const boxHeight = 18;
+          const boxWidth = ctx.measureText(text).width + boxPaddingX * 2;
+          const labelY = ann.y ?? ann.targetY;
+          const boxX = ann.side === 'right' ? lineEndX + 6 : lineEndX - 6 - boxWidth;
+          const boxY = labelY - boxHeight / 2;
+
+          ctx.strokeStyle = ann.color;
+          ctx.lineWidth = 1;
+          ctx.beginPath();
+          ctx.moveTo(ann.anchorX, ann.targetY);
+          ctx.lineTo(lineEndX, ann.targetY);
+          if (Math.abs(labelY - ann.targetY) > 0.5) {
+            ctx.lineTo(lineEndX, labelY);
+          }
+          ctx.stroke();
+
+          ctx.fillStyle = 'rgba(13, 17, 23, 0.94)';
+          ctx.fillRect(boxX, boxY, boxWidth, boxHeight);
+          ctx.strokeStyle = ann.color;
+          ctx.strokeRect(boxX, boxY, boxWidth, boxHeight);
+
+          ctx.fillStyle = '#e6edf3';
+          ctx.fillText(text, boxX + boxPaddingX, labelY);
+        };
+
+        layoutSide('left');
+        layoutSide('right');
+        annotations.forEach(drawAnnotation);
+
+        ctx.restore();
+      },
+    };
 
     this.livePriceChart = new Chart(canvas, {
-      type: 'candlestick' as any,
+      type: 'bar',
       data: {
+        labels: ohlc.labels,
         datasets: [
           {
-            label: 'NVDA OHLC',
-            data: ohlcData as any,
-            backgroundColors: { up: 'rgba(63, 185, 80, 0.45)', down: 'rgba(248, 81, 73, 0.45)', unchanged: 'rgba(139, 148, 158, 0.45)' },
-            borderColors: { up: '#3fb950', down: '#f85149', unchanged: '#8b949e' },
+            label: 'Daily candle',
+            data: ohlc.data.map((candle) => [candle.o, candle.c]) as any,
+            backgroundColor: ohlc.data.map((candle) => this.getCandlestickFillColor(candle)),
+            borderColor: ohlc.data.map((candle) => this.getCandlestickStrokeColor(candle)),
             borderWidth: 1,
-            parsing: false,
+            borderSkipped: false,
+            borderRadius: 2,
+            barPercentage,
+            categoryPercentage,
+            maxBarThickness: maxBodyThickness,
+            minBarLength: 6,
             datalabels: { display: false },
-          } as any,
+          },
         ],
       },
+      plugins: [decorationPlugin],
       options: {
         animation: false,
         responsive: true,
         maintainAspectRatio: false,
-        layout: { padding: { top: 12, right: 12, bottom: 4, left: 4 } },
+        layout: { padding: { top: 12, right: 28, bottom: 8, left: 8 } },
+        interaction: { mode: 'index', intersect: false },
         plugins: {
           legend: {
             display: true,
@@ -925,15 +1127,10 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
             cornerRadius: 6,
             displayColors: false,
             callbacks: {
-              title: (items: any[]) => {
-                if (!items.length) return '';
-                const raw = items[0].raw as { x: number };
-                return new Date(raw.x).toLocaleDateString('en-US', {
-                  weekday: 'short', month: 'short', day: 'numeric', timeZone: 'America/New_York',
-                });
-              },
+              title: (items: any[]) => items?.[0]?.label ?? '',
               label: (item: any) => {
-                const r = item.raw as { o: number; h: number; l: number; c: number };
+                const r = ohlc.data[item.dataIndex];
+                if (!r) return '';
                 return [
                   `Open: $${r.o.toFixed(2)}`,
                   `High: $${r.h.toFixed(2)}`,
@@ -941,20 +1138,28 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
                   `Close: $${r.c.toFixed(2)}`,
                 ] as any;
               },
+              afterBody: (items: any[]) => {
+                const r = ohlc.data[items?.[0]?.dataIndex ?? -1];
+                if (!r || !r.o) return '';
+                const diff = r.c - r.o;
+                const pct = (diff / r.o) * 100;
+                const sign = diff >= 0 ? '+' : '';
+                return `Change: ${sign}$${diff.toFixed(2)} (${sign}${pct.toFixed(2)}%)`;
+              },
             },
           },
         },
         scales: {
           x: {
-            type: 'timeseries' as any,
             offset: true,
-            time: { unit: 'day', displayFormats: { day: 'MMM d' }, tooltipFormat: 'MMM d, yyyy' },
-            ticks: { color: '#8b949e', font: { size: 11 }, maxRotation: 0, source: 'data' as any },
+            ticks: { color: '#8b949e', font: { size: 11 }, maxRotation: 0, autoSkip: true, maxTicksLimit: 8 },
             grid: { display: false },
+            border: { display: false },
           },
           y: {
-            type: 'linear' as any,
             position: 'right' as const,
+            min: bounds.min,
+            max: bounds.max,
             ticks: {
               color: '#8b949e',
               font: { size: 11 },
@@ -963,6 +1168,7 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
             },
             grid: { color: 'rgba(48, 54, 61, 0.4)', drawTicks: false },
             border: { display: false },
+            grace: '6%',
           },
         },
       },
