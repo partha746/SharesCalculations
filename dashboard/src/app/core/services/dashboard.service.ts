@@ -1,7 +1,15 @@
 import { Injectable } from '@angular/core';
-import { HttpClient } from '@angular/common/http';
+import { HttpClient, HttpParams } from '@angular/common/http';
 import { Observable } from 'rxjs';
-import { DashboardResponse, HoldingRow, LivePriceHistoryPoint, LivePriceResponse, MarketStatusResponse, SoldRow } from '../models/dashboard.types';
+import {
+  BreezeStatusResponse,
+  DashboardResponse,
+  HoldingRow,
+  LivePriceHistoryPoint,
+  LivePriceResponse,
+  MarketStatusResponse,
+  SoldRow,
+} from '../models/dashboard.types';
 
 @Injectable({ providedIn: 'root' })
 export class DashboardService {
@@ -80,5 +88,53 @@ export class DashboardService {
   generateTaxDoc(fy?: number): Observable<{ fyLabel: string; rows: any[] }> {
     const params = fy ? `fy=${fy}&t=${Date.now()}` : `t=${Date.now()}`;
     return this.http.get<{ fyLabel: string; rows: any[] }>(`${this.apiUrl}/generate-tax-doc?${params}`);
+  }
+
+  getBreezeStatus(): Observable<BreezeStatusResponse> {
+    return this.http.get<BreezeStatusResponse>(`${this.apiUrl}/breeze/status?t=${Date.now()}`);
+  }
+
+  postBreezeSession(sessionToken: string): Observable<{ success: boolean; error?: string }> {
+    return this.http.post<{ success: boolean; error?: string }>(`${this.apiUrl}/breeze/session`, {
+      session_token: sessionToken,
+    });
+  }
+
+  postBreezeDisconnect(): Observable<{ success: boolean }> {
+    return this.http.post<{ success: boolean }>(`${this.apiUrl}/breeze/disconnect`, {});
+  }
+
+  getBreezeFunds(): Observable<unknown> {
+    return this.http.get(`${this.apiUrl}/breeze/funds`);
+  }
+
+  getBreezeDematHoldings(): Observable<unknown> {
+    return this.http.get(`${this.apiUrl}/breeze/demat-holdings`);
+  }
+
+  getBreezeCustomer(): Observable<unknown> {
+    return this.http.get(`${this.apiUrl}/breeze/customer`);
+  }
+
+  getBreezePortfolioPositions(): Observable<unknown> {
+    return this.http.get(`${this.apiUrl}/breeze/portfolio-positions`);
+  }
+
+  /**
+   * Breeze v1 GET …/portfolioholdings (requires session). exchangeCode e.g. NSE, BSE.
+   */
+  getBreezePortfolioHoldings(options: {
+    exchangeCode: string;
+    fromDate?: string;
+    toDate?: string;
+    stockCode?: string;
+    portfolioType?: string;
+  }): Observable<unknown> {
+    let params = new HttpParams().set('exchange_code', options.exchangeCode.trim());
+    if (options.fromDate?.trim()) params = params.set('from_date', options.fromDate.trim());
+    if (options.toDate?.trim()) params = params.set('to_date', options.toDate.trim());
+    if (options.stockCode?.trim()) params = params.set('stock_code', options.stockCode.trim());
+    if (options.portfolioType?.trim()) params = params.set('portfolio_type', options.portfolioType.trim());
+    return this.http.get(`${this.apiUrl}/breeze/portfolio-holdings`, { params });
   }
 }

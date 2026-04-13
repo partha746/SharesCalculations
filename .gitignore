@@ -27,6 +27,7 @@ dashboard.log
 dashboard.pid
 
 # Angular / dashboard
+dashboard/.env
 dashboard/node_modules/
 dashboard/.angular/
 dashboard/dist/

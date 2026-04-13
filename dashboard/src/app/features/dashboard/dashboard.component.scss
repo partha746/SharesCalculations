@@ -990,6 +990,10 @@
       min-width: 10rem;
       width: 10rem;
     }
+    &--unvested {
+      min-width: 7rem;
+      width: 7rem;
+    }
     box-sizing: border-box;
     background: #21262d;
     border: 1px solid #30363d;
@@ -1001,6 +1005,10 @@
     font-size: 0.8rem;
     color: #8b949e;
     min-width: 0;
+    &--block {
+      flex-basis: 100%;
+      line-height: 1.35;
+    }
   }
   .holdings-simulate-price__diff {
     font-size: 0.85em;
@@ -1014,6 +1022,48 @@
   .holdings-simulate-price__diff--down {
     color: #f85149;
   }
+  .holdings-simulate-price__unvested-result {
+    font-size: 0.85rem;
+    font-weight: 500;
+    color: #c9d1d9;
+    white-space: nowrap;
+  }
+}
+.holdings-unvested-india {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 0.75rem;
+  width: 100%;
+  flex-basis: 100%;
+  margin-top: 0.35rem;
+  padding: 0.5rem 0.65rem;
+  background: #161b22;
+  border: 1px solid #30363d;
+  border-radius: 6px;
+  font-size: 0.85rem;
+  color: #8b949e;
+  &__label {
+    white-space: nowrap;
+  }
+  &__select {
+    min-width: 5rem !important;
+    width: 5rem !important;
+  }
+  &__pct {
+    min-width: 4.25rem !important;
+    width: 4.25rem !important;
+  }
+  &__basis {
+    min-width: 7rem !important;
+    width: 7rem !important;
+  }
+}
+.holdings-unvested-breakdown {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  width: 100%;
 }
 .holdings-table__hint {
   font-size: 0.8rem;
@@ -1307,9 +1357,23 @@
 .holdings-summary--top {
   margin-bottom: 1rem;
 }
+.holdings-summary--unvested-sim {
+  margin-top: 0.75rem;
+  margin-bottom: 1rem;
+}
 .holdings-summary__item {
   color: #e6edf3;
   white-space: nowrap;
+  &--muted {
+    color: #8b949e;
+    font-size: 0.9em;
+  }
+  &--net {
+    font-weight: 600;
+    padding-top: 0.25rem;
+    margin-top: 0.15rem;
+    border-top: 1px solid #30363d;
+  }
 }
 .holdings-summary__hint {
   color: #8b949e;
@@ -1582,4 +1646,181 @@
   display: flex;
   gap: 0.75rem;
   justify-content: flex-end;
+}
+
+.icici-breeze-tab {
+  .icici-breeze-callback-hint .icici-breeze-callback-url {
+    display: block;
+    margin: 0.35rem 0;
+    padding: 0.5rem 0.65rem;
+    border-radius: 6px;
+    border: 1px solid #30363d;
+    background: #0d1117;
+    font-size: 0.8rem;
+    line-height: 1.35;
+    word-break: break-all;
+  }
+  .icici-breeze-status-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    margin-bottom: 0.5rem;
+  }
+  .icici-breeze-summary {
+    margin: 0;
+    flex: 1;
+    font-size: 0.9rem;
+    color: #c9d1d9;
+  }
+  .icici-breeze-pl {
+    font-weight: 600;
+    &.icici-breeze-pl--pos {
+      color: #3fb950;
+    }
+    &.icici-breeze-pl--neg {
+      color: #f85149;
+    }
+    &.icici-breeze-pl--zero,
+    &.icici-breeze-pl--na {
+      color: #8b949e;
+      font-weight: 500;
+    }
+  }
+  .icici-breeze-connect {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    gap: 0.75rem;
+    margin-bottom: 0.75rem;
+  }
+  .icici-breeze-label {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+    color: #8b949e;
+    font-size: 0.85rem;
+    min-width: 280px;
+    flex: 1;
+  }
+  .icici-breeze-input {
+    padding: 0.45rem 0.6rem;
+    border-radius: 6px;
+    border: 1px solid #30363d;
+    background: #0d1117;
+    color: #e6edf3;
+    font-size: 0.9rem;
+    &--dt {
+      min-width: 11rem;
+      font-size: 0.8rem;
+    }
+  }
+  .icici-breeze-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin: 0.75rem 0;
+    align-items: center;
+    &--wrap {
+      row-gap: 0.65rem;
+    }
+  }
+  .icici-breeze-inline {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    color: #8b949e;
+    font-size: 0.85rem;
+    &--grow {
+      flex: 1 1 160px;
+      min-width: 140px;
+    }
+  }
+  .icici-breeze-inline-label {
+    white-space: nowrap;
+  }
+  .icici-breeze-select {
+    padding: 0.35rem 0.5rem;
+    border-radius: 6px;
+    border: 1px solid #30363d;
+    background: #0d1117;
+    color: #e6edf3;
+    font-size: 0.85rem;
+    min-width: 5rem;
+  }
+  .icici-breeze-api-hint {
+    margin: 0 0 0.75rem;
+    font-size: 0.8rem;
+    color: #6e7681;
+    a {
+      color: #58a6ff;
+    }
+  }
+  .icici-breeze-json-title {
+    margin: 1rem 0 0.35rem;
+    font-size: 0.95rem;
+    color: #c9d1d9;
+  }
+  .icici-breeze-table-note {
+    margin: 0.25rem 0 0.5rem;
+    font-size: 0.85rem;
+  }
+  .icici-breeze-portfolio-toolbar {
+    margin: 0 0 0.5rem;
+    max-width: min(100%, 420px);
+  }
+  .icici-breeze-th-sort {
+    cursor: pointer;
+    user-select: none;
+    .icici-breeze-sort-ind {
+      font-weight: 600;
+      opacity: 0.85;
+    }
+    &:hover {
+      text-decoration: underline;
+      text-underline-offset: 2px;
+    }
+  }
+  .icici-breeze-portfolio-tfoot {
+    th,
+    td {
+      font-weight: 600;
+      border-top: 1px solid rgba(255, 255, 255, 0.12);
+      padding-top: 0.5rem;
+    }
+  }
+  .icici-breeze-table-wrap {
+    margin: 0 0 1rem;
+    max-width: 100%;
+    overflow-x: auto;
+    border-radius: 8px;
+  }
+  .icici-breeze-data-table {
+    font-size: 0.8rem;
+    min-width: min(100%, 720px);
+    td {
+      white-space: normal;
+      max-width: 280px;
+      word-break: break-word;
+      vertical-align: top;
+    }
+    th {
+      white-space: normal;
+    }
+  }
+  .icici-breeze-json {
+    margin: 0;
+    padding: 0.75rem 1rem;
+    max-height: 320px;
+    overflow: auto;
+    font-size: 0.8rem;
+    line-height: 1.4;
+    background: #0d1117;
+    border: 1px solid #30363d;
+    border-radius: 6px;
+    color: #8b949e;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
 }

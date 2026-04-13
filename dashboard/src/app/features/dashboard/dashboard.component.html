@@ -273,6 +273,7 @@
       <button type="button" class="tab-btn" [class.tab-btn--active]="activeTab === 'sold'" (click)="setActiveTab('sold')">Sold Shares</button>
       <button type="button" class="tab-btn" [class.tab-btn--active]="activeTab === 'playground'" (click)="setActiveTab('playground')">Playground</button>
       <button type="button" class="tab-btn" [class.tab-btn--active]="activeTab === 'financial'" (click)="setActiveTab('financial')">Financial planning</button>
+      <button type="button" class="tab-btn" [class.tab-btn--active]="activeTab === 'icici'" (click)="setActiveTab('icici')">ICICI Direct</button>
       <button type="button" class="tab-btn" [class.tab-btn--active]="activeTab === 'tax'" (click)="setActiveTab('tax')">Tax Config</button>
       <button type="button" class="tab-btn tab-btn--data" [class.tab-btn--active]="activeTab === 'data'" (click)="setActiveTab('data')">Data</button>
     </div>
@@ -371,6 +372,180 @@
     @if (activeTab === 'financial') {
       <div class="financial-planning-tab">
         <app-financial-planning [dashboardNetInBankIfSellNow]="data.netInBankIfSellNow" />
+      </div>
+    }
+    @if (activeTab === 'icici') {
+      <div class="icici-breeze-tab tax-tab">
+        <section class="tax-tab__section">
+          <h2 class="tax-tab__title">ICICI Direct</h2>
+          @if (breezeStatusLoading) {
+            <p class="tax-tab__status">Loading…</p>
+          }
+          @if (breezeStatus && !breezeStatusLoading) {
+            <div class="icici-breeze-status-row">
+              @if (!breezeStatus.sdkInstalled) {
+                <p class="tax-tab__error">Install <code>breeze-connect</code> on the API server.</p>
+              } @else if (!breezeStatus.configured) {
+                <p class="tax-tab__hint">Add <code>BREEZE_API_KEY</code> and <code>BREEZE_API_SECRET</code> to <code>dashboard/.env</code>, then refresh.</p>
+              } @else {
+                <p class="icici-breeze-summary">
+                  @if (breezeStatus.connected) {
+                    Connected
+                  } @else {
+                    Not connected
+                  }
+                </p>
+              }
+              <button type="button" class="tax-tab__btn tax-tab__btn--reload" [disabled]="breezeStatusLoading" (click)="loadBreezeStatus()">Refresh</button>
+            </div>
+            @if (breezeStatus.callbackUrl && breezeStatus.configured && !breezeStatus.connected) {
+              <p class="tax-tab__hint icici-breeze-callback-hint">
+                Redirect URL (register at ICICI):
+                <code class="icici-breeze-callback-url">{{ breezeStatus.callbackUrl }}</code>
+              </p>
+            }
+            @if (breezeStatus.loginUrl && !breezeStatus.connected) {
+              <p class="tax-tab__hint">
+                <a [href]="breezeStatus.loginUrl" target="_blank" rel="noopener noreferrer">Log in at ICICI</a>, then paste <code>apisession</code> below.
+              </p>
+            }
+            <div class="icici-breeze-connect">
+              <label class="icici-breeze-label">
+                Session token
+                <input
+                  type="text"
+                  class="icici-breeze-input"
+                  [(ngModel)]="breezeSessionToken"
+                  placeholder="apisession"
+                  autocomplete="off"
+                  [disabled]="breezeConnectLoading || breezeStatus.connected"
+                />
+              </label>
+              <button type="button" class="tax-tab__btn tax-tab__btn--save" [disabled]="breezeConnectLoading || breezeStatus.connected" (click)="connectBreeze()">
+                {{ breezeConnectLoading ? 'Connecting…' : 'Connect' }}
+              </button>
+              <button type="button" class="tax-tab__btn tax-tab__btn--reload" [disabled]="!breezeStatus.connected" (click)="disconnectBreeze()">Disconnect</button>
+            </div>
+            @if (breezeConnectError) {
+              <p class="tax-tab__error">{{ breezeConnectError }}</p>
+            }
+            @if (breezeStatus.connected) {
+              <div class="icici-breeze-actions icici-breeze-actions--wrap">
+                <label class="icici-breeze-inline">
+                  <span class="icici-breeze-inline-label">Exchange</span>
+                  <select class="icici-breeze-select" [(ngModel)]="breezePortfolioExchangeCode" [disabled]="breezeDataLoading">
+                    <option value="NSE">NSE</option>
+                    <option value="NFO">NFO</option>
+                  </select>
+                </label>
+                <label class="icici-breeze-inline">
+                  <span class="icici-breeze-inline-label">From</span>
+                  <input type="datetime-local" class="icici-breeze-input icici-breeze-input--dt" [(ngModel)]="breezePortfolioFromDate" [disabled]="breezeDataLoading" />
+                </label>
+                <label class="icici-breeze-inline">
+                  <span class="icici-breeze-inline-label">To</span>
+                  <input type="datetime-local" class="icici-breeze-input icici-breeze-input--dt" [(ngModel)]="breezePortfolioToDate" [disabled]="breezeDataLoading" />
+                </label>
+                <label class="icici-breeze-inline icici-breeze-inline--grow">
+                  <span class="icici-breeze-inline-label">Stock</span>
+                  <input type="text" class="icici-breeze-input" [(ngModel)]="breezePortfolioStockCode" placeholder="Optional" [disabled]="breezeDataLoading" />
+                </label>
+                <button type="button" class="tax-tab__btn tax-tab__btn--generate" [disabled]="breezeDataLoading" (click)="fetchBreezePortfolioHoldings()">Apply</button>
+              </div>
+              @if (breezeDataLoading) {
+                <p class="tax-tab__status">Loading portfolio…</p>
+              }
+              @if (breezeDataError) {
+                <p class="tax-tab__error">{{ breezeDataError }}</p>
+              }
+              @if (breezePortfolioHoldingsData != null) {
+                @if (breezePortfolioHoldingsView(); as ph) {
+                  @if (ph.note) {
+                    <p class="tax-tab__hint icici-breeze-table-note">{{ ph.note }}</p>
+                  }
+                  <div class="icici-breeze-portfolio-toolbar">
+                    <label class="icici-breeze-inline icici-breeze-inline--grow">
+                      <span class="icici-breeze-inline-label">Filter table</span>
+                      <input
+                        type="text"
+                        class="icici-breeze-input"
+                        [(ngModel)]="breezePortfolioTableFilter"
+                        (ngModelChange)="onBreezePortfolioTableFilterChange()"
+                        placeholder="Search stock, qty, amounts…"
+                      />
+                    </label>
+                  </div>
+                  <div class="icici-breeze-table-wrap">
+                    <table class="holdings-table icici-breeze-data-table icici-breeze-portfolio-table">
+                      <thead>
+                        <tr>
+                          <th class="icici-breeze-th-sort" (click)="setBreezePortfolioSort('stockCode')">
+                            Stock code <span class="icici-breeze-sort-ind">{{ breezePortfolioSortIndicator('stockCode') }}</span>
+                          </th>
+                          <th class="icici-breeze-th-sort" (click)="setBreezePortfolioSort('qty')">
+                            Qty <span class="icici-breeze-sort-ind">{{ breezePortfolioSortIndicator('qty') }}</span>
+                          </th>
+                          <th class="icici-breeze-th-sort" (click)="setBreezePortfolioSort('avgPrice')">
+                            Avg price <span class="icici-breeze-sort-ind">{{ breezePortfolioSortIndicator('avgPrice') }}</span>
+                          </th>
+                          <th class="icici-breeze-th-sort" (click)="setBreezePortfolioSort('bookedPnl')">
+                            Booked P&amp;L <span class="icici-breeze-sort-ind">{{ breezePortfolioSortIndicator('bookedPnl') }}</span>
+                          </th>
+                          <th class="icici-breeze-th-sort" (click)="setBreezePortfolioSort('currentPrice')">
+                            Current mkt <span class="icici-breeze-sort-ind">{{ breezePortfolioSortIndicator('currentPrice') }}</span>
+                          </th>
+                          <th class="icici-breeze-th-sort" (click)="setBreezePortfolioSort('invested')">
+                            Invested <span class="icici-breeze-sort-ind">{{ breezePortfolioSortIndicator('invested') }}</span>
+                          </th>
+                          <th class="icici-breeze-th-sort" (click)="setBreezePortfolioSort('current')">
+                            Current <span class="icici-breeze-sort-ind">{{ breezePortfolioSortIndicator('current') }}</span>
+                          </th>
+                          <th class="icici-breeze-th-sort" (click)="setBreezePortfolioSort('pl')">
+                            P&amp;L <span class="icici-breeze-sort-ind">{{ breezePortfolioSortIndicator('pl') }}</span>
+                          </th>
+                          <th class="icici-breeze-th-sort" (click)="setBreezePortfolioSort('plPct')">
+                            P&amp;L % <span class="icici-breeze-sort-ind">{{ breezePortfolioSortIndicator('plPct') }}</span>
+                          </th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        @if (ph.rows.length === 0) {
+                          <tr>
+                            <td colspan="9" class="holdings-table__empty">No rows.</td>
+                          </tr>
+                        } @else {
+                          @for (r of ph.rows; track trackPortfolioHoldingRow($index, r)) {
+                            <tr>
+                              <td>{{ r.stockCode }}</td>
+                              <td>{{ r.quantity }}</td>
+                              <td>{{ r.avgPrice }}</td>
+                              <td>{{ r.bookedPnl }}</td>
+                              <td>{{ r.currentPrice }}</td>
+                              <td>{{ r.investedAmt }}</td>
+                              <td>{{ r.currentAmt }}</td>
+                              <td [ngClass]="'icici-breeze-pl icici-breeze-pl--' + r.plKind">{{ r.pl }}</td>
+                              <td [ngClass]="'icici-breeze-pl icici-breeze-pl--' + r.plKind">{{ r.plPct }}</td>
+                            </tr>
+                          }
+                        }
+                      </tbody>
+                      <tfoot>
+                        <tr class="icici-breeze-portfolio-tfoot">
+                          <th colspan="4" scope="row">Total</th>
+                          <td>—</td>
+                          <td>{{ ph.totals.invested }}</td>
+                          <td>{{ ph.totals.current }}</td>
+                          <td [ngClass]="'icici-breeze-pl icici-breeze-pl--' + ph.totals.plKind">{{ ph.totals.pl }}</td>
+                          <td [ngClass]="'icici-breeze-pl icici-breeze-pl--' + ph.totals.plKind">{{ ph.totals.plPct }}</td>
+                        </tr>
+                      </tfoot>
+                    </table>
+                  </div>
+                }
+              }
+            }
+          }
+        </section>
       </div>
     }
     @if (activeTab === 'data') {
@@ -780,10 +955,68 @@
     }
     <div class="holdings-simulate-price">
       <label for="holdingsSimulatePrice">Simulate price (USD):</label>
-      <input id="holdingsSimulatePrice" type="number" min="0" step="0.01" class="holdings-simulate-price__input" [ngModel]="holdingsSimulatePriceUsd" (ngModelChange)="onHoldingsSimulatePriceChange($event)" placeholder="Live: {{ data ? formatUsd(data.livePriceUsd) : '–' }}" title="Leave empty to use live price" />
+      <input
+        id="holdingsSimulatePrice"
+        type="number"
+        min="0"
+        step="0.01"
+        class="holdings-simulate-price__input"
+        [ngModel]="holdingsSimulatePriceUsd"
+        (ngModelChange)="onHoldingsSimulatePriceChange($event)"
+        placeholder="Live: {{ data ? formatUsd(data.livePriceUsd) : '–' }}"
+        title="Future sell price for unvested sim (India CG: buy = live, sell = this). Leave empty: sell = live." />
       <label for="holdingsSimulateUsdToInr">Simulate USD→INR:</label>
       <input id="holdingsSimulateUsdToInr" type="number" min="0" step="0.01" class="holdings-simulate-price__input holdings-simulate-price__input--fx" [ngModel]="holdingsSimulateUsdToInr" (ngModelChange)="onHoldingsSimulateUsdToInrChange($event)" placeholder="Live: {{ data ? formatUsd(data.usdToInrRate) : '–' }}" title="Leave empty for dashboard USD→INR. INR columns and totals use this rate when set." />
-      <span class="holdings-simulate-price__hint">Leave empty for live values. Table and totals use simulated price and/or USD→INR when set.</span>
+      <label for="holdingsUnvestedGross">Unvested shares (YTD to year-end):</label>
+      <input
+        id="holdingsUnvestedGross"
+        type="text"
+        inputmode="numeric"
+        class="holdings-simulate-price__input holdings-simulate-price__input--unvested"
+        [(ngModel)]="holdingsUnvestedGrossText"
+        (blur)="onHoldingsUnvestedGrossBlur()"
+        placeholder="Gross count"
+        title="Total unvested shares through year-end; normalized to whole shares on blur." />
+      @if (holdingsUnvestedGrossShares != null && holdingsUnvestedSharesAfterUs != null) {
+        <span
+          class="holdings-simulate-price__unvested-result"
+          title="US withhold: floor(gross × (1 − 37.14%)) shares; INR = those counts × price × USD→INR; India tax on rupees below."
+        >
+          → {{ holdingsUnvestedGrossShares }} gross, {{ holdingsUnvestedSharesAfterUs }} shares after US withhold
+        </span>
+      }
+      <span class="holdings-simulate-price__hint holdings-simulate-price__hint--block">
+        <strong>US:</strong> withholding on <strong>shares</strong> (floor), valued at <strong>sell</strong> price. <strong>India CG:</strong> <strong>buy</strong> = live (current) USD; <strong>sell</strong> = Simulate USD when set (e.g. 200), else live. Gain = sell − buy on after-US shares.
+      </span>
+      <div class="holdings-unvested-india">
+        <label class="holdings-unvested-india__label" for="holdingsUnvestedIndiaMode">India CG</label>
+        <select
+          id="holdingsUnvestedIndiaMode"
+          class="holdings-simulate-price__input holdings-unvested-india__select"
+          [(ngModel)]="holdingsUnvestedIndiaCgMode"
+          title="Capital gains treatment in India on the amount after US tax">
+          <option value="stcg">STCG</option>
+          <option value="ltcg">LTCG</option>
+        </select>
+        <label class="holdings-unvested-india__label" for="holdingsUnvestedStcg">STCG %</label>
+        <input
+          id="holdingsUnvestedStcg"
+          type="number"
+          min="0"
+          step="0.1"
+          class="holdings-simulate-price__input holdings-unvested-india__pct"
+          [(ngModel)]="holdingsUnvestedIndiaStcgPct"
+          title="Short-term capital gains rate on taxable gain (India)" />
+        <label class="holdings-unvested-india__label" for="holdingsUnvestedLtcg">LTCG %</label>
+        <input
+          id="holdingsUnvestedLtcg"
+          type="number"
+          min="0"
+          step="0.1"
+          class="holdings-simulate-price__input holdings-unvested-india__pct"
+          [(ngModel)]="holdingsUnvestedIndiaLtcgPct"
+          title="Long-term capital gains rate on taxable gain (India); set to match your rules" />
+      </div>
       @if (holdingsSimulatePriceDiffFromLive) {
         <span class="holdings-simulate-price__diff" [class.holdings-simulate-price__diff--up]="holdingsSimulatePriceDiffFromLive.diffUsd > 0" [class.holdings-simulate-price__diff--down]="holdingsSimulatePriceDiffFromLive.diffUsd < 0">
           Price vs live: {{ holdingsSimulatePriceDiffFromLive.diffUsd > 0 ? '↑' : (holdingsSimulatePriceDiffFromLive.diffUsd < 0 ? '↓' : '') }} $ {{ formatUsd(Math.abs(holdingsSimulatePriceDiffFromLive.diffUsd)) }} ({{ holdingsSimulatePriceDiffFromLive.diffPct >= 0 ? '+' : '' }}{{ holdingsSimulatePriceDiffFromLive.diffPct | number:'1.2-2' }}%)
@@ -795,6 +1028,37 @@
         </span>
       }
     </div>
+    @if (holdingsUnvestedSimTotals) {
+      <div
+        class="holdings-summary holdings-summary--unvested-sim"
+        role="region"
+        aria-label="Simulated unvested shares: US withholding, India CG, and net at sim or live price and USD→INR">
+        <div class="holdings-unvested-breakdown">
+          @if (holdingsUnvestedGrossShares != null && holdingsUnvestedSharesAfterUs != null) {
+            <span class="holdings-summary__item holdings-summary__item--muted">
+              Shares: {{ holdingsUnvestedGrossShares }} gross → {{ holdingsUnvestedSharesAfterUs }} after US withhold
+            </span>
+          }
+          <span class="holdings-summary__item">Value (gross) ₹ {{ formatInr(holdingsUnvestedSimTotals.totalValueTodayInr) }}</span>
+          <span class="holdings-summary__item">US withholding (share-based, 37.14%) ₹ {{ formatInr(holdingsUnvestedSimTotals.usWithholdingInr) }}</span>
+          <span class="holdings-summary__item">
+            After US / sale proceeds ({{ formatUsd(holdingsUnvestedIndiaSellPriceUsd) }}/sh sell) ₹
+            {{ formatInr(holdingsUnvestedSimTotals.valueAfterUsInr) }}
+          </span>
+          <span class="holdings-summary__item">
+            India cost basis ({{ formatUsd(holdingsUnvestedIndiaBuyPriceUsd) }}/sh buy, live) ₹
+            {{ formatInr(holdingsUnvestedSimTotals.indiaCostBasisUsedInr) }}
+          </span>
+          <span class="holdings-summary__item">India taxable gain ₹ {{ formatInr(holdingsUnvestedSimTotals.taxableGainIndiaInr) }}</span>
+          <span class="holdings-summary__item">
+            India tax ({{ holdingsUnvestedIndiaCgModeLabel }} {{ holdingsUnvestedIndiaCgRatePct | number : '1.1-1' }}%) ₹
+            {{ formatInr(holdingsUnvestedSimTotals.indiaTaxInr) }}
+          </span>
+          <span class="holdings-summary__item">Total tax (US + India) ₹ {{ formatInr(holdingsUnvestedSimTotals.totalTaxToPayInr) }}</span>
+          <span class="holdings-summary__item holdings-summary__item--net">In your account after tax ₹ {{ formatInr(holdingsUnvestedSimTotals.totalNetInAccountInr) }}</span>
+        </div>
+      </div>
+    }
     <p class="holdings-table__hint">Drag column headers to reorder; order is saved. Select rows and set sell qty to see totals above.</p>
     <div class="holdings-table-wrap">
       <table class="holdings-table holdings-table--sticky-sell-cols">

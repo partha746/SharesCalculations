@@ -19,7 +19,16 @@ import ChartDataLabels from 'chartjs-plugin-datalabels';
 import { DashboardService } from '../../core/services/dashboard.service';
 
 Chart.register(ChartDataLabels, CandlestickController, CandlestickElement, OhlcController, OhlcElement);
-import { DashboardResponse, HoldingRow, LivePriceDayTickerItem, SoldRow } from '../../core/models/dashboard.types';
+import {
+  BreezePortfolioHoldingsDisplayRow,
+  BreezePortfolioHoldingsTotals,
+  BreezePortfolioSortCol,
+  BreezeStatusResponse,
+  DashboardResponse,
+  HoldingRow,
+  LivePriceDayTickerItem,
+  SoldRow,
+} from '../../core/models/dashboard.types';
 
 /** Recommendation row: lot with tax at simulation target price and qty to sell (may be partial). */
 export interface PlayTaxRecommendationRow extends HoldingRow {
@@ -107,10 +116,42 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
   holdingsSimulatePriceUsd: number | null = null;
   /** Override USD→INR for Holdings table simulation; null = use dashboard rate. */
   holdingsSimulateUsdToInr: number | null = null;
+  /** Raw text in "unvested shares" simulate field (parsed on blur). */
+  holdingsUnvestedGrossText = '';
+  /** Gross unvested share count after last blur commit; null if empty/invalid. */
+  holdingsUnvestedGrossShares: number | null = null;
+  /** US withholding on gross proceeds (NVIDIA RSU / US equity). */
+  readonly UNVESTED_US_WITHHOLDING_FRACTION = 0.3714;
+  /** India: short-term vs long-term capital gains on amount after US tax (taxable gain × rate). */
+  holdingsUnvestedIndiaCgMode: 'stcg' | 'ltcg' = 'stcg';
+  /** Indian STCG % on taxable gain (default aligns with common slab for foreign equity). */
+  holdingsUnvestedIndiaStcgPct = 30;
+  /** Indian LTCG % on taxable gain (editable; rules vary — set to match your situation). */
+  holdingsUnvestedIndiaLtcgPct = 12.5;
   /** Last row clicked (without shift) for shift-click range selection. */
   private lastClickedRowKey: string | null = null;
   /** Tab: Holdings vs Sold Shares vs Playground vs Financial planning */
-  activeTab: 'holdings' | 'sold' | 'playground' | 'data' | 'financial' | 'tax' = 'holdings';
+  activeTab: 'holdings' | 'sold' | 'playground' | 'data' | 'financial' | 'tax' | 'icici' = 'holdings';
+
+  /** ICICI Direct Breeze (optional backend integration). */
+  breezeStatus: BreezeStatusResponse | null = null;
+  breezeStatusLoading = false;
+  breezeSessionToken = '';
+  breezeConnectLoading = false;
+  breezeConnectError: string | null = null;
+  /** v1 /portfolioholdings (ICICI: NSE or NFO; ISO from/to optional — backend defaults last 30d UTC). */
+  breezePortfolioHoldingsData: unknown = null;
+  breezePortfolioExchangeCode = 'NSE';
+  /** datetime-local (optional); sent as ISO UTC to API. */
+  breezePortfolioFromDate = '';
+  breezePortfolioToDate = '';
+  breezePortfolioStockCode = '';
+  /** Table: filter (matches any column text). */
+  breezePortfolioTableFilter = '';
+  breezePortfolioSortCol: BreezePortfolioSortCol = 'stockCode';
+  breezePortfolioSortDir: 1 | -1 = 1;
+  breezeDataLoading = false;
+  breezeDataError: string | null = null;
 
   taxConfig: any = null;
   taxConfigRaw = '';
@@ -245,8 +286,17 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
   ngOnInit(): void {
     this.webAppIframeSrc = this.sanitizer.bypassSecurityTrustResourceUrl('assets/web-app/index.html');
     this.loadHoldingsColumnOrder();
+    this.initBreezePortfolioDefaultDates();
     this.load();
     this.updateCanUndoMarkSold();
+  }
+
+  /** Default ICICI portfolio holdings range: 2015-01-01 local → now (datetime-local). */
+  private initBreezePortfolioDefaultDates(): void {
+    const pad = (n: number) => String(n).padStart(2, '0');
+    this.breezePortfolioFromDate = '2015-01-01T00:00';
+    const d = new Date();
+    this.breezePortfolioToDate = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
   }
 
   private loadHoldingsColumnOrder(): void {
@@ -501,6 +551,337 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
     });
   }
 
+  loadBreezeStatus(): void {
+    this.breezeStatusLoading = true;
+    this.breezeConnectError = null;
+    this.dashboardService.getBreezeStatus().subscribe({
+      next: (s) => {
+        this.breezeStatus = s;
+        this.breezeStatusLoading = false;
+        if (s.connected) {
+          this.fetchBreezePortfolioHoldings();
+        }
+        this.cdr.markForCheck();
+      },
+      error: () => {
+        this.breezeStatus = null;
+        this.breezeStatusLoading = false;
+        this.cdr.markForCheck();
+      },
+    });
+  }
+
+  connectBreeze(): void {
+    const t = this.breezeSessionToken.trim();
+    if (!t) {
+      this.breezeConnectError = 'Paste the API session token from the ICICI redirect URL.';
+      return;
+    }
+    this.breezeConnectLoading = true;
+    this.breezeConnectError = null;
+    this.dashboardService.postBreezeSession(t).subscribe({
+      next: (r) => {
+        this.breezeConnectLoading = false;
+        if (r.success) {
+          this.breezeSessionToken = '';
+          this.loadBreezeStatus();
+        } else {
+          this.breezeConnectError = r.error || 'Connection failed';
+        }
+        this.cdr.markForCheck();
+      },
+      error: (err) => {
+        this.breezeConnectLoading = false;
+        this.breezeConnectError = err?.error?.error || err?.message || 'Connection failed';
+        this.cdr.markForCheck();
+      },
+    });
+  }
+
+  disconnectBreeze(): void {
+    this.dashboardService.postBreezeDisconnect().subscribe({
+      next: () => {
+        this.breezePortfolioHoldingsData = null;
+        this.loadBreezeStatus();
+      },
+    });
+  }
+
+  /** Breeze v1 portfolioholdings (ICICI: …/breezeapi/api/v1/portfolioholdings). */
+  fetchBreezePortfolioHoldings(): void {
+    const ex = this.breezePortfolioExchangeCode.trim();
+    if (!ex) {
+      this.breezeDataError = 'Choose an exchange (NSE or NFO).';
+      this.cdr.markForCheck();
+      return;
+    }
+    this.breezeDataLoading = true;
+    this.breezeDataError = null;
+    const fd = this.breezePortfolioFromDate?.trim();
+    const td = this.breezePortfolioToDate?.trim();
+    const sc = this.breezePortfolioStockCode?.trim();
+    this.dashboardService
+      .getBreezePortfolioHoldings({
+        exchangeCode: ex,
+        ...(fd ? { fromDate: new Date(fd).toISOString() } : {}),
+        ...(td ? { toDate: new Date(td).toISOString() } : {}),
+        ...(sc ? { stockCode: sc } : {}),
+      })
+      .subscribe({
+        next: (d) => {
+          this.breezePortfolioHoldingsData = d;
+          this.breezeDataLoading = false;
+          this.cdr.markForCheck();
+        },
+        error: (err) => {
+          this.breezeDataLoading = false;
+          this.breezeDataError = err?.error?.error || err?.message || 'Request failed';
+          this.cdr.markForCheck();
+        },
+      });
+  }
+
+  /** Portfolio holdings: note + filtered/sorted rows + footer totals. */
+  breezePortfolioHoldingsView(): {
+    note: string | null;
+    rows: BreezePortfolioHoldingsDisplayRow[];
+    totals: BreezePortfolioHoldingsTotals;
+  } {
+    const rows = this.breezePortfolioHoldingsTableRows();
+    return {
+      note: this.breezePortfolioHoldingsApiNote(),
+      rows,
+      totals: this.breezePortfolioHoldingsTotalsFromRows(rows),
+    };
+  }
+
+  setBreezePortfolioSort(col: BreezePortfolioSortCol): void {
+    if (this.breezePortfolioSortCol === col) {
+      this.breezePortfolioSortDir = (this.breezePortfolioSortDir === 1 ? -1 : 1) as 1 | -1;
+    } else {
+      this.breezePortfolioSortCol = col;
+      this.breezePortfolioSortDir = 1;
+    }
+    this.cdr.markForCheck();
+  }
+
+  onBreezePortfolioTableFilterChange(): void {
+    this.cdr.markForCheck();
+  }
+
+  breezePortfolioSortIndicator(col: BreezePortfolioSortCol): string {
+    if (this.breezePortfolioSortCol !== col) return '';
+    return this.breezePortfolioSortDir === 1 ? '↑' : '↓';
+  }
+
+  private breezePortfolioHoldingsBaseRows(): BreezePortfolioHoldingsDisplayRow[] {
+    const data = this.breezePortfolioHoldingsData;
+    if (data == null || typeof data !== 'object') return [];
+    const root = data as Record<string, unknown>;
+    const success = root['Success'];
+    if (!Array.isArray(success) || success.length === 0) return [];
+    const out: BreezePortfolioHoldingsDisplayRow[] = [];
+    for (const raw of success) {
+      if (raw == null || typeof raw !== 'object') continue;
+      const row = raw as Record<string, unknown>;
+      const stockCode = this.breezePortfolioStringField(row, ['stock_code', 'stockCode']);
+      const qty = this.breezePortfolioParseNum(row, ['quantity', 'qty', 'Quantity']);
+      const avg = this.breezePortfolioParseNum(row, ['average_price', 'averagePrice', 'avg_price']);
+      const bookedRaw = this.breezePortfolioRawField(row, [
+        'booked_profit_loss',
+        'bookedProfitLoss',
+        'realized_profit',
+        'booked_profit',
+      ]);
+      const curPx = this.breezePortfolioParseNum(row, ['current_market_price', 'currentMarketPrice', 'ltp', 'last_price']);
+      const invested = avg != null && qty != null ? avg * qty : null;
+      const currentAmtNum = curPx != null && qty != null ? curPx * qty : null;
+      const bookedPnlNum = this.breezePortfolioParseNumValue(bookedRaw);
+      let plKind: BreezePortfolioHoldingsDisplayRow['plKind'] = 'na';
+      let plStr = '—';
+      let plPctStr = '—';
+      let plNumValue: number | null = null;
+      let plPctNumValue: number | null = null;
+      if (invested != null && currentAmtNum != null && Number.isFinite(invested) && Number.isFinite(currentAmtNum)) {
+        plNumValue = currentAmtNum - invested;
+        if (Math.abs(plNumValue) < 1e-6) plKind = 'zero';
+        else if (plNumValue > 0) plKind = 'pos';
+        else plKind = 'neg';
+        plStr = this.breezePortfolioFormatMoney(plNumValue);
+        if (Math.abs(invested) > 1e-9) {
+          plPctNumValue = (plNumValue / invested) * 100;
+          plPctStr = `${plPctNumValue.toFixed(1)}%`;
+        }
+      }
+      out.push({
+        stockCode: stockCode ?? '—',
+        quantity: this.breezePortfolioFormatQty(qty),
+        avgPrice: this.breezePortfolioFormatMoney(avg),
+        bookedPnl: this.breezePortfolioFormatBooked(bookedRaw),
+        currentPrice: this.breezePortfolioFormatMoney(curPx),
+        investedAmt: this.breezePortfolioFormatMoney(invested),
+        currentAmt: this.breezePortfolioFormatMoney(currentAmtNum),
+        pl: plStr,
+        plPct: plPctStr,
+        plKind,
+        qtyNum: qty,
+        avgNum: avg,
+        bookedPnlNum,
+        investedNum: invested,
+        currentNum: currentAmtNum,
+        plNum: plNumValue,
+        plPctNum: plPctNumValue,
+        curPxNum: curPx,
+      });
+    }
+    return out;
+  }
+
+  private breezePortfolioHoldingsTableRows(): BreezePortfolioHoldingsDisplayRow[] {
+    const base = this.breezePortfolioHoldingsBaseRows();
+    const q = this.breezePortfolioTableFilter.trim().toLowerCase();
+    let filtered = base;
+    if (q) {
+      filtered = base.filter(
+        (row) =>
+          row.stockCode.toLowerCase().includes(q) ||
+          row.quantity.toLowerCase().includes(q) ||
+          row.avgPrice.toLowerCase().includes(q) ||
+          row.bookedPnl.toLowerCase().includes(q) ||
+          row.currentPrice.toLowerCase().includes(q) ||
+          row.investedAmt.toLowerCase().includes(q) ||
+          row.currentAmt.toLowerCase().includes(q) ||
+          row.pl.toLowerCase().includes(q) ||
+          row.plPct.toLowerCase().includes(q)
+      );
+    }
+    const col = this.breezePortfolioSortCol;
+    const dir = this.breezePortfolioSortDir;
+    const nullLast = (n: number | null): number =>
+      n == null || !Number.isFinite(n) ? (dir === 1 ? Number.POSITIVE_INFINITY : Number.NEGATIVE_INFINITY) : n;
+    return [...filtered].sort((a, b) => {
+      let cmp = 0;
+      switch (col) {
+        case 'stockCode':
+          cmp = a.stockCode.localeCompare(b.stockCode, undefined, { sensitivity: 'base' });
+          break;
+        case 'qty':
+          cmp = nullLast(a.qtyNum) - nullLast(b.qtyNum);
+          break;
+        case 'avgPrice':
+          cmp = nullLast(a.avgNum) - nullLast(b.avgNum);
+          break;
+        case 'bookedPnl':
+          cmp = nullLast(a.bookedPnlNum) - nullLast(b.bookedPnlNum);
+          break;
+        case 'currentPrice':
+          cmp = nullLast(a.curPxNum) - nullLast(b.curPxNum);
+          break;
+        case 'invested':
+          cmp = nullLast(a.investedNum) - nullLast(b.investedNum);
+          break;
+        case 'current':
+          cmp = nullLast(a.currentNum) - nullLast(b.currentNum);
+          break;
+        case 'pl':
+          cmp = nullLast(a.plNum) - nullLast(b.plNum);
+          break;
+        case 'plPct':
+          cmp = nullLast(a.plPctNum) - nullLast(b.plPctNum);
+          break;
+        default:
+          cmp = 0;
+      }
+      return cmp * dir;
+    });
+  }
+
+  private breezePortfolioHoldingsTotalsFromRows(rows: BreezePortfolioHoldingsDisplayRow[]): BreezePortfolioHoldingsTotals {
+    let inv = 0;
+    let cur = 0;
+    let pl = 0;
+    for (const r of rows) {
+      if (r.investedNum != null && Number.isFinite(r.investedNum)) inv += r.investedNum;
+      if (r.currentNum != null && Number.isFinite(r.currentNum)) cur += r.currentNum;
+      if (r.plNum != null && Number.isFinite(r.plNum)) pl += r.plNum;
+    }
+    let plKind: BreezePortfolioHoldingsTotals['plKind'] = 'na';
+    if (Math.abs(pl) < 1e-6) plKind = 'zero';
+    else if (pl > 0) plKind = 'pos';
+    else plKind = 'neg';
+    const plPctVal = Math.abs(inv) > 1e-9 ? (pl / inv) * 100 : null;
+    return {
+      invested: this.breezePortfolioFormatMoney(inv),
+      current: this.breezePortfolioFormatMoney(cur),
+      pl: this.breezePortfolioFormatMoney(pl),
+      plPct: plPctVal != null ? `${plPctVal.toFixed(1)}%` : '—',
+      plKind,
+    };
+  }
+
+  private breezePortfolioHoldingsApiNote(): string | null {
+    const data = this.breezePortfolioHoldingsData;
+    if (data == null || typeof data !== 'object') return null;
+    const root = data as Record<string, unknown>;
+    const err = root['Error'] ?? root['error'];
+    if (err !== null && err !== undefined && err !== '') {
+      const es = typeof err === 'object' ? JSON.stringify(err) : String(err);
+      if (es && es !== 'null' && es !== 'undefined') return `API error: ${es}`;
+    }
+    return null;
+  }
+
+  trackPortfolioHoldingRow(_index: number, row: BreezePortfolioHoldingsDisplayRow): string {
+    return `${row.stockCode}-${_index}`;
+  }
+
+  private breezePortfolioStringField(row: Record<string, unknown>, keys: string[]): string | null {
+    const v = this.breezePortfolioRawField(row, keys);
+    if (v === null || v === undefined) return null;
+    const s = String(v).trim();
+    return s.length ? s : null;
+  }
+
+  private breezePortfolioRawField(row: Record<string, unknown>, keys: string[]): unknown {
+    const want = new Set(keys.map((k) => k.toLowerCase()));
+    for (const [k, v] of Object.entries(row)) {
+      if (want.has(k.toLowerCase())) return v;
+    }
+    return undefined;
+  }
+
+  private breezePortfolioParseNum(row: Record<string, unknown>, keys: string[]): number | null {
+    const v = this.breezePortfolioRawField(row, keys);
+    return this.breezePortfolioParseNumValue(v);
+  }
+
+  private breezePortfolioParseNumValue(v: unknown): number | null {
+    if (v === null || v === undefined || v === '') return null;
+    if (typeof v === 'number') return Number.isFinite(v) ? v : null;
+    const s = String(v).replace(/,/g, '').trim();
+    if (!s.length) return null;
+    const n = Number(s);
+    return Number.isFinite(n) ? n : null;
+  }
+
+  private breezePortfolioFormatMoney(n: number | null): string {
+    if (n == null || !Number.isFinite(n)) return '—';
+    return n.toLocaleString('en-IN', { maximumFractionDigits: 2, minimumFractionDigits: 2 });
+  }
+
+  private breezePortfolioFormatQty(n: number | null): string {
+    if (n == null || !Number.isFinite(n)) return '—';
+    if (Number.isInteger(n) || Math.abs(n - Math.round(n)) < 1e-9) return String(Math.round(n));
+    return n.toLocaleString('en-IN', { maximumFractionDigits: 4, minimumFractionDigits: 0 });
+  }
+
+  private breezePortfolioFormatBooked(v: unknown): string {
+    if (v === null || v === undefined || v === '') return '—';
+    const n = this.breezePortfolioParseNumValue(v);
+    if (n != null) return this.breezePortfolioFormatMoney(n);
+    return String(v);
+  }
+
   /** After a poll, update last-shown movements when current diff is non-zero so we keep showing it when next poll is unchanged. */
   private updateLastShownMovements(): void {
     if (!this.data || !this.lastRefreshHoldings) return;
@@ -711,6 +1092,19 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
     return this.livePriceHistory.filter((p) => this.getEtDateKey(p.timestamp) === lastKey);
   }
 
+  /**
+   * Line chart data: prefer intraday points for the **latest** ET session only.
+   * If that session has &lt; 2 samples but total history has 2+ (e.g. new day with one poll so far),
+   * fall back to full history so the chart still renders.
+   */
+  private getLivePriceLineChartHistory(): { timestamp: number; livePriceUsd: number; usdToInrRate: number }[] {
+    const latest = this.getLatestLivePriceSessionHistory();
+    if (latest.length >= 2) return latest;
+    const h = this.livePriceHistory;
+    if (h.length >= 2) return h;
+    return latest;
+  }
+
   private updateLivePriceChartData(): void {
     if (!this.livePriceChart || this.livePriceHistory.length < 2) return;
     this.livePriceOpenByDay = this.buildLivePriceOpenByDay(this.livePriceHistory, this.data?.openPriceUsd);
@@ -723,7 +1117,7 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
       this.createCandlestickChart(canvas);
       return;
     } else {
-      const h = this.getLatestLivePriceSessionHistory();
+      const h = this.getLivePriceLineChartHistory();
       const open = h.length ? (this.livePriceOpenByDay.get(this.getEtDateKey(h[0].timestamp)) ?? h[0].livePriceUsd) : null;
       this.livePriceChart.data.labels = h.map((p) => this.formatXLabel(p.timestamp, true));
       (this.livePriceChart.data.datasets[0] as any).data = h.map((p) => p.livePriceUsd);
@@ -801,7 +1195,7 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
   }
 
   private createLineChart(canvas: HTMLCanvasElement): void {
-    const h = this.getLatestLivePriceSessionHistory();
+    const h = this.getLivePriceLineChartHistory();
     if (h.length < 2) return;
     const labels = h.map((p) => this.formatXLabel(p.timestamp, true));
     const prices = h.map((p) => p.livePriceUsd);
@@ -1597,8 +1991,11 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
     });
   }
 
-  setActiveTab(tab: 'holdings' | 'sold' | 'playground' | 'data' | 'financial' | 'tax'): void {
+  setActiveTab(tab: 'holdings' | 'sold' | 'playground' | 'data' | 'financial' | 'tax' | 'icici'): void {
     this.activeTab = tab;
+    if (tab === 'icici') {
+      this.loadBreezeStatus();
+    }
     if (tab === 'tax') {
       if (!this.taxConfig && !this.taxConfigLoading) this.loadTaxConfig();
       if (this.holdingsChart) { this.holdingsChart.destroy(); this.holdingsChart = null; }
@@ -1610,7 +2007,7 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
       }
       if (!this.soldLoaded && !this.soldLoading) this.loadSold();
       else if (this.soldRows.length > 0) setTimeout(() => this.initOrUpdateSoldChart(), 0);
-    } else if (tab === 'playground' || tab === 'financial') {
+    } else if (tab === 'playground' || tab === 'financial' || tab === 'icici') {
       if (this.holdingsChart) {
         this.holdingsChart.destroy();
         this.holdingsChart = null;
@@ -2559,6 +2956,119 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
     const n = Number(value);
     this.holdingsSimulateUsdToInr = Number.isFinite(n) && n > 0 ? n : null;
     this.cdr.markForCheck();
+  }
+
+  /**
+   * Unvested shares after US withholding: floor(gross × (1 − 37.14%)); null if no gross.
+   * US side is share-based; INR lines derive from these counts × price × FX.
+   */
+  get holdingsUnvestedSharesAfterUs(): number | null {
+    const g = this.holdingsUnvestedGrossShares;
+    if (g == null) return null;
+    return Math.floor(g * (1 - this.UNVESTED_US_WITHHOLDING_FRACTION));
+  }
+
+  /**
+   * Unvested shares (through year-end): user enters gross share count; on blur we normalize to whole shares.
+   * US withholding uses share math; India uses INR (see holdingsUnvestedSimTotals).
+   */
+  onHoldingsUnvestedGrossBlur(): void {
+    const t = this.holdingsUnvestedGrossText.trim().replace(/,/g, '');
+    if (t === '') {
+      this.holdingsUnvestedGrossShares = null;
+      this.cdr.markForCheck();
+      return;
+    }
+    const n = Number(t);
+    if (!Number.isFinite(n) || n < 0) {
+      this.holdingsUnvestedGrossShares = null;
+      this.cdr.markForCheck();
+      return;
+    }
+    const gross = Math.floor(n);
+    this.holdingsUnvestedGrossShares = gross;
+    this.holdingsUnvestedGrossText = String(gross);
+    this.cdr.markForCheck();
+  }
+
+  /** Indian CG rate % used for unvested sim (from mode + inputs). */
+  get holdingsUnvestedIndiaCgRatePct(): number {
+    return this.holdingsUnvestedIndiaCgMode === 'stcg'
+      ? Math.max(0, this.holdingsUnvestedIndiaStcgPct)
+      : Math.max(0, this.holdingsUnvestedIndiaLtcgPct);
+  }
+
+  get holdingsUnvestedIndiaCgModeLabel(): 'STCG' | 'LTCG' {
+    return this.holdingsUnvestedIndiaCgMode === 'stcg' ? 'STCG' : 'LTCG';
+  }
+
+  /** Buy (cost) USD/share for India CG in unvested sim: live / current price. */
+  get holdingsUnvestedIndiaBuyPriceUsd(): number {
+    const pLive = this.data?.livePriceUsd ?? 0;
+    const pSim = this.holdingsSimulatePriceUsd;
+    const pSell =
+      pSim != null && pSim > 0 ? pSim : pLive > 0 ? pLive : this.holdingsPriceUsd;
+    return pLive > 0 ? pLive : pSell;
+  }
+
+  /** Sell USD/share for unvested sim: Simulate price when set (future sale), else live. */
+  get holdingsUnvestedIndiaSellPriceUsd(): number {
+    const pLive = this.data?.livePriceUsd ?? 0;
+    const pSim = this.holdingsSimulatePriceUsd;
+    if (pSim != null && pSim > 0) return pSim;
+    if (pLive > 0) return pLive;
+    return this.holdingsPriceUsd;
+  }
+
+  /**
+   * Unvested sim: US math at **sell** price (Simulate = future sale; empty → live).
+   * India CG: **buy** = live (current), **sell** = Simulate or live; gain = sell proceeds − cost at buy.
+   */
+  get holdingsUnvestedSimTotals(): {
+    totalValueTodayInr: number;
+    usWithholdingInr: number;
+    valueAfterUsInr: number;
+    /** India cost: after-US shares × buy USD × FX (buy = live). */
+    indiaCostBasisUsedInr: number;
+    taxableGainIndiaInr: number;
+    indiaTaxInr: number;
+    totalTaxToPayInr: number;
+    totalNetInAccountInr: number;
+  } | null {
+    const gross = this.holdingsUnvestedGrossShares;
+    if (gross == null) return null;
+    const pLive = this.data?.livePriceUsd ?? 0;
+    const pSim = this.holdingsSimulatePriceUsd;
+    const r = this.holdingsUsdToInr;
+    const pSell =
+      pSim != null && pSim > 0 ? pSim : pLive > 0 ? pLive : this.holdingsPriceUsd;
+    const pBuy = pLive > 0 ? pLive : pSell;
+    if (pSell <= 0 || r <= 0) return null;
+    const sharesAfterUs = Math.floor(gross * (1 - this.UNVESTED_US_WITHHOLDING_FRACTION));
+    const valueGross = Math.round(gross * pSell * r * 100) / 100;
+    const valueAfterUsInr = Math.round(sharesAfterUs * pSell * r * 100) / 100;
+    const usWithholdingInr = Math.round((valueGross - valueAfterUsInr) * 100) / 100;
+    const indiaCostBasisUsedInr = Math.round(sharesAfterUs * pBuy * r * 100) / 100;
+    const taxableGainIndiaInr = Math.round(Math.max(0, valueAfterUsInr - indiaCostBasisUsedInr) * 100) / 100;
+    const rate = this.holdingsUnvestedIndiaCgRatePct / 100;
+    const indiaTaxInr = Math.round(taxableGainIndiaInr * rate * 100) / 100;
+    const totalTaxToPayInr = Math.round((usWithholdingInr + indiaTaxInr) * 100) / 100;
+    const totalNetInAccountInr = Math.round((valueAfterUsInr - indiaTaxInr) * 100) / 100;
+    return {
+      totalValueTodayInr: valueGross,
+      usWithholdingInr,
+      valueAfterUsInr,
+      indiaCostBasisUsedInr,
+      taxableGainIndiaInr,
+      indiaTaxInr,
+      totalTaxToPayInr,
+      totalNetInAccountInr,
+    };
+  }
+
+  /** Net INR at sim price/FX (same as unvested sim “after tax” total). */
+  get holdingsUnvestedNetValueInr(): number | null {
+    return this.holdingsUnvestedSimTotals?.totalNetInAccountInr ?? null;
   }
 
   /** Price (USD) used for Holdings table: override if set, else live. */

@@ -1,3 +1,61 @@
+/** ICICI Direct Breeze API status (optional integration). */
+export interface BreezeStatusResponse {
+  sdkInstalled: boolean;
+  configured: boolean;
+  connected: boolean;
+  loginUrl: string | null;
+  /** Register this exact URL as Redirect URL in ICICI Breeze app settings. */
+  callbackUrl?: string | null;
+  message?: string;
+}
+
+/** Sortable column keys for ICICI portfolio table (UI). */
+export type BreezePortfolioSortCol =
+  | 'stockCode'
+  | 'qty'
+  | 'avgPrice'
+  | 'bookedPnl'
+  | 'currentPrice'
+  | 'invested'
+  | 'current'
+  | 'pl'
+  | 'plPct';
+
+/** One row for ICICI GetPortfolioHoldings table (derived from API + computed columns). */
+export interface BreezePortfolioHoldingsDisplayRow {
+  stockCode: string;
+  quantity: string;
+  avgPrice: string;
+  bookedPnl: string;
+  currentPrice: string;
+  investedAmt: string;
+  currentAmt: string;
+  /** current − invested (display). */
+  pl: string;
+  /** % on invested cost. */
+  plPct: string;
+  plKind: 'pos' | 'neg' | 'zero' | 'na';
+  /** Raw numbers for sort / totals (null when not applicable). */
+  qtyNum: number | null;
+  avgNum: number | null;
+  bookedPnlNum: number | null;
+  investedNum: number | null;
+  currentNum: number | null;
+  plNum: number | null;
+  plPctNum: number | null;
+  /** Current market price per share (for sorting Current mkt column). */
+  curPxNum: number | null;
+}
+
+/** Footer totals over filtered rows. */
+export interface BreezePortfolioHoldingsTotals {
+  invested: string;
+  current: string;
+  pl: string;
+  plPct: string;
+  plKind: 'pos' | 'neg' | 'zero' | 'na';
+}
+
 export interface NsuEsppStats {
   qty: number;
   profitAfterTax: number;

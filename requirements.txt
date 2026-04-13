@@ -1,6 +1,7 @@
 Django
 elasticsearch
 flask
+python-dotenv
 pandas
 pytz
 requests
@@ -9,3 +10,4 @@ tabulate
 yahoo_fin
 yahoofinancials
 yfinance
+breeze-connect>=1.0.68
