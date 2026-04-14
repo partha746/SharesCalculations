@@ -38,7 +38,7 @@ def _reload_dashboard_env():
 
 import requests
 
-from flask import Flask, Response, jsonify, request
+from flask import Flask, Response, jsonify, redirect, request
 
 app = Flask(__name__)
 
@@ -507,7 +507,7 @@ def get_live_price():
             return jsonify({"error": "Could not fetch live price or USD/INR rate"}), 503
         payload = {
             "livePriceUsd": round(live_price, 2),
-            "usdToInrRate": round(todays_rp, 2),
+            "usdToInrRate": round(float(todays_rp), 4),
             "lastUpdated": datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z",
         }
         if open_price is not None:
@@ -524,7 +524,10 @@ def get_live_price():
             postmarket = rupee_conv_obj.get_postmarket_price("NVDA")
             if postmarket is not None:
                 payload["postMarketPriceUsd"] = round(postmarket, 2)
-        return jsonify(payload)
+        resp = jsonify(payload)
+        resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
+        resp.headers["Pragma"] = "no-cache"
+        return resp
     except Exception as e:
         return jsonify({"error": str(e)}), 503
 
@@ -601,7 +604,7 @@ def _build_dashboard_response():
 
     payload = {
         "livePriceUsd": round(live_price, 2),
-        "usdToInrRate": round(todays_rp, 2),
+        "usdToInrRate": round(float(todays_rp), 4),
         "totalShares": all_qty,
         "totalValueUsd": total_value_usd,
         "totalValueInr": total_value_inr,
@@ -1027,18 +1030,11 @@ try:
 except ImportError:
     breeze_icici = None  # type: ignore
 
-_BREEZE_CALLBACK_PATH = "/api/breeze/callback"
-
-
 def _extract_breeze_session_token():
     """ICICI may return the session via GET query string or POST body (form / JSON)."""
     keys = (
-        "apisession",
-        "API_Session",
-        "api_session",
-        "session_token",
-        "Session_Token",
-        "APISession",
+        "apisession", "API_Session", "api_session",
+        "session_token", "Session_Token", "APISession",
     )
     for key in keys:
         v = request.values.get(key)
@@ -1052,177 +1048,152 @@ def _extract_breeze_session_token():
     return ""
 
 
-def _breeze_redirect_url_for_registration():
-    """Exact URL to enter in ICICI Breeze app registration (Redirect URL). Must match browser origin."""
+def _breeze_public_base():
     base = (os.environ.get("BREEZE_PUBLIC_BASE_URL") or "").strip().rstrip("/")
-    if base:
-        return f"{base}{_BREEZE_CALLBACK_PATH}"
-    return request.url_root.rstrip("/") + _BREEZE_CALLBACK_PATH
+    return base or request.url_root.rstrip("/")
 
 
-@app.route(_BREEZE_CALLBACK_PATH, methods=["GET", "POST"])
-def breeze_oauth_callback():
-    """ICICI redirects here after login (GET query or POST body); shows session token for copy-paste."""
-    token_server = _extract_breeze_session_token()
-    token_js = json.dumps(token_server)
-    raw_qs = request.query_string.decode("utf-8", errors="replace") or ""
-    raw_qs_js = json.dumps(raw_qs)
-    html = f"""<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="utf-8"/>
-<meta name="viewport" content="width=device-width, initial-scale=1"/>
-<title>Breeze session</title>
-<style>
-body{{font-family:system-ui,sans-serif;max-width:640px;margin:2rem auto;padding:0 1rem;background:#111;color:#eee;line-height:1.5;}}
-code{{background:#222;padding:2px 6px;border-radius:4px;word-break:break-all;}}
-pre{{background:#0d0d0d;padding:1rem;border-radius:8px;overflow:auto;font-size:0.85rem;}}
-</style>
-</head>
-<body>
-<h1>Breeze login</h1>
-<p>Register this URL as your ICICI <strong>Redirect URL</strong>, then use the dashboard <strong>ICICI login</strong> link. The session token is read from the redirect (GET or POST).</p>
-<p id="msg"></p>
-<pre id="raw"></pre>
-<script>
-(function(){{
-  var tokenFromServer = {token_js};
-  var s = window.location.search || '';
-  document.getElementById('raw').textContent = s || {raw_qs_js} || '(no query string)';
-  var params = new URLSearchParams(s);
-  var token = tokenFromServer || '';
-  if (!token) {{
-    ['apisession','API_Session','api_session','session_token','Session_Token'].forEach(function(k){{
-      if (!token && params.has(k)) token = params.get(k);
-    }});
-  }}
-  if (!token) {{
-    params.forEach(function(value, key) {{
-      if (!token && /session|apisession/i.test(key)) token = value;
-    }});
-  }}
-  var p = document.getElementById('msg');
-  if (token) {{
-    p.innerHTML = '<strong>Session token</strong> (paste into dashboard &rarr; Connect):<br><code id="t"></code>';
-    document.getElementById('t').textContent = token;
-  }} else {{
-    p.textContent = 'No token found. If you used POST redirect, check ICICI docs; you may copy the token from the network tab.';
-  }}
-}})();
-</script>
-</body>
-</html>"""
-    return Response(html, mimetype="text/html; charset=utf-8")
+def _breeze_callback_url_for_acct(acct):
+    return f"{_breeze_public_base()}/api/breeze/callback/{acct}"
 
 
-@app.route("/api/breeze/status", methods=["GET"])
-def breeze_status():
-    _reload_dashboard_env()
-    callback_url = _breeze_redirect_url_for_registration()
-    if breeze_icici is None:
-        return jsonify(
-            {
-                "sdkInstalled": False,
-                "configured": False,
-                "connected": False,
-                "loginUrl": None,
-                "callbackUrl": callback_url,
-                "message": "breeze_icici module not found",
-            }
-        )
-    return jsonify(
-        {
-            "sdkInstalled": breeze_icici.sdk_installed(),
-            "configured": breeze_icici.is_configured(),
-            "connected": breeze_icici.get_client() is not None,
-            "loginUrl": breeze_icici.login_url(),
-            "callbackUrl": callback_url,
-        }
+def _breeze_dashboard_url():
+    base = (os.environ.get("BREEZE_DASHBOARD_URL") or "").strip().rstrip("/")
+    if not base:
+        base = _breeze_public_base()
+    return base + "/?tab=icici"
+
+
+def _breeze_js_redirect(url):
+    return Response(
+        f'<!DOCTYPE html><html><head><meta charset="utf-8"/>'
+        f'<title>Redirecting…</title></head><body>'
+        f'<p>Connecting… redirecting to dashboard.</p>'
+        f'<script>window.location.replace({json.dumps(url)});</script>'
+        f'<noscript><p><a href="{url}">Click here to continue</a></p></noscript>'
+        f'</body></html>',
+        status=200,
+        mimetype="text/html; charset=utf-8",
+        headers={"Cache-Control": "no-store"},
     )
 
 
-@app.route("/api/breeze/session", methods=["POST"])
-def breeze_session():
+@app.route("/api/breeze/callback/<acct>", methods=["GET", "POST"])
+def breeze_oauth_callback(acct):
+    _reload_dashboard_env()
+    if breeze_icici is None or acct not in breeze_icici.VALID_ACCOUNT_IDS:
+        return _breeze_js_redirect(_breeze_dashboard_url() + "&breeze_error=invalid_account")
+    token = _extract_breeze_session_token()
+    print(f"[breeze-callback/{acct}] token={'YES' if token else 'EMPTY'}, query={request.query_string.decode()}", flush=True)
+    if token:
+        try:
+            breeze_icici.connect_session(token, acct)
+            dest = _breeze_dashboard_url() + f"&breeze_connected={acct}"
+            print(f"[breeze-callback/{acct}] connect_session OK, redirecting to: {dest}", flush=True)
+            return _breeze_js_redirect(dest)
+        except Exception as e:
+            print(f"[breeze-callback/{acct}] connect_session FAILED: {e}", flush=True)
+            import urllib.parse
+            return _breeze_js_redirect(_breeze_dashboard_url() + "&breeze_error=" + urllib.parse.quote(str(e)))
+    return _breeze_js_redirect(_breeze_dashboard_url() + "&breeze_error=no_token")
+
+
+# Keep old path as alias for account 1
+@app.route("/api/breeze/callback", methods=["GET", "POST"])
+def breeze_oauth_callback_default():
+    return breeze_oauth_callback("1")
+
+
+@app.route("/api/breeze/status/<acct>", methods=["GET"])
+def breeze_status(acct):
+    _reload_dashboard_env()
+    callback_url = _breeze_callback_url_for_acct(acct)
+    if breeze_icici is None:
+        return jsonify({
+            "sdkInstalled": False, "configured": False, "connected": False,
+            "loginUrl": None, "callbackUrl": callback_url,
+            "message": "breeze_icici module not found",
+        })
+    if acct not in breeze_icici.VALID_ACCOUNT_IDS:
+        return jsonify({"error": f"Invalid account id: {acct}"}), 400
+    return jsonify({
+        "sdkInstalled": breeze_icici.sdk_installed(),
+        "configured": breeze_icici.is_configured(acct),
+        "connected": breeze_icici.get_client(acct) is not None,
+        "loginUrl": breeze_icici.login_url(acct),
+        "callbackUrl": callback_url,
+    })
+
+
+@app.route("/api/breeze/status", methods=["GET"])
+def breeze_status_all():
+    """Combined status for all accounts."""
     _reload_dashboard_env()
     if breeze_icici is None:
-        return jsonify({"error": "Breeze module unavailable"}), 500
-    data = request.get_json() or {}
-    token = data.get("session_token") or data.get("sessionToken") or ""
-    try:
-        breeze_icici.connect_session(str(token))
-        return jsonify({"success": True})
-    except Exception as e:
-        return jsonify({"success": False, "error": str(e)}), 400
+        return jsonify({"accounts": {}})
+    result = {}
+    for acct in breeze_icici.VALID_ACCOUNT_IDS:
+        result[acct] = {
+            "sdkInstalled": breeze_icici.sdk_installed(),
+            "configured": breeze_icici.is_configured(acct),
+            "connected": breeze_icici.get_client(acct) is not None,
+            "loginUrl": breeze_icici.login_url(acct),
+            "callbackUrl": _breeze_callback_url_for_acct(acct),
+        }
+    return jsonify({"accounts": result})
 
 
-@app.route("/api/breeze/disconnect", methods=["POST"])
-def breeze_disconnect():
+@app.route("/api/breeze/disconnect/<acct>", methods=["POST"])
+def breeze_disconnect(acct):
     if breeze_icici is None:
         return jsonify({"error": "Breeze module unavailable"}), 500
-    breeze_icici.disconnect()
+    if acct not in breeze_icici.VALID_ACCOUNT_IDS:
+        return jsonify({"error": f"Invalid account id: {acct}"}), 400
+    breeze_icici.disconnect(acct)
     return jsonify({"success": True})
 
 
-@app.route("/api/breeze/customer", methods=["GET"])
-def breeze_customer():
+@app.route("/api/breeze/portfolio-holdings/<acct>", methods=["GET"])
+def breeze_portfolio_holdings(acct):
     if breeze_icici is None:
         return jsonify({"error": "Breeze module unavailable"}), 500
-    try:
-        return jsonify(breeze_icici.api_get_customer_details())
-    except Exception as e:
-        return jsonify({"error": str(e)}), 400
-
-
-@app.route("/api/breeze/funds", methods=["GET"])
-def breeze_funds():
-    if breeze_icici is None:
-        return jsonify({"error": "Breeze module unavailable"}), 500
-    try:
-        return jsonify(breeze_icici.api_get_funds())
-    except Exception as e:
-        return jsonify({"error": str(e)}), 400
-
-
-@app.route("/api/breeze/demat-holdings", methods=["GET"])
-def breeze_demat_holdings():
-    if breeze_icici is None:
-        return jsonify({"error": "Breeze module unavailable"}), 500
-    try:
-        return jsonify(breeze_icici.api_get_demat_holdings())
-    except Exception as e:
-        return jsonify({"error": str(e)}), 400
-
-
-@app.route("/api/breeze/portfolio-holdings", methods=["GET"])
-def breeze_portfolio_holdings():
-    """ICICI Breeze v1 portfolioholdings — same as https://api.icicidirect.com/breezeapi/api/v1/portfolioholdings"""
-    if breeze_icici is None:
-        return jsonify({"error": "Breeze module unavailable"}), 500
+    if acct not in breeze_icici.VALID_ACCOUNT_IDS:
+        return jsonify({"error": f"Invalid account id: {acct}"}), 400
     exchange_code = (request.args.get("exchange_code") or request.args.get("exchangeCode") or "").strip()
     if not exchange_code:
-        return jsonify(
-            {"error": "exchange_code is required (e.g. NSE, BSE, NFO, MCX, NDX, BFO)"}
-        ), 400
+        return jsonify({"error": "exchange_code is required"}), 400
     from_date = (request.args.get("from_date") or request.args.get("fromDate") or "").strip()
     to_date = (request.args.get("to_date") or request.args.get("toDate") or "").strip()
     stock_code = (request.args.get("stock_code") or request.args.get("stockCode") or "").strip()
     portfolio_type = (request.args.get("portfolio_type") or request.args.get("portfolioType") or "").strip()
     try:
         return jsonify(
-            breeze_icici.api_get_portfolio_holdings(
-                exchange_code, from_date, to_date, stock_code, portfolio_type
-            )
+            breeze_icici.api_get_portfolio_holdings(exchange_code, from_date, to_date, stock_code, portfolio_type, acct=acct)
         )
     except Exception as e:
         return jsonify({"error": str(e)}), 400
 
 
-@app.route("/api/breeze/portfolio-positions", methods=["GET"])
-def breeze_portfolio_positions():
+@app.route("/api/breeze/portfolio-positions/<acct>", methods=["GET"])
+def breeze_portfolio_positions(acct):
     if breeze_icici is None:
         return jsonify({"error": "Breeze module unavailable"}), 500
+    if acct not in breeze_icici.VALID_ACCOUNT_IDS:
+        return jsonify({"error": f"Invalid account id: {acct}"}), 400
     try:
-        return jsonify(breeze_icici.api_get_portfolio_positions())
+        return jsonify(breeze_icici.api_get_portfolio_positions(acct))
+    except Exception as e:
+        return jsonify({"error": str(e)}), 400
+
+
+@app.route("/api/breeze/demat-holdings/<acct>", methods=["GET"])
+def breeze_demat_holdings(acct):
+    if breeze_icici is None:
+        return jsonify({"error": "Breeze module unavailable"}), 500
+    if acct not in breeze_icici.VALID_ACCOUNT_IDS:
+        return jsonify({"error": f"Invalid account id: {acct}"}), 400
+    try:
+        return jsonify(breeze_icici.api_get_demat_holdings(acct))
     except Exception as e:
         return jsonify({"error": str(e)}), 400
 

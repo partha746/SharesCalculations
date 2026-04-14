@@ -260,7 +260,7 @@ def _build_dashboard_response():
 
     return {
         "livePriceUsd": round(live_price, 2),
-        "usdToInrRate": round(todays_rp, 2),
+        "usdToInrRate": round(float(todays_rp), 4),
         "totalShares": all_qty,
         "totalValueUsd": total_value_usd,
         "totalValueInr": total_value_inr,

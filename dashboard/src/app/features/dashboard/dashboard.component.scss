@@ -1660,6 +1660,13 @@
     line-height: 1.35;
     word-break: break-all;
   }
+  .icici-breeze-acct-label {
+    min-width: 5.5rem;
+    font-size: 0.85rem;
+  }
+  .icici-breeze-summary--ok {
+    color: #7ee787;
+  }
   .icici-breeze-status-row {
     display: flex;
     flex-wrap: wrap;

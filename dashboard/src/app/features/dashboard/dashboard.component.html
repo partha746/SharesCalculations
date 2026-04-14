@@ -48,7 +48,7 @@
         </div>
         <div class="live-price-block__row">
           <span class="live-price-block__label">USD → INR</span>
-          <span class="live-price-block__value">{{ formatUsd(data.usdToInrRate) }}</span>
+          <span class="live-price-block__value" title="Live FX feed (not ECB daily only); refreshes with the live price poll.">{{ formatUsdInrRate(data.usdToInrRate) }}</span>
         </div>
         <div class="live-price-block__premarket">
           @if (data.preMarketPriceUsd != null) {
@@ -381,55 +381,40 @@
           @if (breezeStatusLoading) {
             <p class="tax-tab__status">Loading…</p>
           }
-          @if (breezeStatus && !breezeStatusLoading) {
-            <div class="icici-breeze-status-row">
-              @if (!breezeStatus.sdkInstalled) {
-                <p class="tax-tab__error">Install <code>breeze-connect</code> on the API server.</p>
-              } @else if (!breezeStatus.configured) {
-                <p class="tax-tab__hint">Add <code>BREEZE_API_KEY</code> and <code>BREEZE_API_SECRET</code> to <code>dashboard/.env</code>, then refresh.</p>
-              } @else {
-                <p class="icici-breeze-summary">
-                  @if (breezeStatus.connected) {
-                    Connected
+          @if (breezeAccountIds.length > 0 && !breezeStatusLoading) {
+            @for (acctId of breezeAccountIds; track acctId) {
+              @let acct = breezeAccounts[acctId];
+              @if (acct) {
+                <div class="icici-breeze-status-row">
+                  <strong class="icici-breeze-acct-label">Account {{ acctId }}</strong>
+                  @if (!acct.sdkInstalled) {
+                    <span class="tax-tab__error">Install breeze-connect</span>
+                  } @else if (!acct.configured) {
+                    <span class="tax-tab__hint">Not configured</span>
+                  } @else if (acct.connected) {
+                    <span class="icici-breeze-summary icici-breeze-summary--ok">Connected</span>
+                    <button type="button" class="tax-tab__btn tax-tab__btn--reload" (click)="disconnectBreeze(acctId)">Disconnect</button>
                   } @else {
-                    Not connected
+                    <span class="icici-breeze-summary">Not connected</span>
+                    @if (acct.loginUrl) {
+                      <a [href]="acct.loginUrl" class="tax-tab__btn tax-tab__btn--save">Log in</a>
+                    }
                   }
-                </p>
+                  @if (acct.callbackUrl && acct.configured && !acct.connected) {
+                    <span class="tax-tab__hint icici-breeze-callback-hint" style="margin-left:0.5rem;font-size:0.78rem;">
+                      Redirect URL: <code class="icici-breeze-callback-url">{{ acct.callbackUrl }}</code>
+                    </span>
+                  }
+                </div>
               }
-              <button type="button" class="tax-tab__btn tax-tab__btn--reload" [disabled]="breezeStatusLoading" (click)="loadBreezeStatus()">Refresh</button>
-            </div>
-            @if (breezeStatus.callbackUrl && breezeStatus.configured && !breezeStatus.connected) {
-              <p class="tax-tab__hint icici-breeze-callback-hint">
-                Redirect URL (register at ICICI):
-                <code class="icici-breeze-callback-url">{{ breezeStatus.callbackUrl }}</code>
-              </p>
             }
-            @if (breezeStatus.loginUrl && !breezeStatus.connected) {
-              <p class="tax-tab__hint">
-                <a [href]="breezeStatus.loginUrl" target="_blank" rel="noopener noreferrer">Log in at ICICI</a>, then paste <code>apisession</code> below.
-              </p>
-            }
-            <div class="icici-breeze-connect">
-              <label class="icici-breeze-label">
-                Session token
-                <input
-                  type="text"
-                  class="icici-breeze-input"
-                  [(ngModel)]="breezeSessionToken"
-                  placeholder="apisession"
-                  autocomplete="off"
-                  [disabled]="breezeConnectLoading || breezeStatus.connected"
-                />
-              </label>
-              <button type="button" class="tax-tab__btn tax-tab__btn--save" [disabled]="breezeConnectLoading || breezeStatus.connected" (click)="connectBreeze()">
-                {{ breezeConnectLoading ? 'Connecting…' : 'Connect' }}
-              </button>
-              <button type="button" class="tax-tab__btn tax-tab__btn--reload" [disabled]="!breezeStatus.connected" (click)="disconnectBreeze()">Disconnect</button>
+            <div class="icici-breeze-status-row" style="margin-top:0.25rem;">
+              <button type="button" class="tax-tab__btn tax-tab__btn--reload" [disabled]="breezeStatusLoading" (click)="loadBreezeStatus()">Refresh status</button>
             </div>
             @if (breezeConnectError) {
               <p class="tax-tab__error">{{ breezeConnectError }}</p>
             }
-            @if (breezeStatus.connected) {
+            @if (breezeAnyConnected) {
               <div class="icici-breeze-actions icici-breeze-actions--wrap">
                 <label class="icici-breeze-inline">
                   <span class="icici-breeze-inline-label">Exchange</span>
@@ -458,7 +443,7 @@
               @if (breezeDataError) {
                 <p class="tax-tab__error">{{ breezeDataError }}</p>
               }
-              @if (breezePortfolioHoldingsData != null) {
+              @if (breezeHasPortfolioData) {
                 @if (breezePortfolioHoldingsView(); as ph) {
                   @if (ph.note) {
                     <p class="tax-tab__hint icici-breeze-table-note">{{ ph.note }}</p>
@@ -471,7 +456,7 @@
                         class="icici-breeze-input"
                         [(ngModel)]="breezePortfolioTableFilter"
                         (ngModelChange)="onBreezePortfolioTableFilterChange()"
-                        placeholder="Search stock, qty, amounts…"
+                        placeholder="Search stock, account, amounts…"
                       />
                     </label>
                   </div>
@@ -479,6 +464,9 @@
                     <table class="holdings-table icici-breeze-data-table icici-breeze-portfolio-table">
                       <thead>
                         <tr>
+                          <th class="icici-breeze-th-sort" (click)="setBreezePortfolioSort('account')">
+                            Acct <span class="icici-breeze-sort-ind">{{ breezePortfolioSortIndicator('account') }}</span>
+                          </th>
                           <th class="icici-breeze-th-sort" (click)="setBreezePortfolioSort('stockCode')">
                             Stock code <span class="icici-breeze-sort-ind">{{ breezePortfolioSortIndicator('stockCode') }}</span>
                           </th>
@@ -511,11 +499,12 @@
                       <tbody>
                         @if (ph.rows.length === 0) {
                           <tr>
-                            <td colspan="9" class="holdings-table__empty">No rows.</td>
+                            <td colspan="10" class="holdings-table__empty">No rows.</td>
                           </tr>
                         } @else {
                           @for (r of ph.rows; track trackPortfolioHoldingRow($index, r)) {
                             <tr>
+                              <td>{{ r.account }}</td>
                               <td>{{ r.stockCode }}</td>
                               <td>{{ r.quantity }}</td>
                               <td>{{ r.avgPrice }}</td>
@@ -531,7 +520,7 @@
                       </tbody>
                       <tfoot>
                         <tr class="icici-breeze-portfolio-tfoot">
-                          <th colspan="4" scope="row">Total</th>
+                          <th colspan="5" scope="row">Total</th>
                           <td>—</td>
                           <td>{{ ph.totals.invested }}</td>
                           <td>{{ ph.totals.current }}</td>
@@ -966,7 +955,7 @@
         placeholder="Live: {{ data ? formatUsd(data.livePriceUsd) : '–' }}"
         title="Future sell price for unvested sim (India CG: buy = live, sell = this). Leave empty: sell = live." />
       <label for="holdingsSimulateUsdToInr">Simulate USD→INR:</label>
-      <input id="holdingsSimulateUsdToInr" type="number" min="0" step="0.01" class="holdings-simulate-price__input holdings-simulate-price__input--fx" [ngModel]="holdingsSimulateUsdToInr" (ngModelChange)="onHoldingsSimulateUsdToInrChange($event)" placeholder="Live: {{ data ? formatUsd(data.usdToInrRate) : '–' }}" title="Leave empty for dashboard USD→INR. INR columns and totals use this rate when set." />
+      <input id="holdingsSimulateUsdToInr" type="number" min="0" step="0.01" class="holdings-simulate-price__input holdings-simulate-price__input--fx" [ngModel]="holdingsSimulateUsdToInr" (ngModelChange)="onHoldingsSimulateUsdToInrChange($event)" placeholder="Live: {{ data ? formatUsdInrRate(data.usdToInrRate) : '–' }}" title="Leave empty for dashboard USD→INR. INR columns and totals use this rate when set." />
       <label for="holdingsUnvestedGross">Unvested shares (YTD to year-end):</label>
       <input
         id="holdingsUnvestedGross"

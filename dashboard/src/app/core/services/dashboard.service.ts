@@ -1,7 +1,9 @@
 import { Injectable } from '@angular/core';
-import { HttpClient, HttpParams } from '@angular/common/http';
+import { HttpClient, HttpHeaders, HttpParams } from '@angular/common/http';
 import { Observable } from 'rxjs';
 import {
+  BreezeAccountStatus,
+  BreezeStatusAllResponse,
   BreezeStatusResponse,
   DashboardResponse,
   HoldingRow,
@@ -23,7 +25,14 @@ export class DashboardService {
   }
 
   getLivePrice(): Observable<LivePriceResponse> {
-    return this.http.get<LivePriceResponse>(`${this.apiUrl}/live-price`);
+    // Cache-bust + explicit no-cache headers so USD→INR always reflects the latest poll.
+    return this.http.get<LivePriceResponse>(`${this.apiUrl}/live-price`, {
+      params: { _: String(Date.now()) },
+      headers: new HttpHeaders({
+        'Cache-Control': 'no-cache',
+        Pragma: 'no-cache',
+      }),
+    });
   }
 
   getMarketStatus(): Observable<MarketStatusResponse> {
@@ -90,51 +99,34 @@ export class DashboardService {
     return this.http.get<{ fyLabel: string; rows: any[] }>(`${this.apiUrl}/generate-tax-doc?${params}`);
   }
 
-  getBreezeStatus(): Observable<BreezeStatusResponse> {
-    return this.http.get<BreezeStatusResponse>(`${this.apiUrl}/breeze/status?t=${Date.now()}`);
+  /** Combined status for all accounts. */
+  getBreezeStatusAll(): Observable<BreezeStatusAllResponse> {
+    return this.http.get<BreezeStatusAllResponse>(`${this.apiUrl}/breeze/status?t=${Date.now()}`);
   }
 
-  postBreezeSession(sessionToken: string): Observable<{ success: boolean; error?: string }> {
-    return this.http.post<{ success: boolean; error?: string }>(`${this.apiUrl}/breeze/session`, {
-      session_token: sessionToken,
-    });
+  /** Status for a single account. */
+  getBreezeStatus(acct: string = '1'): Observable<BreezeAccountStatus> {
+    return this.http.get<BreezeAccountStatus>(`${this.apiUrl}/breeze/status/${acct}?t=${Date.now()}`);
   }
 
-  postBreezeDisconnect(): Observable<{ success: boolean }> {
-    return this.http.post<{ success: boolean }>(`${this.apiUrl}/breeze/disconnect`, {});
+  postBreezeDisconnect(acct: string = '1'): Observable<{ success: boolean }> {
+    return this.http.post<{ success: boolean }>(`${this.apiUrl}/breeze/disconnect/${acct}`, {});
   }
 
-  getBreezeFunds(): Observable<unknown> {
-    return this.http.get(`${this.apiUrl}/breeze/funds`);
-  }
-
-  getBreezeDematHoldings(): Observable<unknown> {
-    return this.http.get(`${this.apiUrl}/breeze/demat-holdings`);
-  }
-
-  getBreezeCustomer(): Observable<unknown> {
-    return this.http.get(`${this.apiUrl}/breeze/customer`);
-  }
-
-  getBreezePortfolioPositions(): Observable<unknown> {
-    return this.http.get(`${this.apiUrl}/breeze/portfolio-positions`);
-  }
-
-  /**
-   * Breeze v1 GET …/portfolioholdings (requires session). exchangeCode e.g. NSE, BSE.
-   */
   getBreezePortfolioHoldings(options: {
     exchangeCode: string;
     fromDate?: string;
     toDate?: string;
     stockCode?: string;
     portfolioType?: string;
+    acct?: string;
   }): Observable<unknown> {
+    const acct = options.acct || '1';
     let params = new HttpParams().set('exchange_code', options.exchangeCode.trim());
     if (options.fromDate?.trim()) params = params.set('from_date', options.fromDate.trim());
     if (options.toDate?.trim()) params = params.set('to_date', options.toDate.trim());
     if (options.stockCode?.trim()) params = params.set('stock_code', options.stockCode.trim());
     if (options.portfolioType?.trim()) params = params.set('portfolio_type', options.portfolioType.trim());
-    return this.http.get(`${this.apiUrl}/breeze/portfolio-holdings`, { params });
+    return this.http.get(`${this.apiUrl}/breeze/portfolio-holdings/${acct}`, { params });
   }
 }

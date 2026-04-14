@@ -261,6 +261,20 @@ class RupeeConv:
 
         return fetch_rate_for_day(date_str)
 
+    def get_usd_to_inr_open_er_api(self):
+        """USD→INR from ExchangeRate-API (open.er-api.com). Updates more often than ECB-only Frankfurter."""
+        try:
+            response = requests.get("https://open.er-api.com/v6/latest/USD", timeout=15)
+            data = response.json()
+            if data.get("result") == "success":
+                rates = data.get("rates") or {}
+                rate = rates.get("INR")
+                if rate is not None:
+                    return float(rate)
+        except Exception as e:
+            print(f"open.er-api USD/INR: {e}")
+        return None
+
     @retry(wait_random_min=10, stop_max_attempt_number=3)
     def get_latest_usd_to_inr(self):
         """Fetch the latest USD→INR rate (for live display / refresh). Uses Frankfurter 'latest' endpoint."""
@@ -458,7 +472,11 @@ class RupeeConv:
                 prev_close = round(float(pc), 2)
         if live_price is None:
             live_price = self.get_stock_price(stock_code='nvda')
-        todays_rp = self.get_latest_usd_to_inr()
+        todays_rp = self.get_usd_to_inr_open_er_api()
+        if todays_rp is None:
+            todays_rp = self.get_latest_usd_to_inr()
+            if todays_rp is not None:
+                todays_rp = float(todays_rp)
         if todays_rp is None:
             todays_rp = self.get_rupee_rate(self.todays_date)
         return live_price, todays_rp, open_price, prev_close

@@ -1,16 +1,24 @@
-/** ICICI Direct Breeze API status (optional integration). */
-export interface BreezeStatusResponse {
+/** ICICI Direct Breeze API status for a single account. */
+export interface BreezeAccountStatus {
   sdkInstalled: boolean;
   configured: boolean;
   connected: boolean;
   loginUrl: string | null;
-  /** Register this exact URL as Redirect URL in ICICI Breeze app settings. */
   callbackUrl?: string | null;
   message?: string;
 }
 
+/** Combined status response: { accounts: { "1": ..., "2": ... } }. */
+export interface BreezeStatusAllResponse {
+  accounts: Record<string, BreezeAccountStatus>;
+}
+
+/** Legacy single-account shape (kept for per-account endpoint). */
+export type BreezeStatusResponse = BreezeAccountStatus;
+
 /** Sortable column keys for ICICI portfolio table (UI). */
 export type BreezePortfolioSortCol =
+  | 'account'
   | 'stockCode'
   | 'qty'
   | 'avgPrice'
@@ -45,6 +53,8 @@ export interface BreezePortfolioHoldingsDisplayRow {
   plPctNum: number | null;
   /** Current market price per share (for sorting Current mkt column). */
   curPxNum: number | null;
+  /** Which ICICI account this row came from ("1" or "2"). */
+  account: string;
 }
 
 /** Footer totals over filtered rows. */

@@ -16,14 +16,15 @@ import { Chart } from 'chart.js/auto';
 import 'chartjs-adapter-date-fns';
 import { CandlestickController, CandlestickElement, OhlcController, OhlcElement } from 'chartjs-chart-financial';
 import ChartDataLabels from 'chartjs-plugin-datalabels';
+import { forkJoin } from 'rxjs';
 import { DashboardService } from '../../core/services/dashboard.service';
 
 Chart.register(ChartDataLabels, CandlestickController, CandlestickElement, OhlcController, OhlcElement);
 import {
+  BreezeAccountStatus,
   BreezePortfolioHoldingsDisplayRow,
   BreezePortfolioHoldingsTotals,
   BreezePortfolioSortCol,
-  BreezeStatusResponse,
   DashboardResponse,
   HoldingRow,
   LivePriceDayTickerItem,
@@ -133,20 +134,17 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
   /** Tab: Holdings vs Sold Shares vs Playground vs Financial planning */
   activeTab: 'holdings' | 'sold' | 'playground' | 'data' | 'financial' | 'tax' | 'icici' = 'holdings';
 
-  /** ICICI Direct Breeze (optional backend integration). */
-  breezeStatus: BreezeStatusResponse | null = null;
+  /** ICICI Direct Breeze — multi-account support. */
+  breezeAccounts: Record<string, BreezeAccountStatus> = {};
+  breezeAccountIds: string[] = [];
   breezeStatusLoading = false;
-  breezeSessionToken = '';
-  breezeConnectLoading = false;
   breezeConnectError: string | null = null;
-  /** v1 /portfolioholdings (ICICI: NSE or NFO; ISO from/to optional — backend defaults last 30d UTC). */
-  breezePortfolioHoldingsData: unknown = null;
+  /** Per-account raw API data (merged for display). */
+  breezePortfolioDataByAcct: Record<string, unknown> = {};
   breezePortfolioExchangeCode = 'NSE';
-  /** datetime-local (optional); sent as ISO UTC to API. */
   breezePortfolioFromDate = '';
   breezePortfolioToDate = '';
   breezePortfolioStockCode = '';
-  /** Table: filter (matches any column text). */
   breezePortfolioTableFilter = '';
   breezePortfolioSortCol: BreezePortfolioSortCol = 'stockCode';
   breezePortfolioSortDir: 1 | -1 = 1;
@@ -287,8 +285,29 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
     this.webAppIframeSrc = this.sanitizer.bypassSecurityTrustResourceUrl('assets/web-app/index.html');
     this.loadHoldingsColumnOrder();
     this.initBreezePortfolioDefaultDates();
+    this.handleBreezeCallbackParams();
     this.load();
     this.updateCanUndoMarkSold();
+  }
+
+  /** If redirected back from ICICI callback, switch to ICICI tab and show status. */
+  private handleBreezeCallbackParams(): void {
+    const params = new URLSearchParams(window.location.search);
+    const tab = params.get('tab');
+    const connected = params.get('breeze_connected');
+    const error = params.get('breeze_error');
+    if (tab === 'icici') {
+      this.activeTab = 'icici';
+      if (error) {
+        this.breezeConnectError = error === 'no_token' ? 'No session token received from ICICI.' : error;
+      }
+      this.loadBreezeStatus();
+      const url = new URL(window.location.href);
+      url.searchParams.delete('tab');
+      url.searchParams.delete('breeze_connected');
+      url.searchParams.delete('breeze_error');
+      window.history.replaceState({}, '', url.pathname + url.search + url.hash);
+    }
   }
 
   /** Default ICICI portfolio holdings range: 2015-01-01 local → now (datetime-local). */
@@ -495,6 +514,15 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
         const totalShares = this.data.totalShares ?? 0;
         const totalValueUsd = totalShares * res.livePriceUsd;
         const totalValueInr = totalShares * res.livePriceUsd * res.usdToInrRate;
+        const roundedUsd = Math.round(totalValueUsd * 100) / 100;
+        const roundedInr = Math.round(totalValueInr * 100) / 100;
+        const prevInr = this.data.totalValueInr;
+        const ratio = prevInr > 0 ? roundedInr / prevInr : 1;
+        const newTax = Math.min(
+          Math.max(0, Math.round(this.data.totalTaxToPay * ratio * 100) / 100),
+          roundedInr
+        );
+        const newNet = Math.round((roundedInr - newTax) * 100) / 100;
         this.data = {
           ...this.data,
           livePriceUsd: res.livePriceUsd,
@@ -502,8 +530,12 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
           ...(res.openPriceUsd != null && { openPriceUsd: res.openPriceUsd }),
           preMarketPriceUsd: res.preMarketPriceUsd ?? undefined,
           postMarketPriceUsd: res.postMarketPriceUsd ?? undefined,
-          totalValueUsd: Math.round(totalValueUsd * 100) / 100,
-          totalValueInr: Math.round(totalValueInr * 100) / 100,
+          totalValueUsd: roundedUsd,
+          totalValueInr: roundedInr,
+          unrealisedProfitAfterTax: Math.round(this.data.unrealisedProfitAfterTax * ratio * 100) / 100,
+          unrealisedProfitBeforeTax: Math.round(this.data.unrealisedProfitBeforeTax * ratio * 100) / 100,
+          totalTaxToPay: newTax,
+          netInBankIfSellNow: newNet,
         };
         this.lastRefreshedAt = new Date(res.lastUpdated);
         const now = Date.now();
@@ -554,60 +586,43 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
   loadBreezeStatus(): void {
     this.breezeStatusLoading = true;
     this.breezeConnectError = null;
-    this.dashboardService.getBreezeStatus().subscribe({
-      next: (s) => {
-        this.breezeStatus = s;
+    this.dashboardService.getBreezeStatusAll().subscribe({
+      next: (resp) => {
+        this.breezeAccounts = resp.accounts || {};
+        this.breezeAccountIds = Object.keys(this.breezeAccounts).sort();
         this.breezeStatusLoading = false;
-        if (s.connected) {
+        const anyConnected = this.breezeAccountIds.some((id) => this.breezeAccounts[id]?.connected);
+        if (anyConnected) {
           this.fetchBreezePortfolioHoldings();
         }
         this.cdr.markForCheck();
       },
       error: () => {
-        this.breezeStatus = null;
+        this.breezeAccounts = {};
+        this.breezeAccountIds = [];
         this.breezeStatusLoading = false;
         this.cdr.markForCheck();
       },
     });
   }
 
-  connectBreeze(): void {
-    const t = this.breezeSessionToken.trim();
-    if (!t) {
-      this.breezeConnectError = 'Paste the API session token from the ICICI redirect URL.';
-      return;
-    }
-    this.breezeConnectLoading = true;
-    this.breezeConnectError = null;
-    this.dashboardService.postBreezeSession(t).subscribe({
-      next: (r) => {
-        this.breezeConnectLoading = false;
-        if (r.success) {
-          this.breezeSessionToken = '';
-          this.loadBreezeStatus();
-        } else {
-          this.breezeConnectError = r.error || 'Connection failed';
-        }
-        this.cdr.markForCheck();
-      },
-      error: (err) => {
-        this.breezeConnectLoading = false;
-        this.breezeConnectError = err?.error?.error || err?.message || 'Connection failed';
-        this.cdr.markForCheck();
-      },
-    });
-  }
-
-  disconnectBreeze(): void {
-    this.dashboardService.postBreezeDisconnect().subscribe({
+  disconnectBreeze(acct: string): void {
+    this.dashboardService.postBreezeDisconnect(acct).subscribe({
       next: () => {
-        this.breezePortfolioHoldingsData = null;
+        this.breezePortfolioDataByAcct[acct] = null;
         this.loadBreezeStatus();
       },
     });
   }
 
-  /** Breeze v1 portfolioholdings (ICICI: …/breezeapi/api/v1/portfolioholdings). */
+  get breezeAnyConfigured(): boolean {
+    return this.breezeAccountIds.some((id) => this.breezeAccounts[id]?.configured);
+  }
+
+  get breezeAnyConnected(): boolean {
+    return this.breezeAccountIds.some((id) => this.breezeAccounts[id]?.connected);
+  }
+
   fetchBreezePortfolioHoldings(): void {
     const ex = this.breezePortfolioExchangeCode.trim();
     if (!ex) {
@@ -615,30 +630,40 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
       this.cdr.markForCheck();
       return;
     }
+    const connectedAccts = this.breezeAccountIds.filter((id) => this.breezeAccounts[id]?.connected);
+    if (connectedAccts.length === 0) return;
     this.breezeDataLoading = true;
     this.breezeDataError = null;
     const fd = this.breezePortfolioFromDate?.trim();
     const td = this.breezePortfolioToDate?.trim();
     const sc = this.breezePortfolioStockCode?.trim();
-    this.dashboardService
-      .getBreezePortfolioHoldings({
+    const reqs: Record<string, ReturnType<typeof this.dashboardService.getBreezePortfolioHoldings>> = {};
+    for (const acct of connectedAccts) {
+      reqs[acct] = this.dashboardService.getBreezePortfolioHoldings({
         exchangeCode: ex,
         ...(fd ? { fromDate: new Date(fd).toISOString() } : {}),
         ...(td ? { toDate: new Date(td).toISOString() } : {}),
         ...(sc ? { stockCode: sc } : {}),
-      })
-      .subscribe({
-        next: (d) => {
-          this.breezePortfolioHoldingsData = d;
-          this.breezeDataLoading = false;
-          this.cdr.markForCheck();
-        },
-        error: (err) => {
-          this.breezeDataLoading = false;
-          this.breezeDataError = err?.error?.error || err?.message || 'Request failed';
-          this.cdr.markForCheck();
-        },
+        acct,
       });
+    }
+    forkJoin(reqs).subscribe({
+      next: (results) => {
+        this.breezePortfolioDataByAcct = results;
+        this.breezeDataLoading = false;
+        this.cdr.markForCheck();
+      },
+      error: (err) => {
+        this.breezeDataLoading = false;
+        this.breezeDataError = err?.error?.error || err?.message || 'Request failed';
+        this.cdr.markForCheck();
+      },
+    });
+  }
+
+  /** Are there any portfolio results loaded? */
+  get breezeHasPortfolioData(): boolean {
+    return Object.values(this.breezePortfolioDataByAcct).some((d) => d != null);
   }
 
   /** Portfolio holdings: note + filtered/sorted rows + footer totals. */
@@ -675,64 +700,63 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
   }
 
   private breezePortfolioHoldingsBaseRows(): BreezePortfolioHoldingsDisplayRow[] {
-    const data = this.breezePortfolioHoldingsData;
-    if (data == null || typeof data !== 'object') return [];
-    const root = data as Record<string, unknown>;
-    const success = root['Success'];
-    if (!Array.isArray(success) || success.length === 0) return [];
     const out: BreezePortfolioHoldingsDisplayRow[] = [];
-    for (const raw of success) {
-      if (raw == null || typeof raw !== 'object') continue;
-      const row = raw as Record<string, unknown>;
-      const stockCode = this.breezePortfolioStringField(row, ['stock_code', 'stockCode']);
-      const qty = this.breezePortfolioParseNum(row, ['quantity', 'qty', 'Quantity']);
-      const avg = this.breezePortfolioParseNum(row, ['average_price', 'averagePrice', 'avg_price']);
-      const bookedRaw = this.breezePortfolioRawField(row, [
-        'booked_profit_loss',
-        'bookedProfitLoss',
-        'realized_profit',
-        'booked_profit',
-      ]);
-      const curPx = this.breezePortfolioParseNum(row, ['current_market_price', 'currentMarketPrice', 'ltp', 'last_price']);
-      const invested = avg != null && qty != null ? avg * qty : null;
-      const currentAmtNum = curPx != null && qty != null ? curPx * qty : null;
-      const bookedPnlNum = this.breezePortfolioParseNumValue(bookedRaw);
-      let plKind: BreezePortfolioHoldingsDisplayRow['plKind'] = 'na';
-      let plStr = '—';
-      let plPctStr = '—';
-      let plNumValue: number | null = null;
-      let plPctNumValue: number | null = null;
-      if (invested != null && currentAmtNum != null && Number.isFinite(invested) && Number.isFinite(currentAmtNum)) {
-        plNumValue = currentAmtNum - invested;
-        if (Math.abs(plNumValue) < 1e-6) plKind = 'zero';
-        else if (plNumValue > 0) plKind = 'pos';
-        else plKind = 'neg';
-        plStr = this.breezePortfolioFormatMoney(plNumValue);
-        if (Math.abs(invested) > 1e-9) {
-          plPctNumValue = (plNumValue / invested) * 100;
-          plPctStr = `${plPctNumValue.toFixed(1)}%`;
+    for (const [acct, data] of Object.entries(this.breezePortfolioDataByAcct)) {
+      if (data == null || typeof data !== 'object') continue;
+      const root = data as Record<string, unknown>;
+      const success = root['Success'];
+      if (!Array.isArray(success) || success.length === 0) continue;
+      for (const raw of success) {
+        if (raw == null || typeof raw !== 'object') continue;
+        const row = raw as Record<string, unknown>;
+        const stockCode = this.breezePortfolioStringField(row, ['stock_code', 'stockCode']);
+        const qty = this.breezePortfolioParseNum(row, ['quantity', 'qty', 'Quantity']);
+        const avg = this.breezePortfolioParseNum(row, ['average_price', 'averagePrice', 'avg_price']);
+        const bookedRaw = this.breezePortfolioRawField(row, [
+          'booked_profit_loss', 'bookedProfitLoss', 'realized_profit', 'booked_profit',
+        ]);
+        const curPx = this.breezePortfolioParseNum(row, ['current_market_price', 'currentMarketPrice', 'ltp', 'last_price']);
+        const invested = avg != null && qty != null ? avg * qty : null;
+        const currentAmtNum = curPx != null && qty != null ? curPx * qty : null;
+        const bookedPnlNum = this.breezePortfolioParseNumValue(bookedRaw);
+        let plKind: BreezePortfolioHoldingsDisplayRow['plKind'] = 'na';
+        let plStr = '—';
+        let plPctStr = '—';
+        let plNumValue: number | null = null;
+        let plPctNumValue: number | null = null;
+        if (invested != null && currentAmtNum != null && Number.isFinite(invested) && Number.isFinite(currentAmtNum)) {
+          plNumValue = currentAmtNum - invested;
+          if (Math.abs(plNumValue) < 1e-6) plKind = 'zero';
+          else if (plNumValue > 0) plKind = 'pos';
+          else plKind = 'neg';
+          plStr = this.breezePortfolioFormatMoney(plNumValue);
+          if (Math.abs(invested) > 1e-9) {
+            plPctNumValue = (plNumValue / invested) * 100;
+            plPctStr = `${plPctNumValue.toFixed(1)}%`;
+          }
         }
+        out.push({
+          stockCode: stockCode ?? '—',
+          quantity: this.breezePortfolioFormatQty(qty),
+          avgPrice: this.breezePortfolioFormatMoney(avg),
+          bookedPnl: this.breezePortfolioFormatBooked(bookedRaw),
+          currentPrice: this.breezePortfolioFormatMoney(curPx),
+          investedAmt: this.breezePortfolioFormatMoney(invested),
+          currentAmt: this.breezePortfolioFormatMoney(currentAmtNum),
+          pl: plStr,
+          plPct: plPctStr,
+          plKind,
+          qtyNum: qty,
+          avgNum: avg,
+          bookedPnlNum,
+          investedNum: invested,
+          currentNum: currentAmtNum,
+          plNum: plNumValue,
+          plPctNum: plPctNumValue,
+          curPxNum: curPx,
+          account: acct,
+        });
       }
-      out.push({
-        stockCode: stockCode ?? '—',
-        quantity: this.breezePortfolioFormatQty(qty),
-        avgPrice: this.breezePortfolioFormatMoney(avg),
-        bookedPnl: this.breezePortfolioFormatBooked(bookedRaw),
-        currentPrice: this.breezePortfolioFormatMoney(curPx),
-        investedAmt: this.breezePortfolioFormatMoney(invested),
-        currentAmt: this.breezePortfolioFormatMoney(currentAmtNum),
-        pl: plStr,
-        plPct: plPctStr,
-        plKind,
-        qtyNum: qty,
-        avgNum: avg,
-        bookedPnlNum,
-        investedNum: invested,
-        currentNum: currentAmtNum,
-        plNum: plNumValue,
-        plPctNum: plPctNumValue,
-        curPxNum: curPx,
-      });
     }
     return out;
   }
@@ -752,7 +776,8 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
           row.investedAmt.toLowerCase().includes(q) ||
           row.currentAmt.toLowerCase().includes(q) ||
           row.pl.toLowerCase().includes(q) ||
-          row.plPct.toLowerCase().includes(q)
+          row.plPct.toLowerCase().includes(q) ||
+          row.account.toLowerCase().includes(q)
       );
     }
     const col = this.breezePortfolioSortCol;
@@ -762,6 +787,9 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
     return [...filtered].sort((a, b) => {
       let cmp = 0;
       switch (col) {
+        case 'account':
+          cmp = a.account.localeCompare(b.account);
+          break;
         case 'stockCode':
           cmp = a.stockCode.localeCompare(b.stockCode, undefined, { sensitivity: 'base' });
           break;
@@ -820,19 +848,21 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
   }
 
   private breezePortfolioHoldingsApiNote(): string | null {
-    const data = this.breezePortfolioHoldingsData;
-    if (data == null || typeof data !== 'object') return null;
-    const root = data as Record<string, unknown>;
-    const err = root['Error'] ?? root['error'];
-    if (err !== null && err !== undefined && err !== '') {
-      const es = typeof err === 'object' ? JSON.stringify(err) : String(err);
-      if (es && es !== 'null' && es !== 'undefined') return `API error: ${es}`;
+    const notes: string[] = [];
+    for (const [acct, data] of Object.entries(this.breezePortfolioDataByAcct)) {
+      if (data == null || typeof data !== 'object') continue;
+      const root = data as Record<string, unknown>;
+      const err = root['Error'] ?? root['error'];
+      if (err !== null && err !== undefined && err !== '') {
+        const es = typeof err === 'object' ? JSON.stringify(err) : String(err);
+        if (es && es !== 'null' && es !== 'undefined') notes.push(`Account ${acct}: ${es}`);
+      }
     }
-    return null;
+    return notes.length ? notes.join(' · ') : null;
   }
 
   trackPortfolioHoldingRow(_index: number, row: BreezePortfolioHoldingsDisplayRow): string {
-    return `${row.stockCode}-${_index}`;
+    return `${row.account}-${row.stockCode}-${_index}`;
   }
 
   private breezePortfolioStringField(row: Record<string, unknown>, keys: string[]): string | null {
@@ -1888,9 +1918,11 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
         this.lastRefreshedAt = new Date();
         this.refreshLiveInProgress = false;
         this.loadHoldings();
+        this.cdr.markForCheck();
       },
       error: () => {
         this.refreshLiveInProgress = false;
+        this.cdr.markForCheck();
       },
     });
   }
@@ -2093,7 +2125,12 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
 
     const priceEffectInr = (curUsd - lastUsd) * curRate;
     const fxEffectInr = lastUsd * (curRate - prevRate);
-    if (Math.abs(priceEffectInr) >= 1 || Math.abs(fxEffectInr) >= 1) {
+    const last = this.lastShownInrChangeBreakdown;
+    const rateMoved =
+      last == null ||
+      Math.abs(last.curRate - curRate) >= 0.001 ||
+      Math.abs(last.prevRate - prevRate) >= 0.001;
+    if (Math.abs(priceEffectInr) >= 1 || Math.abs(fxEffectInr) >= 1 || rateMoved) {
       this.lastShownInrChangeBreakdown = { priceEffectInr, fxEffectInr, prevRate, curRate };
     }
     return this.lastShownInrChangeBreakdown;
@@ -2680,6 +2717,11 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
 
   formatUsd(n: number): string {
     return new Intl.NumberFormat('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 6 }).format(n);
+  }
+
+  /** USD→INR spot: extra decimals so small feed moves are visible (ECB-only rates barely budge intraday). */
+  formatUsdInrRate(n: number): string {
+    return new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 4 }).format(n);
   }
 
   liveInrPerShare(): number {
