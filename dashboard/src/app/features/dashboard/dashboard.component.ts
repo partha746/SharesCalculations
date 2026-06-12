@@ -2737,6 +2737,11 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
     return new Intl.NumberFormat('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 6 }).format(n);
   }
 
+  /** USD rounded to exactly 1 decimal (used for average summaries). */
+  formatUsd1(n: number): string {
+    return new Intl.NumberFormat('en-US', { minimumFractionDigits: 1, maximumFractionDigits: 1 }).format(n);
+  }
+
   /** USD→INR spot: extra decimals so small feed moves are visible (ECB-only rates barely budge intraday). */
   formatUsdInrRate(n: number): string {
     return new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 4 }).format(n);
@@ -3287,12 +3292,22 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
     return Math.round(((net - cost) / cost) * 1000) / 10;
   }
 
-  /** Totals for selected rows only, scaled by sell qty per row (for sell-strategy simulation). Uses simulated price when set. */
-  get holdingsSelectedTotals(): { totalValueTodayInr: number; totalTaxToPayInr: number; totalNetInAccountInr: number; selectedCount: number } {
+  /** Totals for selected rows only, scaled by sell qty per row (for sell-strategy simulation). Uses simulated price when set. Avg buy/profit% are qty-weighted over selected rows. */
+  get holdingsSelectedTotals(): {
+    totalValueTodayInr: number;
+    totalTaxToPayInr: number;
+    totalNetInAccountInr: number;
+    avgBuyPriceUsd: number;
+    avgProfitPercent: number;
+    selectedCount: number;
+  } {
     const rows = this.holdingsFilteredSorted;
     let totalValueTodayInr = 0;
     let totalTaxToPayInr = 0;
     let totalNetInAccountInr = 0;
+    let buyPriceQtySum = 0;
+    let profitPctQtySum = 0;
+    let qtySum = 0;
     let selectedCount = 0;
     for (const r of rows) {
       if (!this.selectedRowKeys.has(this.getRowKey(r))) continue;
@@ -3305,8 +3320,13 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
       totalValueTodayInr += valueTodayRow * ratio;
       totalTaxToPayInr += taxRow * ratio;
       totalNetInAccountInr += netRow * ratio;
+      buyPriceQtySum += Number(r.buyPriceUsd) * r.qty;
+      profitPctQtySum += this.getHoldingProfitPercent(r) * r.qty;
+      qtySum += r.qty;
     }
-    return { totalValueTodayInr, totalTaxToPayInr, totalNetInAccountInr, selectedCount };
+    const avgBuyPriceUsd = qtySum > 0 ? buyPriceQtySum / qtySum : 0;
+    const avgProfitPercent = qtySum > 0 ? profitPctQtySum / qtySum : 0;
+    return { totalValueTodayInr, totalTaxToPayInr, totalNetInAccountInr, avgBuyPriceUsd, avgProfitPercent, selectedCount };
   }
 
   /** When simulating price or FX: totals vs live USD × live dashboard USD→INR (INR). */
