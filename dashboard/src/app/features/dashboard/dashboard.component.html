@@ -1145,11 +1145,15 @@
             <span class="holdings-summary__item">Total qty sold {{ soldSummaryTotals.totalQtySold }}</span>
             <span class="holdings-summary__item">Total amount ₹ {{ formatInr(soldSummaryTotals.totalSellValueInr) }}</span>
             <span class="holdings-summary__item">Total tax paid ₹ {{ formatInr(soldSummaryTotals.totalTaxPaidInr) }}</span>
+            <span class="holdings-summary__item">Avg buy price $ {{ formatUsd(soldSummaryTotals.avgBuyPriceUsd) }}</span>
+            <span class="holdings-summary__item">Avg sold price $ {{ formatUsd(soldSummaryTotals.avgSellPriceUsd) }}</span>
             <span class="holdings-summary__hint">(selected rows)</span>
           } @else {
             <span class="holdings-summary__item">Total qty sold {{ soldSummaryTotals.totalQtySold }}</span>
             <span class="holdings-summary__item">Total amount ₹ {{ formatInr(soldSummaryTotals.totalSellValueInr) }}</span>
             <span class="holdings-summary__item">Total tax paid ₹ {{ formatInr(soldSummaryTotals.totalTaxPaidInr) }}</span>
+            <span class="holdings-summary__item">Avg buy price $ {{ formatUsd(soldSummaryTotals.avgBuyPriceUsd) }}</span>
+            <span class="holdings-summary__item">Avg sold price $ {{ formatUsd(soldSummaryTotals.avgSellPriceUsd) }}</span>
             <span class="holdings-summary__hint">(all rows) Select rows to see selected totals.</span>
           }
         </div>

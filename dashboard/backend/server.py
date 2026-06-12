@@ -4,6 +4,7 @@ Run from dashboard folder: python backend/server.py
 Uses repo root (parent of dashboard) for configs/ and helpers/.
 """
 import json
+import math
 import os
 import sys
 import threading
@@ -645,6 +646,15 @@ def _build_dashboard_response():
     return payload
 
 
+def _safe_float(v, default=0.0):
+    """Convert to float, replacing NaN/Infinity with *default* so JSON stays valid."""
+    try:
+        f = float(v)
+        return f if math.isfinite(f) else default
+    except (TypeError, ValueError):
+        return default
+
+
 def _build_holdings_response():
     from helpers import gather_data
 
@@ -670,25 +680,27 @@ def _build_holdings_response():
                 qty = int(float(r["Available_Sell"])) if r["Available_Sell"] is not None else 0
             except (TypeError, ValueError):
                 qty = 0
+            if qty <= 0:
+                continue
             buy_date = r.get("Buy_Date")
             buy_date_str = buy_date.isoformat() if hasattr(buy_date, "isoformat") else (str(buy_date) if buy_date else "")
-            value_today_inr = float(r["TodaysValue_raw"])
-            tax_to_pay_inr = float(r["TaxNeedtoPay_raw"])
+            value_today_inr = _safe_float(r["TodaysValue_raw"])
+            tax_to_pay_inr = _safe_float(r["TaxNeedtoPay_raw"])
             net_if_sell_today_inr = value_today_inr - tax_to_pay_inr
-            tax_slab_pct = float(r.get("TaxSlab", 0) * 100) if "TaxSlab" in r else 0
+            tax_slab_pct = _safe_float(r.get("TaxSlab", 0) * 100) if "TaxSlab" in r else 0
             row_data = {
                 "type": stock_type,
                 "buyDate": buy_date_str,
                 "qty": qty,
-                "buyPriceUsd": float(r[price_col]),
-                "totalPurchaseInr": float(r["InitialValue_raw"]),
+                "buyPriceUsd": _safe_float(r[price_col]),
+                "totalPurchaseInr": _safe_float(r["InitialValue_raw"]),
                 "netIfSellTodayInr": net_if_sell_today_inr,
-                "profitPercent": round(float(r["ProfitPercent"]), 1),
+                "profitPercent": round(_safe_float(r["ProfitPercent"]), 1),
                 "taxToPayInr": tax_to_pay_inr,
                 "taxPercent": tax_slab_pct,
             }
             if stock_type == "ESPP":
-                row_data["priceBoughtUsd"] = float(r["Price_Bought_raw"])
+                row_data["priceBoughtUsd"] = _safe_float(r["Price_Bought_raw"])
             rows.append(row_data)
     return rows
 
@@ -904,6 +916,7 @@ def mark_sold():
         price_sell_val = float(price_sell_usd)
         for v in validated:
             match_date = v["_match_buy_date"]
+            sell_buy_price = v["_match_tds_price"] if v["type"] == "ESPP" else v["price_bought_usd"]
             cur = conn.execute(
                 """INSERT INTO SellOut (Sell_Date, Buy_Date, Qty_Sold, Price_Bought, Price_Sell, BuyRupeeRate, SellRupeeRate, Type)
                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
@@ -911,7 +924,7 @@ def mark_sold():
                     sell_date.strftime("%m/%d/%Y"),
                     match_date,
                     v["qty"],
-                    v["price_bought_usd"],
+                    sell_buy_price,
                     price_sell_val,
                     v["buy_rate"],
                     sell_rate,

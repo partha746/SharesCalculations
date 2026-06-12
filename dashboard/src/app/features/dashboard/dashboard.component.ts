@@ -388,6 +388,7 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
         this.lastRefreshedAt = new Date();
         this.loading = false;
         this.loadHoldings();
+        if (this.soldLoaded) this.loadSold();
         this.updateCanUndoMarkSold();
         this.loadLivePriceHistoryFromDb();
         this.startLivePricePolling();
@@ -969,7 +970,7 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
         this.cdr.markForCheck();
         if (this.activeTab === 'holdings') setTimeout(() => this.initOrUpdateHoldingsChart(), 0);
       },
-      error: () => { this.holdings = []; },
+      error: () => { this.holdings = []; this.cdr.markForCheck(); },
     });
   }
 
@@ -2037,7 +2038,7 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
         this.holdingsChart.destroy();
         this.holdingsChart = null;
       }
-      if (!this.soldLoaded && !this.soldLoading) this.loadSold();
+      if (!this.soldLoading) this.loadSold();
       else if (this.soldRows.length > 0) setTimeout(() => this.initOrUpdateSoldChart(), 0);
     } else if (tab === 'playground' || tab === 'financial' || tab === 'icici') {
       if (this.holdingsChart) {
@@ -2053,7 +2054,11 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
         this.soldChart.destroy();
         this.soldChart = null;
       }
-      if (this.holdings.length > 0) setTimeout(() => this.initOrUpdateHoldingsChart(), 0);
+      if (this.holdings.length === 0) {
+        this.loadHoldings();
+      } else {
+        setTimeout(() => this.initOrUpdateHoldingsChart(), 0);
+      }
     }
   }
 
@@ -2644,13 +2649,22 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
     this.cdr.markForCheck();
   }
 
-  /** Totals for sold: when rows selected, use selected only; else use all filtered. */
-  get soldSummaryTotals(): { totalQtySold: number; totalSellValueInr: number; totalTaxPaidInr: number; selectedCount: number } {
+  /** Totals for sold: when rows selected, use selected only; else use all filtered. Avg prices are qty-weighted (USD). */
+  get soldSummaryTotals(): {
+    totalQtySold: number;
+    totalSellValueInr: number;
+    totalTaxPaidInr: number;
+    avgBuyPriceUsd: number;
+    avgSellPriceUsd: number;
+    selectedCount: number;
+  } {
     const rows = this.soldFilteredSorted;
     const useSelected = this.selectedSoldKeys.size > 0;
     let totalQtySold = 0;
     let totalSellValueInr = 0;
     let totalTaxPaidInr = 0;
+    let buyPriceQtySum = 0;
+    let sellPriceQtySum = 0;
     let selectedCount = 0;
     for (const r of rows) {
       if (useSelected && !this.selectedSoldKeys.has(this.getSoldRowKey(r))) continue;
@@ -2658,8 +2672,12 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
       totalQtySold += r.qtySold;
       totalSellValueInr += r.sellValueInr;
       totalTaxPaidInr += r.taxPaidInr;
+      buyPriceQtySum += Number(r.priceBoughtUsd) * r.qtySold;
+      sellPriceQtySum += Number(r.priceSellUsd) * r.qtySold;
     }
-    return { totalQtySold, totalSellValueInr, totalTaxPaidInr, selectedCount };
+    const avgBuyPriceUsd = totalQtySold > 0 ? buyPriceQtySum / totalQtySold : 0;
+    const avgSellPriceUsd = totalQtySold > 0 ? sellPriceQtySum / totalQtySold : 0;
+    return { totalQtySold, totalSellValueInr, totalTaxPaidInr, avgBuyPriceUsd, avgSellPriceUsd, selectedCount };
   }
 
   /** RSU share of total sold value (0–100) for pie chart. When no breakdown (total 0), returns 0 so pie shows no RSU slice. */
@@ -2944,7 +2962,6 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
         this.selectedRowKeys = new Set();
         this.rowSellQty = {};
         this.canUndoMarkSold = true;
-        this.loadHoldings();
         if (this.data) this.load(true);
         if (this.soldLoaded) this.loadSold();
         this.cdr.markForCheck();
