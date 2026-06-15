@@ -1,0 +1,48 @@
+# NVDA shares dashboard - two services (Flask API + static Angular server).
+#
+#   docker compose up -d --build       # build + run in background
+#   docker compose logs -f             # tail logs
+#   docker compose down                # stop
+#
+# The SQLite DB and config live on the host (./configs) via a bind mount, so data
+# persists across container rebuilds and the recorder keeps appending to the same DB.
+# Secrets are optional: helpers/config.py falls back to built-in defaults. Set overrides
+# in a .env file next to this compose file (e.g. FINNHUB_TOKEN=..., BREEZE_API_KEY=...).
+
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    image: shares-backend
+    container_name: shares-backend
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./configs:/app/configs
+    environment:
+      PORT: "8080"
+      FINNHUB_TOKEN: "${FINNHUB_TOKEN:-}"
+      FMV_API_KEY: "${FMV_API_KEY:-}"
+      BREEZE_API_KEY: "${BREEZE_API_KEY:-}"
+      BREEZE_API_SECRET: "${BREEZE_API_SECRET:-}"
+      BREEZE_API_KEY_2: "${BREEZE_API_KEY_2:-}"
+      BREEZE_API_SECRET_2: "${BREEZE_API_SECRET_2:-}"
+      BREEZE_PUBLIC_BASE_URL: "${BREEZE_PUBLIC_BASE_URL:-}"
+
+  frontend:
+    build:
+      context: ./dashboard
+      dockerfile: Dockerfile
+    image: shares-dashboard
+    container_name: shares-dashboard
+    restart: unless-stopped
+    ports:
+      - "4201:4201"
+    environment:
+      PORT: "4201"
+      API_TARGET: "http://backend:8080"
+    depends_on:
+      backend:
+        condition: service_healthy

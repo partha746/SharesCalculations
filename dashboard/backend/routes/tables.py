@@ -7,11 +7,14 @@ bp = Blueprint("tables", __name__)
 
 @bp.route("/api/tables", methods=["GET"])
 def list_tables():
+    # Only expose editable user tables (TABLE_COLUMNS); internal time-series tables
+    # (live_price_history, live_price_ohlc_*) are not hand-editable and are hidden here.
     with get_db() as conn:
         cur = conn.execute(
-            "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name"
+            "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'"
         )
-        names = [r[0] for r in cur.fetchall()]
+        existing = {r[0] for r in cur.fetchall()}
+    names = [t for t in TABLE_COLUMNS if t in existing]
     return jsonify(names)
 
 

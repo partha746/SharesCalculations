@@ -41,18 +41,29 @@ Run everything from the **dashboard** folder (parent repo must contain `configs/
 
 The backend lives in `backend/server.py` and uses the repo root (parent of `dashboard`) for `configs/` and `helpers/`.
 
-## Production (pm2)
+## Production (Docker — primary)
 
-The live system runs under pm2 (see [`../ecosystem.config.js`](../ecosystem.config.js)):
+The live system runs as two containers via [`../docker-compose.yml`](../docker-compose.yml):
 
-- `shares-backend` -> `backend/server.py` (Flask API, port 8080)
-- `shares-dashboard` -> `serve-prod.js` (serves the built app on port 4201 + proxies `/api`)
+- `backend`  -> `backend/server.py` (Flask API, port 8080)
+- `frontend` -> built Angular app + `/api` proxy via `serve-prod.js` (port 4201)
 
-Deploy after changes (from this `dashboard/` folder):
+The host `../configs` is bind-mounted so the SQLite DB / config persist. From the repo root:
 
-- `npm run deploy` - build + restart the dashboard
-- `npm run deploy:all` - build + restart dashboard and backend
+```bash
+sudo docker compose up -d --build     # build + run (also use after any code change)
+sudo docker compose ps                # status
+sudo docker compose logs -f           # logs
+sudo docker compose down              # stop
+```
 
-First-time / full start: `../start.sh` (builds if needed, then `pm2 start`).
+Or `../start.sh` (auto-detects whether `sudo` is needed). Convenience npm scripts (run from this
+folder): `npm run docker:deploy` (rebuild frontend), `npm run docker:deploy:all` (rebuild both).
+
+Tip: drop the `sudo` by adding your user to the docker group once: `sudo usermod -aG docker $USER`
+(then log out/in).
+
+> Alternative runner: pm2 ([`../ecosystem.config.js`](../ecosystem.config.js)) still works, but don't
+> run pm2 and Docker at the same time (port/DB conflict).
 
 See [`../ARCHITECTURE.md`](../ARCHITECTURE.md) for the full backend/frontend module layout.

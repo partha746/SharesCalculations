@@ -9,8 +9,10 @@
     "build": "ng build",
     "watch": "ng build --watch --configuration development",
     "serve:prod": "node serve-prod.js",
-    "deploy": "ng build && pm2 restart shares-dashboard",
-    "deploy:all": "ng build && pm2 restart shares-dashboard shares-backend"
+    "docker:deploy": "docker compose -f ../docker-compose.yml up -d --build frontend",
+    "docker:deploy:all": "docker compose -f ../docker-compose.yml up -d --build",
+    "docker:logs": "docker compose -f ../docker-compose.yml logs -f",
+    "docker:down": "docker compose -f ../docker-compose.yml down"
   },
   "private": true,
   "dependencies": {

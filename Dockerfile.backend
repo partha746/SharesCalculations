@@ -1,0 +1,30 @@
+# Backend (Flask API). Build context = repo root.
+FROM python:3.11-slim
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1
+
+# en_IN.UTF-8 + en_US.UTF-8 are required by helpers/market.py print_rupees (locale.setlocale).
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends locales \
+ && echo "en_IN.UTF-8 UTF-8" >> /etc/locale.gen \
+ && echo "en_US.UTF-8 UTF-8" >> /etc/locale.gen \
+ && locale-gen \
+ && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+COPY requirements.txt ./
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Application code (configs/ — incl. the SQLite DB — is provided via a volume at runtime).
+COPY helpers ./helpers
+COPY dashboard/backend ./dashboard/backend
+
+EXPOSE 8080
+
+# Lightweight healthcheck: hit a DB-only endpoint (no external API calls).
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+  CMD python -c "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8080/api/tables', timeout=5).status==200 else 1)"
+
+CMD ["python", "dashboard/backend/server.py"]

@@ -1,14 +1,20 @@
 # Architecture
 
-NVDA shares tracking dashboard. Runs under pm2 (see [`ecosystem.config.js`](ecosystem.config.js)):
+NVDA shares tracking dashboard. Runs as two Docker containers (primary; see [`docker-compose.yml`](docker-compose.yml)):
 
-- `shares-backend` -> [`dashboard/backend/server.py`](dashboard/backend/server.py) (Flask API, port 8080)
-- `shares-dashboard` -> [`dashboard/serve-prod.js`](dashboard/serve-prod.js) (serves the built Angular app on port 4201, proxies `/api` to the backend)
+- `backend` -> [`dashboard/backend/server.py`](dashboard/backend/server.py) (Flask API, port 8080)
+- `frontend` -> [`dashboard/serve-prod.js`](dashboard/serve-prod.js) serving the built Angular app on port 4201, proxying `/api` to the backend
 
-Deploy after changes (from `dashboard/`):
+Run / deploy after changes (from repo root):
 
-- `npm run deploy` - build + restart the dashboard
-- `npm run deploy:all` - build + restart dashboard and backend
+```bash
+sudo docker compose up -d --build     # build + run
+sudo docker compose logs -f           # logs
+sudo docker compose down              # stop
+```
+
+Or `./start.sh` (auto-detects sudo). pm2 ([`ecosystem.config.js`](ecosystem.config.js)) remains as an
+alternative runner but should not run at the same time as Docker (port/DB conflict).
 
 ## Layout
 
@@ -65,6 +71,27 @@ legacy/                  # retired CLI / old web app (not used by pm2) - see leg
 
 All secrets and external endpoints live in [`helpers/config.py`](helpers/config.py) with env overrides
 (set in `dashboard/.env`; see `dashboard/.env.example`). Defaults preserve prior behavior.
+
+## Docker
+
+Two containers via [`docker-compose.yml`](docker-compose.yml):
+
+- `backend` ([`Dockerfile.backend`](Dockerfile.backend)) - Flask API on 8080. Installs `en_IN`/`en_US`
+  locales (required by `print_rupees`). The host `./configs` (SQLite DB, tax config, FA template)
+  is bind-mounted so data persists and the recorder keeps the same DB.
+- `frontend` ([`dashboard/Dockerfile`](dashboard/Dockerfile)) - multi-stage Angular build, served by
+  `serve-prod.js` on 4201 with `API_TARGET=http://backend:8080` (proxies `/api`).
+
+```bash
+docker compose up -d --build      # build + run
+docker compose logs -f            # logs
+docker compose down               # stop
+```
+
+Secrets are optional (config.py has defaults); override via a `.env` next to the compose file
+(`FINNHUB_TOKEN`, `FMV_API_KEY`, `BREEZE_API_KEY`, ...). Note: pm2 and Docker are alternative run
+methods - don't run both against the same ports/DB simultaneously. If a backend pip wheel fails to
+build on this arch, add build tools to `Dockerfile.backend` (`apt-get install -y build-essential`).
 
 ## Notes / follow-ups
 

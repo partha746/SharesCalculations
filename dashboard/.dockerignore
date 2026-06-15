@@ -1,0 +1,10 @@
+# Frontend build context = dashboard/
+node_modules
+dist
+.angular
+.cache
+.tmp
+coverage
+*.log
+.env
+backend/__pycache__

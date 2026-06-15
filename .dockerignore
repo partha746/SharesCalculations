@@ -1,0 +1,24 @@
+# Backend build context = repo root. Keep it small + never ship secrets/build artifacts.
+.git
+.gitignore
+.cursor
+.vscode
+legacy
+logs
+output
+docs
+*.md
+*.log
+*.pid
+**/__pycache__
+*.pyc
+*.pyo
+# Frontend build happens in its own image; exclude its heavy/build dirs from the backend context.
+dashboard/node_modules
+dashboard/dist
+dashboard/.angular
+dashboard/.cache
+dashboard/src
+dashboard/.env
+node_modules
+.env
