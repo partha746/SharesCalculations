@@ -1,6 +1,7 @@
 Django
 elasticsearch
 flask
+openpyxl
 python-dotenv
 pandas
 pytz

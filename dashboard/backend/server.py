@@ -39,7 +39,7 @@ def _reload_dashboard_env():
 
 import requests
 
-from flask import Flask, Response, jsonify, redirect, request
+from flask import Flask, Response, jsonify, redirect, request, send_file
 
 app = Flask(__name__)
 
@@ -406,24 +406,200 @@ def _ensure_live_price_history_table(conn):
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_live_price_history_ts ON live_price_history(timestamp_ms)"
     )
+    # OHLC rollups for fast long-range visualization. 1m/1h keyed by UTC-aligned bucket; 1d keyed by ET calendar date.
+    for tbl in ("live_price_ohlc_1m", "live_price_ohlc_1h"):
+        conn.execute(
+            f"""CREATE TABLE IF NOT EXISTS {tbl} (
+               bucket_ms INTEGER PRIMARY KEY,
+               open REAL NOT NULL, high REAL NOT NULL, low REAL NOT NULL, close REAL NOT NULL,
+               sum_price REAL NOT NULL, n INTEGER NOT NULL, rate_close REAL NOT NULL,
+               last_ts_ms INTEGER NOT NULL
+            )"""
+        )
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS live_price_ohlc_1d (
+           et_date TEXT PRIMARY KEY,
+           bucket_ms INTEGER NOT NULL,
+           open REAL NOT NULL, high REAL NOT NULL, low REAL NOT NULL, close REAL NOT NULL,
+           sum_price REAL NOT NULL, n INTEGER NOT NULL, rate_close REAL NOT NULL,
+           last_ts_ms INTEGER NOT NULL
+        )"""
+    )
+
+
+def _et_date_str(ts_ms):
+    """ET calendar date (YYYY-MM-DD) for a UTC ms timestamp."""
+    from datetime import timezone, timedelta
+    dt = datetime.fromtimestamp(ts_ms / 1000, tz=timezone.utc)
+    if ZoneInfo is not None:
+        dt = dt.astimezone(ZoneInfo("America/New_York"))
+    else:
+        dt = dt - timedelta(hours=5)
+    return dt.strftime("%Y-%m-%d")
+
+
+def _update_rollups(conn, ts_ms, price, rate):
+    """Incrementally fold one tick into the 1m/1h/1d OHLC rollups (UPSERT)."""
+    minute = (ts_ms // 60000) * 60000
+    hour = (ts_ms // 3600000) * 3600000
+    for tbl, bucket in (("live_price_ohlc_1m", minute), ("live_price_ohlc_1h", hour)):
+        conn.execute(
+            f"""INSERT INTO {tbl} (bucket_ms, open, high, low, close, sum_price, n, rate_close, last_ts_ms)
+                VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?)
+                ON CONFLICT(bucket_ms) DO UPDATE SET
+                  high=MAX(high, excluded.high),
+                  low=MIN(low, excluded.low),
+                  close=CASE WHEN excluded.last_ts_ms >= last_ts_ms THEN excluded.close ELSE close END,
+                  rate_close=CASE WHEN excluded.last_ts_ms >= last_ts_ms THEN excluded.rate_close ELSE rate_close END,
+                  open=CASE WHEN excluded.last_ts_ms < last_ts_ms AND excluded.bucket_ms = bucket_ms THEN excluded.open ELSE open END,
+                  sum_price=sum_price + excluded.sum_price,
+                  n=n + 1,
+                  last_ts_ms=MAX(last_ts_ms, excluded.last_ts_ms)
+            """,
+            (bucket, price, price, price, price, price, rate, ts_ms),
+        )
+    et_date = _et_date_str(ts_ms)
+    conn.execute(
+        """INSERT INTO live_price_ohlc_1d (et_date, bucket_ms, open, high, low, close, sum_price, n, rate_close, last_ts_ms)
+            VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
+            ON CONFLICT(et_date) DO UPDATE SET
+              high=MAX(high, excluded.high),
+              low=MIN(low, excluded.low),
+              close=CASE WHEN excluded.last_ts_ms >= last_ts_ms THEN excluded.close ELSE close END,
+              rate_close=CASE WHEN excluded.last_ts_ms >= last_ts_ms THEN excluded.rate_close ELSE rate_close END,
+              open=CASE WHEN excluded.bucket_ms < bucket_ms THEN excluded.open ELSE open END,
+              bucket_ms=MIN(bucket_ms, excluded.bucket_ms),
+              sum_price=sum_price + excluded.sum_price,
+              n=n + 1,
+              last_ts_ms=MAX(last_ts_ms, excluded.last_ts_ms)
+        """,
+        (et_date, ts_ms, price, price, price, price, price, rate, ts_ms),
+    )
+
+
+def _backfill_rollups_if_needed(conn):
+    """Build OHLC rollups from existing raw history once (when rollups are empty but raw data exists)."""
+    if conn.execute("SELECT 1 FROM live_price_ohlc_1m LIMIT 1").fetchone():
+        return
+    rows = conn.execute(
+        "SELECT timestamp_ms, live_price_usd, usd_to_inr_rate FROM live_price_history ORDER BY timestamp_ms ASC"
+    ).fetchall()
+    if not rows:
+        return
+
+    def aggregate(key_fn):
+        # value: [open, high, low, close, sum, n, rate, first_ts, last_ts, bucket_ms]
+        out = {}
+        for ts, price, rate in rows:
+            key, bucket_ms = key_fn(ts)
+            e = out.get(key)
+            if e is None:
+                out[key] = [price, price, price, price, price, 1, rate, ts, ts, bucket_ms]
+            else:
+                if price > e[1]:
+                    e[1] = price
+                if price < e[2]:
+                    e[2] = price
+                e[4] += price
+                e[5] += 1
+                if ts >= e[8]:
+                    e[3] = price
+                    e[6] = rate
+                    e[8] = ts
+                if ts < e[7]:
+                    e[0] = price
+                    e[7] = ts
+                    e[9] = min(e[9], bucket_ms)
+        return out
+
+    m1 = aggregate(lambda ts: ((ts // 60000) * 60000, (ts // 60000) * 60000))
+    h1 = aggregate(lambda ts: ((ts // 3600000) * 3600000, (ts // 3600000) * 3600000))
+    d1 = aggregate(lambda ts: (_et_date_str(ts), ts))
+
+    for tbl, agg in (("live_price_ohlc_1m", m1), ("live_price_ohlc_1h", h1)):
+        conn.executemany(
+            f"INSERT OR REPLACE INTO {tbl} (bucket_ms, open, high, low, close, sum_price, n, rate_close, last_ts_ms) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            [(k, e[0], e[1], e[2], e[3], e[4], e[5], e[6], e[8]) for k, e in agg.items()],
+        )
+    conn.executemany(
+        "INSERT OR REPLACE INTO live_price_ohlc_1d (et_date, bucket_ms, open, high, low, close, sum_price, n, rate_close, last_ts_ms) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        [(k, e[9], e[0], e[1], e[2], e[3], e[4], e[5], e[6], e[8]) for k, e in d1.items()],
+    )
+    print(f"[rollups] backfilled from {len(rows)} raw rows: {len(m1)} 1m, {len(h1)} 1h, {len(d1)} 1d buckets", flush=True)
+
+
+# Nice bucket sizes (ms) for chart aggregation, ascending.
+_AGG_BUCKETS_MS = [
+    60000, 120000, 300000, 600000, 900000, 1800000,
+    3600000, 7200000, 14400000, 21600000, 43200000, 86400000,
+]
 
 
 @app.route("/api/live-price-history", methods=["GET"])
 def get_live_price_history():
-    """Return stored live price history for the last N days (default 7). Max 5000 points."""
-    days = min(7, max(1, int(request.args.get("days", 7))))
-    cutoff_ms = int(time.time() * 1000) - (days * 24 * 60 * 60 * 1000)
+    """Server-aggregated OHLC history for charts. Params: days (1..370), maxPoints (100..5000).
+    Picks a bucket size so the response stays <= maxPoints, sourced from the smallest suitable rollup table.
+    Returns ascending points: {timestamp, open, high, low, livePriceUsd(=close), usdToInrRate(=close), avg, n}.
+    """
+    days = min(370, max(1, int(request.args.get("days", 7))))
+    max_points = min(5000, max(100, int(request.args.get("maxPoints", 1500))))
+    now_ms = int(time.time() * 1000)
+    start_ms = now_ms - days * 86400000
+    span_ms = max(days * 86400000, 1)
+    target = span_ms / max_points
+    bucket = next((b for b in _AGG_BUCKETS_MS if b >= target), _AGG_BUCKETS_MS[-1])
+
     with get_db() as conn:
         _ensure_live_price_history_table(conn)
-        cur = conn.execute(
-            "SELECT timestamp_ms, live_price_usd, usd_to_inr_rate FROM live_price_history WHERE timestamp_ms >= ? ORDER BY timestamp_ms ASC LIMIT 5001",
-            (cutoff_ms,),
-        )
-        rows = cur.fetchall()
-    out = [
-        {"timestamp": r[0], "livePriceUsd": round(r[1], 2), "usdToInrRate": round(r[2], 2)}
-        for r in rows
-    ]
+        if bucket >= 86400000:
+            rows = conn.execute(
+                "SELECT bucket_ms, open, high, low, close, sum_price, n, rate_close FROM live_price_ohlc_1d WHERE bucket_ms >= ? ORDER BY bucket_ms ASC",
+                (start_ms,),
+            ).fetchall()
+            src = [(r[0], r[1], r[2], r[3], r[4], r[5], r[6], r[7]) for r in rows]
+        else:
+            table = "live_price_ohlc_1h" if bucket >= 3600000 else "live_price_ohlc_1m"
+            rows = conn.execute(
+                f"SELECT bucket_ms, open, high, low, close, sum_price, n, rate_close FROM {table} WHERE bucket_ms >= ? ORDER BY bucket_ms ASC",
+                (start_ms,),
+            ).fetchall()
+            src = [(r[0], r[1], r[2], r[3], r[4], r[5], r[6], r[7]) for r in rows]
+
+    # Re-bucket the source rollup rows (already time-ordered) into the target bucket size.
+    agg = {}
+    order = []
+    for (bm, o, h, l, c, sp, n, rc) in src:
+        k = (bm // bucket) * bucket if bucket < 86400000 else bm
+        e = agg.get(k)
+        if e is None:
+            agg[k] = [o, h, l, c, sp, n, rc, bm]
+            order.append(k)
+        else:
+            if h > e[1]:
+                e[1] = h
+            if l < e[2]:
+                e[2] = l
+            e[4] += sp
+            e[5] += n
+            if bm >= e[7]:
+                e[3] = c
+                e[6] = rc
+                e[7] = bm
+
+    out = []
+    for k in order:
+        e = agg[k]
+        avg = e[4] / e[5] if e[5] else e[3]
+        out.append({
+            "timestamp": k,
+            "open": round(e[0], 2),
+            "high": round(e[1], 2),
+            "low": round(e[2], 2),
+            "livePriceUsd": round(e[3], 2),
+            "avg": round(avg, 2),
+            "usdToInrRate": round(e[6], 2),
+            "n": e[5],
+        })
     return jsonify(out)
 
 
@@ -434,6 +610,8 @@ def clear_live_price_history():
         _ensure_live_price_history_table(conn)
         cur = conn.execute("DELETE FROM live_price_history")
         deleted = cur.rowcount
+        for tbl in ("live_price_ohlc_1m", "live_price_ohlc_1h", "live_price_ohlc_1d"):
+            conn.execute(f"DELETE FROM {tbl}")
     return jsonify({"ok": True, "deleted": deleted})
 
 
@@ -455,6 +633,7 @@ def append_live_price_history():
             "INSERT INTO live_price_history (timestamp_ms, live_price_usd, usd_to_inr_rate) VALUES (?, ?, ?)",
             (ts_ms, float(price), float(rate)),
         )
+        _update_rollups(conn, ts_ms, float(price), float(rate))
     return jsonify({"ok": True}), 201
 
 
@@ -467,25 +646,65 @@ def _record_live_price_to_history():
         if live_price is None or todays_rp is None:
             return
         ts_ms = int(time.time() * 1000)
+        price = round(float(live_price), 2)
+        rate = round(float(todays_rp), 2)
         with get_db() as conn:
             _ensure_live_price_history_table(conn)
             conn.execute(
                 "INSERT INTO live_price_history (timestamp_ms, live_price_usd, usd_to_inr_rate) VALUES (?, ?, ?)",
-                (ts_ms, round(float(live_price), 2), round(float(todays_rp), 2)),
+                (ts_ms, price, rate),
             )
+            _update_rollups(conn, ts_ms, price, rate)
     except Exception as e:
         print(f"[live-price-recorder] {e}", flush=True)
+
+
+_DB_SIZE_CAP_BYTES = 5 * 1024 * 1024 * 1024  # 5 GB: prune oldest raw ticks beyond this (rollups are tiny, kept).
+
+
+def _prune_raw_if_over_cap():
+    """If the DB exceeds the 5 GB cap, delete the oldest raw ticks (rollups are retained). Effectively never triggers."""
+    try:
+        with get_db() as conn:
+            page_size = conn.execute("PRAGMA page_size").fetchone()[0]
+            page_count = conn.execute("PRAGMA page_count").fetchone()[0]
+            size = page_size * page_count
+            if size <= _DB_SIZE_CAP_BYTES:
+                return
+            # Delete the oldest ~20% of raw rows to get back under the cap; keep rollups intact.
+            total = conn.execute("SELECT COUNT(*) FROM live_price_history").fetchone()[0]
+            to_delete = max(1, total // 5)
+            cutoff = conn.execute(
+                "SELECT timestamp_ms FROM live_price_history ORDER BY timestamp_ms ASC LIMIT 1 OFFSET ?",
+                (to_delete,),
+            ).fetchone()
+            if cutoff:
+                conn.execute("DELETE FROM live_price_history WHERE timestamp_ms < ?", (cutoff[0],))
+                print(f"[live-price-recorder] DB over 5GB cap ({size} bytes); pruned ~{to_delete} oldest raw ticks", flush=True)
+    except Exception as e:
+        print(f"[live-price-recorder] prune error: {e}", flush=True)
 
 
 def _live_price_recorder_loop():
     """Background loop: only when market is open (ET), record live price every 14s. When closed, sleep until next open."""
     RECORDER_INTERVAL_SEC = 14
+    try:
+        with get_db() as conn:
+            _ensure_live_price_history_table(conn)
+            _backfill_rollups_if_needed(conn)
+    except Exception as e:
+        print(f"[live-price-recorder] rollup init error: {e}", flush=True)
+    iters = 0
     while True:
         try:
             if _is_nasdaq_open_et():
                 _record_live_price_to_history()
+                iters += 1
+                if iters % 200 == 0:  # ~ every 47 min of trading
+                    _prune_raw_if_over_cap()
                 time.sleep(RECORDER_INTERVAL_SEC)
             else:
+                _prune_raw_if_over_cap()
                 sec = _seconds_until_next_market_open_et()
                 if sec > 0:
                     time.sleep(sec)
@@ -1211,22 +1430,20 @@ def breeze_demat_holdings(acct):
         return jsonify({"error": str(e)}), 400
 
 
-@app.route("/api/generate-tax-doc", methods=["GET"])
-def generate_tax_doc():
-    """Generate the ITR foreign-asset schedule JSON from holdings data + tax_config template.
-    Query param `fy` = assessment year (e.g. 2026 for AY 2026–27, FY starting 1 Apr 2025).
-    Defaults to current calendar year.
+def _build_foreign_asset_rows(fy_year, selected_keys=None):
+    """Shared row builder for the foreign-asset (Schedule FA) data.
+    Returns (rows, template, error_tuple). One entry per holding lot acquired on/before FY end.
+    rows[i] has template keys plus InterestAcquiringDate, InitialValOfInvstmnt, PeakBalanceDuringPeriod, ClosingBalance.
+    selected_keys: optional set of lot keys "YYYY-MM-DD|TYPE|qty" to restrict the export to checked holdings.
     """
     import json as _json
     from helpers import gather_data
 
-    fy_year = request.args.get("fy", type=int) or date.today().year
-    fy_start = datetime(fy_year - 1, 4, 1)
     fy_end = datetime(fy_year, 3, 31)
 
     db_obj = gather_data.DB()
     if not os.path.isfile(db_obj.db_path):
-        return jsonify({"error": "Database not found"}), 404
+        return None, None, ("Database not found", 404)
     db_obj.ensure_tables()
     db_status = db_obj.check_for_empty_db()
     rupee_conv_obj = gather_data.RupeeConv()
@@ -1254,14 +1471,112 @@ def generate_tax_doc():
             invest_date = datetime.strptime(row["Buy_Date_formatted"], "%d/%m/%Y")
             if invest_date > fy_end:
                 continue
+            if selected_keys is not None:
+                try:
+                    lot_qty = int(float(row["Available_Sell"])) if row["Available_Sell"] is not None else 0
+                except (TypeError, ValueError):
+                    lot_qty = 0
+                lot_key = f"{invest_date.strftime('%Y-%m-%d')}|{stock_type}|{lot_qty}"
+                if lot_key not in selected_keys:
+                    continue
             entry = dict(template)
             entry["InterestAcquiringDate"] = invest_date.strftime("%Y-%m-%d")
             entry["InitialValOfInvstmnt"] = int(round(float(datacleaner_obj.convert_from_symbol(row["InitialValue"])), 0))
             entry["PeakBalanceDuringPeriod"] = int(round(float(datacleaner_obj.convert_from_symbol(row["Max_Value_FY"])), 0))
             entry["ClosingBalance"] = int(round(float(datacleaner_obj.convert_from_symbol(row["FY_Closing_Value"])), 0))
+            # Skip lots with no remaining holding at period end (nothing to report).
+            if entry["ClosingBalance"] == 0:
+                continue
             shares_list.append(entry)
 
-    return jsonify({"fyLabel": f"FY {fy_year - 1}–{str(fy_year)[-2:]} (AY {fy_year}–{str(fy_year + 1)[-2:]})", "rows": shares_list})
+    # Order rows by acquisition date ascending (oldest first).
+    shares_list.sort(key=lambda e: e.get("InterestAcquiringDate", ""))
+
+    return shares_list, template, None
+
+
+@app.route("/api/generate-tax-doc", methods=["GET"])
+def generate_tax_doc():
+    """Generate the ITR foreign-asset schedule JSON from holdings data + tax_config template.
+    Query param `fy` = assessment year (e.g. 2026 for AY 2026–27, FY starting 1 Apr 2025).
+    Defaults to current calendar year.
+    """
+    fy_year = request.args.get("fy", type=int) or date.today().year
+    rows, _template, err = _build_foreign_asset_rows(fy_year)
+    if err is not None:
+        return jsonify({"error": err[0]}), err[1]
+    return jsonify({"fyLabel": f"FY {fy_year - 1}–{str(fy_year)[-2:]} (AY {fy_year}–{str(fy_year + 1)[-2:]})", "rows": rows})
+
+
+# Country dropdown values in the ClearTax FA template's Help sheet (Help!B2:B251) use underscore_caps names.
+_FA_A3_COUNTRY_BY_CODE = {
+    "2": "UNITED_STATES_OF_AMERICA",
+}
+_FA_TEMPLATE_PATH = os.path.join(REPO_ROOT, "configs", "templates", "cleartax_schedule_fa.xlsx")
+
+
+@app.route("/api/export-fa-a3", methods=["GET"])
+def export_fa_a3():
+    """Fill the FA-A3 sheet of the ClearTax Schedule FA template with holdings data and return the xlsx.
+    Query param `fy` = assessment year (defaults to current calendar year).
+    """
+    from io import BytesIO
+    import openpyxl
+
+    fy_year = request.args.get("fy", type=int) or date.today().year
+    keys_param = request.args.get("keys", type=str)
+    selected_keys = set(k for k in keys_param.split(";;") if k) if keys_param else None
+    rows, template, err = _build_foreign_asset_rows(fy_year, selected_keys=selected_keys)
+    if err is not None:
+        return jsonify({"error": err[0]}), err[1]
+
+    if not os.path.isfile(_FA_TEMPLATE_PATH):
+        return jsonify({"error": f"FA template not found at {_FA_TEMPLATE_PATH}"}), 404
+
+    template = template or {}
+    code = str(template.get("CountryCodeExcludingIndia", "2"))
+    country_a3 = _FA_A3_COUNTRY_BY_CODE.get(code, "UNITED_STATES_OF_AMERICA")
+    name_of_entity = template.get("NameOfEntity", "")
+    address = template.get("AddressOfEntity", "")
+    zip_code = template.get("ZipCode", "")
+    nature = template.get("NatureOfEntity", "Shares")
+    gross_amt = template.get("TotGrossAmtPaidCredited", 0)
+    proceeds = template.get("TotGrossProceeds", 0)
+
+    wb = openpyxl.load_workbook(_FA_TEMPLATE_PATH)
+    ws = wb["FA- A3"]
+
+    # Data rows start at row 3 (row 1 = title, row 2 = headers). Columns A..K.
+    start_row = 3
+    for i, entry in enumerate(rows):
+        r = start_row + i
+        acq = entry.get("InterestAcquiringDate", "")
+        try:
+            acq_fmt = datetime.strptime(acq, "%Y-%m-%d").strftime("%d/%m/%Y")
+        except Exception:
+            acq_fmt = acq
+        ws.cell(row=r, column=1, value=country_a3)
+        ws.cell(row=r, column=2, value=name_of_entity)
+        ws.cell(row=r, column=3, value=address)
+        ws.cell(row=r, column=4, value=zip_code)
+        ws.cell(row=r, column=5, value=nature)
+        ws.cell(row=r, column=6, value=acq_fmt)
+        ws.cell(row=r, column=7, value=entry.get("InitialValOfInvstmnt", 0))
+        ws.cell(row=r, column=8, value=entry.get("PeakBalanceDuringPeriod", 0))
+        ws.cell(row=r, column=9, value=entry.get("ClosingBalance", 0))
+        ws.cell(row=r, column=10, value=gross_amt)
+        ws.cell(row=r, column=11, value=proceeds)
+
+    buf = BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    fname = f"schedule_fa_a3_FY{fy_year - 1}-{str(fy_year)[-2:]}.xlsx"
+    return send_file(
+        buf,
+        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        as_attachment=True,
+        download_name=fname,
+    )
 
 
 PORT = 8080
@@ -1273,4 +1588,5 @@ if __name__ == "__main__":
     rec.start()
     print(f"Backend API at http://127.0.0.1:{PORT} (configs at {REPO_ROOT})")
     print("Live price recorder: running in background (records every 14s when market open)")
-    app.run(host="0.0.0.0", port=PORT, debug=True)
+    # use_reloader=False: pm2 manages restarts; the reloader would spawn duplicate recorder threads (duplicate ticks).
+    app.run(host="0.0.0.0", port=PORT, debug=False, use_reloader=False)

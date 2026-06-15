@@ -12,12 +12,17 @@ import {
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { DomSanitizer, SafeResourceUrl } from '@angular/platform-browser';
+import { ActivatedRoute, Router } from '@angular/router';
 import { Chart } from 'chart.js/auto';
 import 'chartjs-adapter-date-fns';
 import { CandlestickController, CandlestickElement, OhlcController, OhlcElement } from 'chartjs-chart-financial';
 import ChartDataLabels from 'chartjs-plugin-datalabels';
-import { forkJoin } from 'rxjs';
+import { forkJoin, Subscription } from 'rxjs';
 import { DashboardService } from '../../core/services/dashboard.service';
+
+/** Dashboard tabs, each mapped to a URL path segment (e.g. /holdings). */
+export type DashboardTab = 'holdings' | 'sold' | 'playground' | 'data' | 'financial' | 'tax' | 'icici';
+export const DASHBOARD_TABS: readonly DashboardTab[] = ['holdings', 'sold', 'playground', 'financial', 'icici', 'tax', 'data'];
 
 Chart.register(ChartDataLabels, CandlestickController, CandlestickElement, OhlcController, OhlcElement);
 import {
@@ -28,6 +33,7 @@ import {
   DashboardResponse,
   HoldingRow,
   LivePriceDayTickerItem,
+  LivePriceHistoryPoint,
   SoldRow,
 } from '../../core/models/dashboard.types';
 
@@ -132,7 +138,8 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
   /** Last row clicked (without shift) for shift-click range selection. */
   private lastClickedRowKey: string | null = null;
   /** Tab: Holdings vs Sold Shares vs Playground vs Financial planning */
-  activeTab: 'holdings' | 'sold' | 'playground' | 'data' | 'financial' | 'tax' | 'icici' = 'holdings';
+  activeTab: DashboardTab = 'holdings';
+  private routeSub: Subscription | null = null;
 
   /** ICICI Direct Breeze — multi-account support. */
   breezeAccounts: Record<string, BreezeAccountStatus> = {};
@@ -168,6 +175,10 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
     for (let y = cur + 1; y >= cur - 5; y--) opts.push(y);
     return opts;
   })();
+  /** FA-A3 export (Holdings section): selected assessment year + in-progress flag. */
+  faExportFy: number = new Date().getFullYear();
+  faExportInProgress = false;
+  faExportError: string | null = null;
   /** Cached sanitized URL for Data tab iframe (set once to avoid reload on every change detection). */
   webAppIframeSrc!: SafeResourceUrl;
   soldRows: SoldRow[] = [];
@@ -176,6 +187,8 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
   soldSortKey: keyof SoldRow | '' = 'sellDate';
   soldSortDir: 1 | -1 = -1;
   soldFilter: Record<string, string> = {};
+  /** Sold filter by Indian financial year (by sell date). 'all' = no FY filter; otherwise FY start year (e.g. 2024 = FY 2024–25). */
+  soldFyFilter: number | 'all' = 'all';
   readonly soldCols = SOLD_COLS;
   readonly soldColLabels = SOLD_COL_LABELS;
   /** Selected sold row keys for summary card (key = getSoldRowKey(row)). */
@@ -248,7 +261,7 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
     'RSU: grant USD price. ESPP: TDS/FMV (tax cost) vs what you paid; INR cost uses TDS × ₹ on the buy date. Tax in Value/Tax/Net compares today’s ₹/USD to that INR cost—not live USD vs “paid” alone.';
 
   /** Live price polling: history for chart (max 7 days, max 5000 points) */
-  livePriceHistory: { timestamp: number; livePriceUsd: number; usdToInrRate: number }[] = [];
+  livePriceHistory: LivePriceHistoryPoint[] = [];
   /** Cached per-day ticker chips; rebuilt only when history / open price changes (not on every CD). */
   livePriceDayTickerItems: LivePriceDayTickerItem[] = [];
   /** Per-day (ET) open price for live chart: date key (YYYY-MM-DD) -> first price that day. Used for "diff from open" in tooltip. */
@@ -257,6 +270,12 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
   private livePriceFirstOfDayIndices = new Set<number>();
   /** Data indices that are the last point of their day (ET); for per-day End labels. */
   private livePriceLastOfDayIndices = new Set<number>();
+  /** Points currently plotted on the line chart (null entries = day-boundary gaps); used by tooltip callbacks. */
+  private livePriceLinePoints: ({ timestamp: number; livePriceUsd: number; usdToInrRate: number } | null)[] = [];
+  /** Overall average of the plotted line points (for the dashed Average line + tooltip). */
+  private livePriceLineAvg = 0;
+  /** Max plotted points per day for the line chart (downsamples dense intraday data so 2 weeks stays responsive). */
+  private static readonly LIVE_PRICE_LINE_MAX_PER_DAY = 400;
   /** Whether US market is open (from /api/market-status). */
   marketOpen = false;
   /** True when in pre-market (4–9:30 AM ET) or post-market (4–8 PM ET). */
@@ -268,17 +287,24 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
   marketNextPreMarketStartMs: number | null = null;
   /** Show data label when |diff from open %| is at least this (e.g. 1.6). */
   livePriceChartMode: 'line' | 'candlestick' = 'line';
+  /** Visible range for the live price chart, by most-recent ET session days. Default 1 week. */
+  livePriceRange: '1d' | '1w' | '2w' = '1w';
+  /** Calendar days fetched for each range option (server picks bucket resolution to fit). */
+  private static readonly LIVE_PRICE_RANGE_DAYS: Record<'1d' | '1w' | '2w', number> = { '1d': 1, '1w': 7, '2w': 14 };
   /** True while clearing the live price history (graph) from the backend. */
   clearGraphInProgress = false;
   private livePricePollingInterval: ReturnType<typeof setInterval> | null = null;
   private static readonly LIVE_PRICE_POLL_MS = 14000;
-  private static readonly LIVE_PRICE_HISTORY_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
-  private static readonly LIVE_PRICE_HISTORY_MAX = 5000;
+  private static readonly LIVE_PRICE_HISTORY_DAYS = 14;
+  private static readonly LIVE_PRICE_HISTORY_DAYS_MS = DashboardComponent.LIVE_PRICE_HISTORY_DAYS * 24 * 60 * 60 * 1000;
+  private static readonly LIVE_PRICE_HISTORY_MAX = 50000;
 
   constructor(
     private dashboardService: DashboardService,
     private cdr: ChangeDetectorRef,
     private sanitizer: DomSanitizer,
+    private router: Router,
+    private route: ActivatedRoute,
   ) {}
 
   ngOnInit(): void {
@@ -286,6 +312,12 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
     this.loadHoldingsColumnOrder();
     this.initBreezePortfolioDefaultDates();
     this.handleBreezeCallbackParams();
+    // Drive the active tab from the URL (:tab); applies side-effects (data loads, chart lifecycle) on each change.
+    this.routeSub = this.route.paramMap.subscribe((pm) => {
+      const raw = (pm.get('tab') || '').toLowerCase();
+      const tab = (DASHBOARD_TABS as readonly string[]).includes(raw) ? (raw as DashboardTab) : 'holdings';
+      this.applyTab(tab);
+    });
     this.load();
     this.updateCanUndoMarkSold();
   }
@@ -297,16 +329,11 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
     const connected = params.get('breeze_connected');
     const error = params.get('breeze_error');
     if (tab === 'icici') {
-      this.activeTab = 'icici';
       if (error) {
         this.breezeConnectError = error === 'no_token' ? 'No session token received from ICICI.' : error;
       }
-      this.loadBreezeStatus();
-      const url = new URL(window.location.href);
-      url.searchParams.delete('tab');
-      url.searchParams.delete('breeze_connected');
-      url.searchParams.delete('breeze_error');
-      window.history.replaceState({}, '', url.pathname + url.search + url.hash);
+      // Move to the dedicated ICICI URL (clears the callback query params); applyTab loads breeze status.
+      this.router.navigate(['/icici'], { replaceUrl: true });
     }
   }
 
@@ -416,12 +443,13 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
       livePriceUsd: this.data.livePriceUsd,
       usdToInrRate: this.data.usdToInrRate,
     };
-    this.dashboardService.getLivePriceHistory(7).subscribe({
+    const fetchDays = this.livePriceRangeFetchDays();
+    this.dashboardService.getLivePriceHistory(fetchDays).subscribe({
       next: (stored) => {
         const combined = stored.length ? [...stored] : [];
         combined.push(currentPoint);
         combined.sort((a, b) => a.timestamp - b.timestamp);
-        const cutoff = now - DashboardComponent.LIVE_PRICE_HISTORY_DAYS_MS;
+        const cutoff = now - fetchDays * 24 * 60 * 60 * 1000;
         this.livePriceHistory = combined
           .filter((p) => p.timestamp >= cutoff)
           .slice(-DashboardComponent.LIVE_PRICE_HISTORY_MAX);
@@ -980,6 +1008,10 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
 
   ngOnDestroy(): void {
     this.stopLivePricePolling();
+    if (this.routeSub) {
+      this.routeSub.unsubscribe();
+      this.routeSub = null;
+    }
     if (this.holdingsChart) {
       this.holdingsChart.destroy();
       this.holdingsChart = null;
@@ -1028,7 +1060,7 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
       return;
     }
     const openByDay = this.buildLivePriceOpenByDay(h, this.data?.openPriceUsd);
-    const dayToPoints = new Map<string, { timestamp: number; livePriceUsd: number; usdToInrRate: number }[]>();
+    const dayToPoints = new Map<string, LivePriceHistoryPoint[]>();
     for (const p of h) {
       const k = this.getEtDateKey(p.timestamp);
       if (!dayToPoints.has(k)) dayToPoints.set(k, []);
@@ -1037,13 +1069,14 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
     const keys = [...dayToPoints.keys()].sort().reverse();
     this.livePriceDayTickerItems = keys.map((dateKey) => {
       const pts = dayToPoints.get(dateKey)!;
-      const prices = pts.map((p) => p.livePriceUsd);
       const close = pts[pts.length - 1]!.livePriceUsd;
-      const open = openByDay.get(dateKey) ?? pts[0]!.livePriceUsd;
+      const open = openByDay.get(dateKey) ?? pts[0]!.open ?? pts[0]!.livePriceUsd;
+      // Use per-bucket OHLC highs/lows when present (server rollups); else fall back to close prices.
+      const highs = pts.map((p) => p.high ?? p.livePriceUsd);
+      const lows = pts.map((p) => p.low ?? p.livePriceUsd);
       // Keep OHLC internally consistent even when polling started after the official session open.
-      // If we mix an exchange-reported open with sampled intraday points, high/low must still bound open/close.
-      const low = Math.min(...prices, open, close);
-      const high = Math.max(...prices, open, close);
+      const low = Math.min(...lows, open, close);
+      const high = Math.max(...highs, open, close);
       const diffUsd = close - open;
       const diffPct = open !== 0 ? (diffUsd / open) * 100 : 0;
       return {
@@ -1068,11 +1101,11 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
   }
 
   /** Build map of ET date -> open price that day. Uses API today open when provided; else first point per day from history. */
-  private buildLivePriceOpenByDay(history: { timestamp: number; livePriceUsd: number }[], todayOpenUsd?: number): Map<string, number> {
+  private buildLivePriceOpenByDay(history: { timestamp: number; livePriceUsd: number; open?: number }[], todayOpenUsd?: number): Map<string, number> {
     const map = new Map<string, number>();
     for (const p of history) {
       const key = this.getEtDateKey(p.timestamp);
-      if (!map.has(key)) map.set(key, p.livePriceUsd);
+      if (!map.has(key)) map.set(key, p.open ?? p.livePriceUsd);
     }
     if (todayOpenUsd != null && todayOpenUsd > 0) {
       const todayKey = this.getEtDateKey(Date.now());
@@ -1107,8 +1140,25 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
     this.initOrUpdateLivePriceChart();
   }
 
+  setLivePriceRange(range: '1d' | '1w' | '2w'): void {
+    if (this.livePriceRange === range) return;
+    this.livePriceRange = range;
+    // Range drives the fetch so each range gets an appropriate server-side resolution.
+    if (this.livePriceChart) { this.livePriceChart.destroy(); this.livePriceChart = null; }
+    this.loadLivePriceHistoryFromDb();
+  }
+
+  /** Calendar days to fetch for the selected range. */
+  private livePriceRangeFetchDays(): number {
+    return DashboardComponent.LIVE_PRICE_RANGE_DAYS[this.livePriceRange];
+  }
+
   get livePriceLineSessionLabel(): string {
-    return this.livePriceDayTickerItems[0]?.label ?? 'Latest session';
+    const items = this.livePriceDayTickerItems;
+    if (!items.length) return 'Latest sessions';
+    const newest = items[0]?.label ?? '';
+    const oldest = items[items.length - 1]?.label ?? '';
+    return items.length > 1 ? `${oldest} → ${newest}` : newest;
   }
 
   get livePriceCandlestickSummary(): string {
@@ -1117,23 +1167,62 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
     return `O $${this.formatUsd(latest.open)} | H $${this.formatUsd(latest.high)} | L $${this.formatUsd(latest.low)} | C $${this.formatUsd(latest.close)}`;
   }
 
-  private getLatestLivePriceSessionHistory(): { timestamp: number; livePriceUsd: number; usdToInrRate: number }[] {
-    if (!this.livePriceHistory.length) return [];
-    const lastKey = this.getEtDateKey(this.livePriceHistory[this.livePriceHistory.length - 1].timestamp);
-    return this.livePriceHistory.filter((p) => this.getEtDateKey(p.timestamp) === lastKey);
+  /** Evenly downsample a day's points to at most maxN, always keeping the first and last. */
+  private downsampleLinePoints<T>(pts: T[], maxN: number): T[] {
+    if (pts.length <= maxN) return pts;
+    const stride = Math.ceil(pts.length / maxN);
+    const out: T[] = [];
+    for (let i = 0; i < pts.length; i += stride) out.push(pts[i]);
+    if (out[out.length - 1] !== pts[pts.length - 1]) out.push(pts[pts.length - 1]);
+    return out;
   }
 
   /**
-   * Line chart data: prefer intraday points for the **latest** ET session only.
-   * If that session has &lt; 2 samples but total history has 2+ (e.g. new day with one poll so far),
-   * fall back to full history so the chart still renders.
+   * Build the multi-day line series over the full history. Inserts a null between ET days so the line
+   * breaks across overnight/weekend gaps, and emits a per-day "Session open" value. Downsamples dense
+   * intraday data per day for responsiveness. Also caches livePriceLinePoints / livePriceLineAvg for tooltips.
    */
-  private getLivePriceLineChartHistory(): { timestamp: number; livePriceUsd: number; usdToInrRate: number }[] {
-    const latest = this.getLatestLivePriceSessionHistory();
-    if (latest.length >= 2) return latest;
+  private buildLivePriceLineSeries(): { labels: string[]; prices: (number | null)[]; openLine: (number | null)[] } {
     const h = this.livePriceHistory;
-    if (h.length >= 2) return h;
-    return latest;
+    const labels: string[] = [];
+    const prices: (number | null)[] = [];
+    const openLine: (number | null)[] = [];
+    const points: ({ timestamp: number; livePriceUsd: number; usdToInrRate: number } | null)[] = [];
+
+    // Group consecutive points by ET day (preserves chronological order). Range is already scoped by the fetch.
+    const dayGroups: { key: string; pts: typeof h }[] = [];
+    for (const p of h) {
+      const key = this.getEtDateKey(p.timestamp);
+      const last = dayGroups[dayGroups.length - 1];
+      if (!last || last.key !== key) dayGroups.push({ key, pts: [p] });
+      else last.pts.push(p);
+    }
+
+    let sum = 0;
+    let count = 0;
+    dayGroups.forEach((g, gi) => {
+      if (gi > 0) {
+        // Gap separator so the line doesn't connect across days.
+        labels.push('');
+        prices.push(null);
+        openLine.push(null);
+        points.push(null);
+      }
+      const pts = this.downsampleLinePoints(g.pts, DashboardComponent.LIVE_PRICE_LINE_MAX_PER_DAY);
+      const dayOpen = this.livePriceOpenByDay.get(g.key) ?? pts[0].livePriceUsd;
+      for (const p of pts) {
+        labels.push(this.formatXLabel(p.timestamp, false));
+        prices.push(p.livePriceUsd);
+        openLine.push(dayOpen);
+        points.push(p);
+        sum += p.livePriceUsd;
+        count++;
+      }
+    });
+
+    this.livePriceLinePoints = points;
+    this.livePriceLineAvg = count ? sum / count : 0;
+    return { labels, prices, openLine };
   }
 
   private updateLivePriceChartData(): void {
@@ -1148,11 +1237,12 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
       this.createCandlestickChart(canvas);
       return;
     } else {
-      const h = this.getLivePriceLineChartHistory();
-      const open = h.length ? (this.livePriceOpenByDay.get(this.getEtDateKey(h[0].timestamp)) ?? h[0].livePriceUsd) : null;
-      this.livePriceChart.data.labels = h.map((p) => this.formatXLabel(p.timestamp, true));
-      (this.livePriceChart.data.datasets[0] as any).data = h.map((p) => p.livePriceUsd);
-      (this.livePriceChart.data.datasets[1] as any).data = h.map(() => open);
+      const { labels, prices, openLine } = this.buildLivePriceLineSeries();
+      const avg = this.livePriceLineAvg;
+      this.livePriceChart.data.labels = labels;
+      (this.livePriceChart.data.datasets[0] as any).data = prices;
+      (this.livePriceChart.data.datasets[1] as any).data = openLine;
+      (this.livePriceChart.data.datasets[2] as any).data = prices.map((v) => (v === null ? null : avg));
     }
     this.livePriceChart.update('none');
   }
@@ -1226,13 +1316,13 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
   }
 
   private createLineChart(canvas: HTMLCanvasElement): void {
-    const h = this.getLivePriceLineChartHistory();
-    if (h.length < 2) return;
-    const labels = h.map((p) => this.formatXLabel(p.timestamp, true));
-    const prices = h.map((p) => p.livePriceUsd);
-    const dayKey = this.getEtDateKey(h[0].timestamp);
-    const open = this.livePriceOpenByDay.get(dayKey) ?? h[0].livePriceUsd;
-    const avg = prices.reduce((a, b) => a + b, 0) / prices.length;
+    if (this.livePriceHistory.length < 2) return;
+    const { labels, prices, openLine } = this.buildLivePriceLineSeries();
+    const realCount = this.livePriceLinePoints.filter((p) => p !== null).length;
+    if (realCount < 2) return;
+    const avg = this.livePriceLineAvg;
+    const lastRealIndex = prices.length - 1;
+    const avgLine = prices.map((v) => (v === null ? null : avg));
 
     const ctx2d = canvas.getContext('2d')!;
     const gradient = ctx2d.createLinearGradient(0, 0, 0, canvas.parentElement?.clientHeight || 400);
@@ -1250,34 +1340,37 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
             data: prices,
             borderColor: '#388bfd',
             borderWidth: 2,
-            pointRadius: (ctx: any) => ctx.dataIndex === prices.length - 1 ? 3 : 0,
+            pointRadius: (ctx: any) => ctx.dataIndex === lastRealIndex ? 3 : 0,
             pointHoverRadius: 5,
             pointBackgroundColor: '#388bfd',
             pointHoverBackgroundColor: '#58a6ff',
             backgroundColor: gradient,
             fill: true,
+            spanGaps: false,
             tension: 0.25,
             datalabels: { display: false },
           },
           {
             label: 'Session open',
-            data: prices.map(() => open),
+            data: openLine,
             borderColor: 'rgba(139, 148, 158, 0.75)',
             borderDash: [5, 4],
             borderWidth: 1,
             pointRadius: 0,
             fill: false,
+            spanGaps: false,
             tension: 0,
             datalabels: { display: false },
           },
           {
             label: 'Average',
-            data: prices.map(() => avg),
+            data: avgLine,
             borderColor: 'rgba(126, 231, 135, 0.95)',
             borderDash: [3, 3],
             borderWidth: 1,
             pointRadius: 0,
             fill: false,
+            spanGaps: false,
             tension: 0,
             datalabels: { display: false },
           },
@@ -1309,22 +1402,27 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
             callbacks: {
               title: (items: any[]) => {
                 if (!items.length) return '';
-                const p = h[items[0].dataIndex];
+                const p = this.livePriceLinePoints[items[0].dataIndex];
+                if (!p) return '';
                 return new Date(p.timestamp).toLocaleString('en-US', {
                   weekday: 'short', month: 'short', day: 'numeric',
                   hour: '2-digit', minute: '2-digit', hour12: true, timeZone: 'America/New_York',
                 }) + ' ET';
               },
               label: (item: any) => {
+                const p = this.livePriceLinePoints[item.dataIndex];
+                const dayOpen = p ? (this.livePriceOpenByDay.get(this.getEtDateKey(p.timestamp)) ?? p.livePriceUsd) : 0;
                 if (item.datasetIndex === 0) return `NVDA: $${Number(item.raw).toFixed(2)}`;
-                if (item.datasetIndex === 1) return `Session open: $${open.toFixed(2)}`;
-                return `Average: $${avg.toFixed(2)}`;
+                if (item.datasetIndex === 1) return `Session open: $${dayOpen.toFixed(2)}`;
+                return `Average: $${this.livePriceLineAvg.toFixed(2)}`;
               },
               afterBody: (items: any[]) => {
                 if (!items.length) return '';
-                const p = h[items[0].dataIndex];
-                const diff = p.livePriceUsd - open;
-                const pct = open ? (diff / open) * 100 : 0;
+                const p = this.livePriceLinePoints[items[0].dataIndex];
+                if (!p) return '';
+                const dayOpen = this.livePriceOpenByDay.get(this.getEtDateKey(p.timestamp)) ?? p.livePriceUsd;
+                const diff = p.livePriceUsd - dayOpen;
+                const pct = dayOpen ? (diff / dayOpen) * 100 : 0;
                 const sign = diff >= 0 ? '+' : '';
                 return `Change from open: ${sign}$${diff.toFixed(2)} (${sign}${pct.toFixed(2)}%)`;
               },
@@ -2010,6 +2108,54 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
     URL.revokeObjectURL(url);
   }
 
+  /** Lot keys (buyDate|type|qty) for the holdings currently checked — used to filter the FA-A3 export. */
+  private selectedHoldingLotKeys(): string[] {
+    const keys: string[] = [];
+    for (const r of this.holdingsFilteredSorted) {
+      if (this.selectedRowKeys.has(this.getRowKey(r))) {
+        const date = String(r.buyDate ?? '').split('T')[0];
+        keys.push(`${date}|${r.type}|${r.qty}`);
+      }
+    }
+    return keys;
+  }
+
+  /** Download the ClearTax Schedule FA template with FA-A3 filled from holdings (xlsx). Selected lots only when any are checked. */
+  exportFaA3(): void {
+    if (this.faExportInProgress) return;
+    this.faExportInProgress = true;
+    this.faExportError = null;
+    this.cdr.markForCheck();
+    const selectedKeys = this.selectedRowKeys.size > 0 ? this.selectedHoldingLotKeys() : undefined;
+    this.dashboardService.exportFaA3(this.faExportFy, selectedKeys).subscribe({
+      next: (resp) => {
+        const blob = resp.body;
+        if (!blob) {
+          this.faExportError = 'Empty file returned.';
+          this.faExportInProgress = false;
+          this.cdr.markForCheck();
+          return;
+        }
+        const cd = resp.headers.get('Content-Disposition') || '';
+        const match = /filename="?([^"]+)"?/.exec(cd);
+        const filename = match?.[1] || `schedule_fa_a3_AY_${this.faExportFy}.xlsx`;
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        a.click();
+        URL.revokeObjectURL(url);
+        this.faExportInProgress = false;
+        this.cdr.markForCheck();
+      },
+      error: (err) => {
+        this.faExportError = err?.error?.error || err?.message || 'Export failed.';
+        this.faExportInProgress = false;
+        this.cdr.markForCheck();
+      },
+    });
+  }
+
   loadSold(): void {
     this.soldLoading = true;
     this.dashboardService.getSold().subscribe({
@@ -2024,7 +2170,14 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
     });
   }
 
-  setActiveTab(tab: 'holdings' | 'sold' | 'playground' | 'data' | 'financial' | 'tax' | 'icici'): void {
+  /** Navigate to a tab's URL; the route param subscription applies it. */
+  setActiveTab(tab: DashboardTab): void {
+    if (tab === this.activeTab) return;
+    this.router.navigate(['/', tab]);
+  }
+
+  /** Apply a tab: set active state and run its data-load / chart lifecycle side-effects. Called from the route param subscription. */
+  private applyTab(tab: DashboardTab): void {
     this.activeTab = tab;
     if (tab === 'icici') {
       this.loadBreezeStatus();
@@ -2555,8 +2708,34 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
     return String(v ?? '');
   }
 
+  /** Indian FY start year for a date (Apr–Mar). Apr 2024–Mar 2025 -> 2024. Returns null if unparseable. */
+  private fyStartYear(dateStr: string): number | null {
+    const t = this.parseDate(String(dateStr ?? ''));
+    if (!t) return null;
+    const d = new Date(t);
+    return d.getMonth() >= 3 ? d.getFullYear() : d.getFullYear() - 1;
+  }
+
+  /** FY label like "FY 2024–25 (AY 2025–26)" from a FY start year. */
+  soldFyLabel(startYear: number): string {
+    return `FY ${startYear}\u2013${String(startYear + 1).slice(-2)} (AY ${startYear + 1}\u2013${String(startYear + 2).slice(-2)})`;
+  }
+
+  /** Distinct FY start years present in sold rows (by sell date), newest first. */
+  get soldFyOptions(): number[] {
+    const years = new Set<number>();
+    for (const r of this.soldRows) {
+      const y = this.fyStartYear(String(r.sellDate ?? ''));
+      if (y != null) years.add(y);
+    }
+    return Array.from(years).sort((a, b) => b - a);
+  }
+
   get soldFilteredSorted(): SoldRow[] {
     let list = this.soldRows.slice();
+    if (this.soldFyFilter !== 'all') {
+      list = list.filter((r) => this.fyStartYear(String(r.sellDate ?? '')) === this.soldFyFilter);
+    }
     for (const col of SOLD_COLS) {
       const f = (this.soldFilter[col] ?? '').trim().toLowerCase();
       if (!f) continue;
@@ -2649,20 +2828,27 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
     this.cdr.markForCheck();
   }
 
-  /** Totals for sold: when rows selected, use selected only; else use all filtered. Avg prices are qty-weighted (USD). */
+  /** Totals for sold: when rows selected, use selected only; else use all filtered. Avg prices are qty-weighted (USD).
+   * Profit % accrued = (total gain before tax / total buy value) and after tax (gain − tax) / buy value, both INR-based. */
   get soldSummaryTotals(): {
     totalQtySold: number;
+    totalBuyValueInr: number;
     totalSellValueInr: number;
     totalTaxPaidInr: number;
+    totalGainBeforeTaxInr: number;
     avgBuyPriceUsd: number;
     avgSellPriceUsd: number;
+    profitPercentBeforeTax: number;
+    profitPercentAfterTax: number;
     selectedCount: number;
   } {
     const rows = this.soldFilteredSorted;
     const useSelected = this.selectedSoldKeys.size > 0;
     let totalQtySold = 0;
+    let totalBuyValueInr = 0;
     let totalSellValueInr = 0;
     let totalTaxPaidInr = 0;
+    let totalGainBeforeTaxInr = 0;
     let buyPriceQtySum = 0;
     let sellPriceQtySum = 0;
     let selectedCount = 0;
@@ -2670,14 +2856,29 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
       if (useSelected && !this.selectedSoldKeys.has(this.getSoldRowKey(r))) continue;
       selectedCount++;
       totalQtySold += r.qtySold;
+      totalBuyValueInr += Number(r.buyValueInr);
       totalSellValueInr += r.sellValueInr;
       totalTaxPaidInr += r.taxPaidInr;
+      totalGainBeforeTaxInr += Number(r.gainBeforeTaxInr);
       buyPriceQtySum += Number(r.priceBoughtUsd) * r.qtySold;
       sellPriceQtySum += Number(r.priceSellUsd) * r.qtySold;
     }
     const avgBuyPriceUsd = totalQtySold > 0 ? buyPriceQtySum / totalQtySold : 0;
     const avgSellPriceUsd = totalQtySold > 0 ? sellPriceQtySum / totalQtySold : 0;
-    return { totalQtySold, totalSellValueInr, totalTaxPaidInr, avgBuyPriceUsd, avgSellPriceUsd, selectedCount };
+    const profitPercentBeforeTax = totalBuyValueInr > 0 ? (totalGainBeforeTaxInr / totalBuyValueInr) * 100 : 0;
+    const profitPercentAfterTax = totalBuyValueInr > 0 ? ((totalGainBeforeTaxInr - totalTaxPaidInr) / totalBuyValueInr) * 100 : 0;
+    return {
+      totalQtySold,
+      totalBuyValueInr,
+      totalSellValueInr,
+      totalTaxPaidInr,
+      totalGainBeforeTaxInr,
+      avgBuyPriceUsd,
+      avgSellPriceUsd,
+      profitPercentBeforeTax,
+      profitPercentAfterTax,
+      selectedCount,
+    };
   }
 
   /** RSU share of total sold value (0–100) for pie chart. When no breakdown (total 0), returns 0 so pie shows no RSU slice. */
@@ -3417,6 +3618,20 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
     return str;
   }
 
+  /** ISO date (YYYY-MM-DD) for CSV export so spreadsheets parse it as a real date. */
+  private formatDateForExport(value: string): string {
+    const s = String(value ?? '').trim();
+    if (!s) return '';
+    const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(s);
+    if (m) return `${m[1]}-${m[2]}-${m[3]}`;
+    const d = new Date(s);
+    if (isNaN(d.getTime())) return s;
+    const y = d.getFullYear();
+    const mo = String(d.getMonth() + 1).padStart(2, '0');
+    const da = String(d.getDate()).padStart(2, '0');
+    return `${y}-${mo}-${da}`;
+  }
+
   /** Plain number for CSV export: no commas, no currency symbols. */
   private formatForExport(value: number, decimals = 2): string {
     const n = Number(value);
@@ -3433,9 +3648,10 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
     URL.revokeObjectURL(url);
   }
 
-  /** Export currently visible (filtered/sorted) holdings to CSV. No commas, no rupee/currency symbols. */
+  /** Export holdings to CSV: selected rows if any are checked, else all visible (filtered/sorted). No commas/currency symbols. */
   exportHoldingsCsv(): void {
-    const rows = this.holdingsFilteredSorted;
+    const all = this.holdingsFilteredSorted;
+    const rows = this.selectedRowKeys.size > 0 ? all.filter((r) => this.selectedRowKeys.has(this.getRowKey(r))) : all;
     const cols = this.holdingsColumnOrder;
     const header = cols.map((k) => this.escapeCsvCell(this.getColLabel(k))).join(',');
     const lines = [header];
@@ -3444,7 +3660,7 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
         const v = row[k];
         if (k === 'buyPriceUsd' || k === 'totalPurchaseInr' || k === 'netIfSellTodayInr' || k === 'taxToPayInr') return this.escapeCsvCell(this.formatForExport(Number(v)));
         if (k === 'type') return this.escapeCsvCell(this.typeLabel(String(v)));
-        if (k === 'buyDate') return this.escapeCsvCell(this.formatDate(String(v)));
+        if (k === 'buyDate') return this.escapeCsvCell(this.formatDateForExport(String(v)));
         if (k === 'qty') return this.escapeCsvCell(String(v));
         if (k === 'profitPercent' || k === 'taxPercent') return this.escapeCsvCell(this.formatForExport(Number(v), 1));
         return this.escapeCsvCell(String(v ?? ''));
@@ -3456,16 +3672,17 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
     this.downloadCsv(csv, filename);
   }
 
-  /** Export currently visible (filtered/sorted) sold shares to CSV. No commas, no rupee/currency symbols. */
+  /** Export sold shares to CSV: selected rows if any are checked, else all visible (filtered/sorted). No commas/currency symbols. */
   exportSoldCsv(): void {
-    const rows = this.soldFilteredSorted;
+    const all = this.soldFilteredSorted;
+    const rows = this.selectedSoldKeys.size > 0 ? all.filter((r) => this.selectedSoldKeys.has(this.getSoldRowKey(r))) : all;
     const cols = this.soldCols;
     const header = cols.map((k) => this.escapeCsvCell(this.soldColLabels[k])).join(',');
     const lines = [header];
     for (const row of rows) {
       const cells = cols.map((col) => {
         const v = (row as unknown as Record<string, unknown>)[col];
-        if (col === 'sellDate' || col === 'buyDate') return this.escapeCsvCell(this.formatDate(String(v ?? '')));
+        if (col === 'sellDate' || col === 'buyDate') return this.escapeCsvCell(this.formatDateForExport(String(v ?? '')));
         if (col === 'type') return this.escapeCsvCell(this.typeLabel(String(v ?? '')));
         if (col === 'qtySold') return this.escapeCsvCell(String(v ?? ''));
         if (col === 'priceBoughtUsd' || col === 'priceSellUsd' || ['buyValueInr', 'sellValueInr', 'gainBeforeTaxInr', 'taxPaidInr'].includes(col)) return this.escapeCsvCell(this.formatForExport(Number(v)));

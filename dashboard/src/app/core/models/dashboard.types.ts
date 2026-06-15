@@ -90,6 +90,12 @@ export interface LivePriceHistoryPoint {
   timestamp: number;
   livePriceUsd: number;
   usdToInrRate: number;
+  /** OHLC for the aggregation bucket this point represents (server rollups). livePriceUsd = close. */
+  open?: number;
+  high?: number;
+  low?: number;
+  avg?: number;
+  n?: number;
 }
 
 /** One row in the live-price “by day” ticker (grouped by US Eastern calendar day). */

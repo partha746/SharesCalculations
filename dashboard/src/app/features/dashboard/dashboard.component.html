@@ -144,9 +144,14 @@
         <button type="button" class="chart-mode-btn" [class.chart-mode-btn--active]="livePriceChartMode === 'line'" (click)="setLivePriceChartMode('line')">Line</button>
         <button type="button" class="chart-mode-btn" [class.chart-mode-btn--active]="livePriceChartMode === 'candlestick'" (click)="setLivePriceChartMode('candlestick')">Candlestick</button>
       </div>
+      <div class="live-price-chart-toggle live-price-chart-range">
+        <button type="button" class="chart-mode-btn" [class.chart-mode-btn--active]="livePriceRange === '1d'" (click)="setLivePriceRange('1d')">1D</button>
+        <button type="button" class="chart-mode-btn" [class.chart-mode-btn--active]="livePriceRange === '1w'" (click)="setLivePriceRange('1w')">1W</button>
+        <button type="button" class="chart-mode-btn" [class.chart-mode-btn--active]="livePriceRange === '2w'" (click)="setLivePriceRange('2w')">2W</button>
+      </div>
       <div class="live-price-chart-meta">
         @if (livePriceChartMode === 'line') {
-          <span class="live-price-chart-meta__pill">Latest ET session: {{ livePriceLineSessionLabel }}</span>
+          <span class="live-price-chart-meta__pill">ET sessions: {{ livePriceLineSessionLabel }}</span>
         } @else {
           <span class="live-price-chart-meta__pill">{{ livePriceCandlestickSummary }}</span>
         }
@@ -909,6 +914,22 @@
       <h2 class="section-title">Holdings</h2>
       @if (holdingsFilteredSorted.length > 0) {
         <button type="button" class="export-btn" (click)="exportHoldingsCsv()">Export CSV</button>
+        <label class="fa-export-fy-label">
+          AY
+          <select class="fa-export-fy-select" [(ngModel)]="faExportFy">
+            @for (fy of taxDocFyOptions; track fy) {
+              <option [ngValue]="fy">{{ taxDocFyDisplayLabel(fy) }}</option>
+            }
+          </select>
+        </label>
+        <button
+          type="button"
+          class="export-btn"
+          [disabled]="faExportInProgress"
+          title="Download ClearTax Schedule FA template with the FA-A3 sheet filled from your holdings"
+          (click)="exportFaA3()">
+          {{ faExportInProgress ? 'Exporting…' : 'Export Schedule FA (A3)' }}
+        </button>
         <button
           type="button"
           class="export-btn mark-sold-btn"
@@ -925,6 +946,9 @@
         </button>
       }
     </div>
+    @if (faExportError) {
+      <p class="holdings-table__hint holdings-table__hint--error">FA export: {{ faExportError }}</p>
+    }
     @if (undoMarkSoldError) {
       <p class="holdings-table__hint holdings-table__hint--error">{{ undoMarkSoldError }}</p>
     }
@@ -1133,6 +1157,15 @@
     <div class="section-title-row">
       <h2 class="section-title">Sold Shares</h2>
       @if (soldRows.length > 0 && !soldLoading) {
+        <label class="fa-export-fy-label">
+          FY
+          <select class="fa-export-fy-select" [(ngModel)]="soldFyFilter">
+            <option [ngValue]="'all'">All financial years</option>
+            @for (fy of soldFyOptions; track fy) {
+              <option [ngValue]="fy">{{ soldFyLabel(fy) }}</option>
+            }
+          </select>
+        </label>
         <button type="button" class="export-btn" (click)="exportSoldCsv()">Export CSV</button>
       }
     </div>
@@ -1149,6 +1182,7 @@
             <span class="holdings-summary__item">Total tax paid ₹ {{ formatInr(soldSummaryTotals.totalTaxPaidInr) }}</span>
             <span class="holdings-summary__item">Avg buy price $ {{ formatUsd1(soldSummaryTotals.avgBuyPriceUsd) }}</span>
             <span class="holdings-summary__item">Avg sold price $ {{ formatUsd1(soldSummaryTotals.avgSellPriceUsd) }}</span>
+            <span class="holdings-summary__item">Profit accrued {{ soldSummaryTotals.profitPercentBeforeTax | number:'1.1-1' }}% <span class="holdings-summary__sub">({{ soldSummaryTotals.profitPercentAfterTax | number:'1.1-1' }}% after tax)</span></span>
             <span class="holdings-summary__hint">(selected rows)</span>
           } @else {
             <span class="holdings-summary__item">Total qty sold {{ soldSummaryTotals.totalQtySold }}</span>
@@ -1156,6 +1190,7 @@
             <span class="holdings-summary__item">Total tax paid ₹ {{ formatInr(soldSummaryTotals.totalTaxPaidInr) }}</span>
             <span class="holdings-summary__item">Avg buy price $ {{ formatUsd1(soldSummaryTotals.avgBuyPriceUsd) }}</span>
             <span class="holdings-summary__item">Avg sold price $ {{ formatUsd1(soldSummaryTotals.avgSellPriceUsd) }}</span>
+            <span class="holdings-summary__item">Profit accrued {{ soldSummaryTotals.profitPercentBeforeTax | number:'1.1-1' }}% <span class="holdings-summary__sub">({{ soldSummaryTotals.profitPercentAfterTax | number:'1.1-1' }}% after tax)</span></span>
             <span class="holdings-summary__hint">(all rows) Select rows to see selected totals.</span>
           }
         </div>

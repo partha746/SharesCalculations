@@ -1,5 +1,5 @@
 import { Injectable } from '@angular/core';
-import { HttpClient, HttpHeaders, HttpParams } from '@angular/common/http';
+import { HttpClient, HttpHeaders, HttpParams, HttpResponse } from '@angular/common/http';
 import { Observable } from 'rxjs';
 import {
   BreezeAccountStatus,
@@ -39,9 +39,9 @@ export class DashboardService {
     return this.http.get<MarketStatusResponse>(`${this.apiUrl}/market-status`);
   }
 
-  /** Stored live price history from DB (for chart + diff baseline after refresh). */
-  getLivePriceHistory(days = 7): Observable<LivePriceHistoryPoint[]> {
-    return this.http.get<LivePriceHistoryPoint[]>(`${this.apiUrl}/live-price-history?days=${days}`);
+  /** Server-aggregated OHLC live price history for the chart (bucketed to <= maxPoints). */
+  getLivePriceHistory(days = 7, maxPoints = 1500): Observable<LivePriceHistoryPoint[]> {
+    return this.http.get<LivePriceHistoryPoint[]>(`${this.apiUrl}/live-price-history?days=${days}&maxPoints=${maxPoints}`);
   }
 
   /** Persist one poll point to DB (fire-and-forget from component). */
@@ -97,6 +97,19 @@ export class DashboardService {
   generateTaxDoc(fy?: number): Observable<{ fyLabel: string; rows: any[] }> {
     const params = fy ? `fy=${fy}&t=${Date.now()}` : `t=${Date.now()}`;
     return this.http.get<{ fyLabel: string; rows: any[] }>(`${this.apiUrl}/generate-tax-doc?${params}`);
+  }
+
+  /** Download the ClearTax Schedule FA template with the FA-A3 sheet filled from holdings (xlsx blob).
+   * When `selectedKeys` is provided, only those lots (key = buyDate|type|qty) are exported. */
+  exportFaA3(fy?: number, selectedKeys?: string[]): Observable<HttpResponse<Blob>> {
+    let params = new HttpParams().set('t', String(Date.now()));
+    if (fy) params = params.set('fy', String(fy));
+    if (selectedKeys && selectedKeys.length > 0) params = params.set('keys', selectedKeys.join(';;'));
+    return this.http.get(`${this.apiUrl}/export-fa-a3`, {
+      params,
+      responseType: 'blob',
+      observe: 'response',
+    });
   }
 
   /** Combined status for all accounts. */

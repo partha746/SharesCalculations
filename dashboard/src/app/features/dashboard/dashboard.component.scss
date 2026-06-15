@@ -243,6 +243,23 @@
     pointer-events: none;
   }
 }
+.fa-export-fy-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.8rem;
+  color: #8b949e;
+}
+.fa-export-fy-select {
+  font: inherit;
+  font-size: 0.8rem;
+  padding: 0.3rem 0.4rem;
+  background: #21262d;
+  border: 1px solid #30363d;
+  border-radius: 6px;
+  color: #c9d1d9;
+  cursor: pointer;
+}
 .dashboard-section {
   margin-bottom: 1.5rem;
 }
@@ -1378,6 +1395,11 @@
 .holdings-summary__hint {
   color: #8b949e;
   font-size: 0.9rem;
+}
+.holdings-summary__sub {
+  color: #8b949e;
+  font-size: 0.85em;
+  font-weight: 400;
 }
 .holdings-summary__diff {
   color: #8b949e;

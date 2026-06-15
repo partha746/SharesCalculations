@@ -7,7 +7,10 @@
     "backend": "python backend/server.py",
     "start:all": "concurrently -n api,ng -c blue,green \"npm run backend\" \"npm run start\"",
     "build": "ng build",
-    "watch": "ng build --watch --configuration development"
+    "watch": "ng build --watch --configuration development",
+    "serve:prod": "node serve-prod.js",
+    "deploy": "ng build && pm2 restart shares-dashboard",
+    "deploy:all": "ng build && pm2 restart shares-dashboard shares-backend"
   },
   "private": true,
   "dependencies": {
