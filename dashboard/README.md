@@ -41,9 +41,18 @@ Run everything from the **dashboard** folder (parent repo must contain `configs/
 
 The backend lives in `backend/server.py` and uses the repo root (parent of `dashboard`) for `configs/` and `helpers/`.
 
-## Production build (served by Flask at project root)
+## Production (pm2)
 
-From the **project root** (parent of dashboard):
+The live system runs under pm2 (see [`../ecosystem.config.js`](../ecosystem.config.js)):
 
-1. Build: `cd dashboard && npm run build -- --base-href /dashboard/`
-2. Run: `python web_app.py` (serves API and dashboard at http://localhost:8080/dashboard/)
+- `shares-backend` -> `backend/server.py` (Flask API, port 8080)
+- `shares-dashboard` -> `serve-prod.js` (serves the built app on port 4201 + proxies `/api`)
+
+Deploy after changes (from this `dashboard/` folder):
+
+- `npm run deploy` - build + restart the dashboard
+- `npm run deploy:all` - build + restart dashboard and backend
+
+First-time / full start: `../start.sh` (builds if needed, then `pm2 start`).
+
+See [`../ARCHITECTURE.md`](../ARCHITECTURE.md) for the full backend/frontend module layout.

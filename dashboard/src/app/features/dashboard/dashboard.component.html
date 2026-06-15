@@ -543,9 +543,7 @@
       </div>
     }
     @if (activeTab === 'data') {
-      <div class="data-tab-wrap">
-        <iframe [src]="webAppIframeSrc" class="data-tab-iframe" title="nvShares.db Data Manager"></iframe>
-      </div>
+      <app-data-tab />
     }
     @if (activeTab === 'playground') {
   <div class="playground-section">

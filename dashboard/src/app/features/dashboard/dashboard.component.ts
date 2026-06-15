@@ -11,7 +11,6 @@ import {
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-import { DomSanitizer, SafeResourceUrl } from '@angular/platform-browser';
 import { ActivatedRoute, Router } from '@angular/router';
 import { Chart } from 'chart.js/auto';
 import 'chartjs-adapter-date-fns';
@@ -19,6 +18,17 @@ import { CandlestickController, CandlestickElement, OhlcController, OhlcElement 
 import ChartDataLabels from 'chartjs-plugin-datalabels';
 import { forkJoin, Subscription } from 'rxjs';
 import { DashboardService } from '../../core/services/dashboard.service';
+import {
+  escapeCsvCell,
+  formatDate,
+  formatDateForExport,
+  formatForExport,
+  formatInr,
+  formatUsd,
+  formatUsd1,
+  formatUsdInrRate,
+  typeLabel,
+} from '../../core/utils/format.util';
 
 /** Dashboard tabs, each mapped to a URL path segment (e.g. /holdings). */
 export type DashboardTab = 'holdings' | 'sold' | 'playground' | 'data' | 'financial' | 'tax' | 'icici';
@@ -65,6 +75,7 @@ import { StatCardComponent } from './stat-card/stat-card.component';
 import { OverviewTimeCardComponent } from './overview-time-card.component';
 import { LivePriceExtendedHintComponent } from './live-price-extended-hint.component';
 import { FinancialPlanningComponent } from './financial-planning/financial-planning.component';
+import { DataTabComponent } from './data-tab/data-tab.component';
 
 const HOLDING_COLS = ['buyPriceUsd', 'type', 'totalPurchaseInr', 'netIfSellTodayInr', 'buyDate', 'qty', 'profitPercent', 'taxToPayInr', 'taxPercent'] as const;
 const DATE_COLS = ['buyDate'];
@@ -84,7 +95,7 @@ const HOLDINGS_COLUMN_ORDER_STORAGE_KEY = 'dashboard.holdingsColumnOrder';
 @Component({
   selector: 'app-dashboard',
   standalone: true,
-  imports: [CommonModule, FormsModule, StatCardComponent, OverviewTimeCardComponent, LivePriceExtendedHintComponent, FinancialPlanningComponent],
+  imports: [CommonModule, FormsModule, StatCardComponent, OverviewTimeCardComponent, LivePriceExtendedHintComponent, FinancialPlanningComponent, DataTabComponent],
   templateUrl: './dashboard.component.html',
   styleUrl: './dashboard.component.scss',
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -179,8 +190,6 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
   faExportFy: number = new Date().getFullYear();
   faExportInProgress = false;
   faExportError: string | null = null;
-  /** Cached sanitized URL for Data tab iframe (set once to avoid reload on every change detection). */
-  webAppIframeSrc!: SafeResourceUrl;
   soldRows: SoldRow[] = [];
   soldLoading = false;
   private soldLoaded = false;
@@ -302,13 +311,11 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
   constructor(
     private dashboardService: DashboardService,
     private cdr: ChangeDetectorRef,
-    private sanitizer: DomSanitizer,
     private router: Router,
     private route: ActivatedRoute,
   ) {}
 
   ngOnInit(): void {
-    this.webAppIframeSrc = this.sanitizer.bypassSecurityTrustResourceUrl('assets/web-app/index.html');
     this.loadHoldingsColumnOrder();
     this.initBreezePortfolioDefaultDates();
     this.handleBreezeCallbackParams();
@@ -2931,21 +2938,21 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
   }
 
   formatInr(n: number): string {
-    return new Intl.NumberFormat('en-IN', { maximumFractionDigits: 0, minimumFractionDigits: 0 }).format(n);
+    return formatInr(n);
   }
 
   formatUsd(n: number): string {
-    return new Intl.NumberFormat('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 6 }).format(n);
+    return formatUsd(n);
   }
 
   /** USD rounded to exactly 1 decimal (used for average summaries). */
   formatUsd1(n: number): string {
-    return new Intl.NumberFormat('en-US', { minimumFractionDigits: 1, maximumFractionDigits: 1 }).format(n);
+    return formatUsd1(n);
   }
 
   /** USD→INR spot: extra decimals so small feed moves are visible (ECB-only rates barely budge intraday). */
   formatUsdInrRate(n: number): string {
-    return new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 4 }).format(n);
+    return formatUsdInrRate(n);
   }
 
   liveInrPerShare(): number {
@@ -2953,13 +2960,11 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
   }
 
   typeLabel(type: string): string {
-    return type === 'NSU' ? 'RSU' : type;
+    return typeLabel(type);
   }
 
   formatDate(isoDate: string): string {
-    if (!isoDate) return '';
-    const d = new Date(isoDate);
-    return isNaN(d.getTime()) ? isoDate : d.toLocaleDateString('en-IN', { day: '2-digit', month: '2-digit', year: 'numeric' });
+    return formatDate(isoDate);
   }
 
   parseDate(s: string): number {
@@ -3613,29 +3618,17 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
   }
 
   private escapeCsvCell(s: string): string {
-    const str = String(s ?? '');
-    if (/[",\r\n]/.test(str)) return '"' + str.replace(/"/g, '""') + '"';
-    return str;
+    return escapeCsvCell(s);
   }
 
   /** ISO date (YYYY-MM-DD) for CSV export so spreadsheets parse it as a real date. */
   private formatDateForExport(value: string): string {
-    const s = String(value ?? '').trim();
-    if (!s) return '';
-    const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(s);
-    if (m) return `${m[1]}-${m[2]}-${m[3]}`;
-    const d = new Date(s);
-    if (isNaN(d.getTime())) return s;
-    const y = d.getFullYear();
-    const mo = String(d.getMonth() + 1).padStart(2, '0');
-    const da = String(d.getDate()).padStart(2, '0');
-    return `${y}-${mo}-${da}`;
+    return formatDateForExport(value);
   }
 
   /** Plain number for CSV export: no commas, no currency symbols. */
   private formatForExport(value: number, decimals = 2): string {
-    const n = Number(value);
-    return isNaN(n) ? '' : n.toFixed(decimals);
+    return formatForExport(value, decimals);
   }
 
   private downloadCsv(content: string, filename: string): void {
