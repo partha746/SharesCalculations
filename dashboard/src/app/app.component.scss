@@ -13,3 +13,14 @@ main {
   margin: 0 auto;
   padding: 0 1.5rem 1.5rem;
 }
+
+@media (max-width: 768px) {
+  .app-header {
+    padding: 0.7rem 1rem;
+    margin-bottom: 0.75rem;
+    h1 { font-size: 1.05rem; }
+  }
+  main {
+    padding: 0 0.75rem 1rem;
+  }
+}

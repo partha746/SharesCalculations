@@ -105,6 +105,75 @@
     cursor: not-allowed;
   }
 }
+/* Candlestick insights panel (shown in candlestick mode) */
+.candle-insights {
+  background: #161b22;
+  border: 1px solid #30363d;
+  border-radius: 8px;
+  padding: 0.6rem 0.85rem;
+  margin-bottom: 0.75rem;
+}
+.candle-insights__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+.candle-insights__chip {
+  font-size: 0.78rem;
+  padding: 0.25rem 0.6rem;
+  border-radius: 999px;
+  background: rgba(56, 139, 253, 0.1);
+  border: 1px solid rgba(56, 139, 253, 0.25);
+  color: #c9d1d9;
+  white-space: nowrap;
+}
+.candle-insights__chip--signal {
+  white-space: normal;
+  background: rgba(139, 148, 158, 0.1);
+  border-color: #30363d;
+  color: #e6edf3;
+}
+.candle-insights__chip--up {
+  background: rgba(63, 185, 80, 0.12);
+  border-color: rgba(63, 185, 80, 0.4);
+  color: #3fb950;
+}
+.candle-insights__chip--down {
+  background: rgba(248, 81, 73, 0.12);
+  border-color: rgba(248, 81, 73, 0.4);
+  color: #f85149;
+}
+.candle-insights__help-btn {
+  margin-left: auto;
+  font: inherit;
+  font-size: 0.78rem;
+  padding: 0.25rem 0.6rem;
+  background: #21262d;
+  border: 1px solid #30363d;
+  border-radius: 6px;
+  color: #8b949e;
+  cursor: pointer;
+  &:hover {
+    color: #58a6ff;
+    border-color: #58a6ff;
+  }
+}
+.candle-insights__help {
+  margin-top: 0.6rem;
+  padding-top: 0.6rem;
+  border-top: 1px solid #21262d;
+  font-size: 0.82rem;
+  color: #8b949e;
+  line-height: 1.5;
+  p { margin: 0 0 0.4rem; }
+  ul { margin: 0; padding-left: 1.1rem; }
+  li { margin: 0.15rem 0; }
+  strong { color: #c9d1d9; }
+}
+.candle-insights__up { color: #3fb950; }
+.candle-insights__down { color: #f85149; }
+
 /* Session-day cards: above the chart, not inside the graph panel */
 .live-price-session-strip {
   background: #161b22;
@@ -904,6 +973,226 @@
     font-size: 0.9em;
     color: #e6edf3;
   }
+}
+
+/* ICICI Direct - modern status cards */
+.icici-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+.icici-refresh {
+  font: inherit;
+  font-size: 0.82rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.35rem 0.7rem;
+  background: #21262d;
+  border: 1px solid #30363d;
+  border-radius: 6px;
+  color: #8b949e;
+  cursor: pointer;
+  &:hover:not(:disabled) { color: #c9d1d9; border-color: #8b949e; }
+  &:disabled { opacity: 0.6; cursor: not-allowed; }
+}
+.icici-refresh__icon { font-size: 1rem; display: inline-block; }
+.icici-refresh__icon--spin { animation: icici-spin 0.9s linear infinite; }
+@keyframes icici-spin { to { transform: rotate(360deg); } }
+
+.icici-accounts {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  max-width: 640px;
+}
+.icici-card {
+  background: #161b22;
+  border: 1px solid #30363d;
+  border-left: 4px solid #6e7681;
+  border-radius: 10px;
+  padding: 0.85rem 1rem;
+}
+.icici-card--ok { border-left-color: #3fb950; }
+.icici-card--warn { border-left-color: #d29922; }
+.icici-card--off { border-left-color: #6e7681; }
+.icici-card__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+.icici-card__id { display: flex; flex-direction: column; gap: 0.2rem; }
+.icici-card__name { font-size: 0.95rem; font-weight: 600; color: #e6edf3; }
+.icici-card__status {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.82rem;
+  color: #8b949e;
+}
+.icici-card__dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #6e7681;
+  flex-shrink: 0;
+}
+.icici-card--ok .icici-card__dot { background: #3fb950; box-shadow: 0 0 0 3px rgba(63, 185, 80, 0.15); }
+.icici-card--warn .icici-card__dot { background: #d29922; box-shadow: 0 0 0 3px rgba(210, 153, 34, 0.15); }
+.icici-card--ok .icici-card__status { color: #3fb950; }
+.icici-card__actions { display: flex; align-items: center; gap: 0.5rem; }
+.icici-card__note { font-size: 0.8rem; color: #8b949e; }
+.icici-btn {
+  font: inherit;
+  font-size: 0.85rem;
+  font-weight: 500;
+  padding: 0.4rem 0.9rem;
+  border-radius: 6px;
+  cursor: pointer;
+  text-decoration: none;
+  display: inline-block;
+  border: 1px solid transparent;
+}
+.icici-btn--primary {
+  background: #238636;
+  color: #fff;
+  border-color: #2ea043;
+  &:hover { background: #2ea043; }
+}
+.icici-btn--ghost {
+  background: transparent;
+  color: #8b949e;
+  border-color: #30363d;
+  &:hover { color: #f85149; border-color: #f85149; }
+}
+.icici-btn--copy {
+  background: #21262d;
+  color: #c9d1d9;
+  border-color: #30363d;
+  &:hover { border-color: #58a6ff; color: #58a6ff; }
+}
+.icici-setup {
+  margin-top: 0.75rem;
+  border-top: 1px solid #21262d;
+  padding-top: 0.6rem;
+}
+.icici-setup__summary {
+  font-size: 0.8rem;
+  color: #58a6ff;
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+  &::-webkit-details-marker { display: none; }
+  &::before { content: '› '; }
+}
+details[open] > .icici-setup__summary::before { content: '⌄ '; }
+.icici-setup__body {
+  margin-top: 0.5rem;
+  font-size: 0.82rem;
+  color: #8b949e;
+  line-height: 1.5;
+  p { margin: 0 0 0.5rem; }
+  strong { color: #c9d1d9; }
+}
+.icici-setup__copy { display: flex; gap: 0.4rem; align-items: center; }
+.icici-setup__url {
+  flex: 1;
+  min-width: 0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.78rem;
+  padding: 0.4rem 0.55rem;
+  background: #0d1117;
+  border: 1px solid #30363d;
+  border-radius: 6px;
+  color: #c9d1d9;
+}
+
+/* ICICI portfolio panels (controls + table) */
+.icici-panel {
+  background: #161b22;
+  border: 1px solid #30363d;
+  border-radius: 10px;
+  padding: 1rem 1.1rem;
+  margin-top: 1rem;
+  max-width: 100%;
+}
+.icici-panel--table { padding-bottom: 0.6rem; }
+.icici-panel__head {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #8b949e;
+  margin-bottom: 0.75rem;
+  font-weight: 600;
+}
+.icici-panel__head--inline { margin-bottom: 0; }
+.icici-panel__toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.75rem;
+}
+.icici-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 0.75rem;
+}
+.icici-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+.icici-field--grow { flex: 1 1 180px; min-width: 150px; }
+.icici-field__label {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: #8b949e;
+}
+.icici-field__input {
+  font: inherit;
+  font-size: 0.85rem;
+  padding: 0.45rem 0.6rem;
+  background: #0d1117;
+  border: 1px solid #30363d;
+  border-radius: 6px;
+  color: #e6edf3;
+  &:focus { outline: none; border-color: #58a6ff; }
+  &:disabled { opacity: 0.6; }
+}
+.icici-controls__apply { align-self: flex-end; }
+.icici-search {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  min-width: 240px;
+  flex: 1 1 240px;
+  max-width: 360px;
+}
+.icici-search__icon {
+  position: absolute;
+  left: 0.6rem;
+  color: #6e7681;
+  font-size: 1rem;
+  pointer-events: none;
+}
+.icici-search__input {
+  font: inherit;
+  font-size: 0.85rem;
+  width: 100%;
+  padding: 0.45rem 0.6rem 0.45rem 1.8rem;
+  background: #0d1117;
+  border: 1px solid #30363d;
+  border-radius: 999px;
+  color: #e6edf3;
+  &:focus { outline: none; border-color: #58a6ff; }
 }
 
 .tab-bar {
@@ -1800,26 +2089,46 @@
   .icici-breeze-portfolio-tfoot {
     th,
     td {
-      font-weight: 600;
-      border-top: 1px solid rgba(255, 255, 255, 0.12);
-      padding-top: 0.5rem;
+      font-weight: 700;
+      background: #0d1117;
+      border-top: 2px solid #30363d;
+      padding: 0.55rem 0.6rem;
+      color: #e6edf3;
     }
   }
   .icici-breeze-table-wrap {
-    margin: 0 0 1rem;
+    margin: 0;
     max-width: 100%;
     overflow-x: auto;
+    border: 1px solid #21262d;
     border-radius: 8px;
   }
   .icici-breeze-data-table {
     font-size: 0.8rem;
     min-width: min(100%, 720px);
-    td {
+    border-collapse: collapse;
+    width: 100%;
+    thead th {
+      position: sticky;
+      top: 0;
+      background: #0d1117;
+      color: #8b949e;
+      font-size: 0.72rem;
+      text-transform: uppercase;
+      letter-spacing: 0.03em;
+      border-bottom: 1px solid #30363d;
+      padding: 0.55rem 0.6rem;
+      z-index: 1;
+    }
+    tbody td {
+      padding: 0.5rem 0.6rem;
+      border-bottom: 1px solid #21262d;
       white-space: normal;
       max-width: 280px;
       word-break: break-word;
       vertical-align: top;
     }
+    tbody tr:hover td { background: #1c2128; }
     th {
       white-space: normal;
     }
@@ -1838,4 +2147,106 @@
     white-space: pre-wrap;
     word-break: break-word;
   }
+}
+
+/* ============================================================
+   Mobile / responsive (phones, e.g. iPhone Pro Max ~430px)
+   ============================================================ */
+@media (max-width: 768px) {
+  /* Overview cards: single column, drop desktop min-widths so nothing overflows the screen */
+  .stat-grid--primary {
+    grid-template-columns: 1fr;
+  }
+  .live-price-block,
+  .total-holdings-block {
+    min-width: 0;
+  }
+  .live-price-block__row--main,
+  .total-holdings-block__row--main {
+    font-size: 1.25rem;
+    .live-price-block__value,
+    .total-holdings-block__value {
+      font-size: 1.25rem;
+    }
+  }
+
+  /* Tabs: swipeable horizontal strip instead of wrapping into many rows */
+  .tab-bar {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    &::-webkit-scrollbar { display: none; }
+  }
+  .tab-btn {
+    flex: 0 0 auto;
+    white-space: nowrap;
+  }
+
+  /* Section headers wrap their action buttons */
+  .section-title-row {
+    flex-wrap: wrap;
+    gap: 0.5rem;
+  }
+
+  /* Live price chart: shorter on phones; controls wrap */
+  .live-price-chart-wrap {
+    height: 300px;
+    padding: 0.5rem 0.6rem 0.75rem;
+  }
+  .live-price-chart-controls {
+    gap: 0.5rem;
+  }
+  .live-price-clear-graph-btn {
+    margin-left: 0;
+  }
+
+  /* Wide tables scroll horizontally inside their own container */
+  .holdings-table-wrap,
+  .sold-table-wrap,
+  .playground-table-wrap,
+  .icici-breeze-table-wrap {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  /* Breakdown + summaries stack */
+  .breakdown-grid {
+    grid-template-columns: 1fr;
+  }
+  .holdings-summary {
+    gap: 0.5rem 1rem;
+    font-size: 0.88rem;
+    padding: 0.85rem 1rem;
+  }
+
+  /* Simulate-price row: inputs go full width */
+  .holdings-simulate-price {
+    .holdings-simulate-price__input,
+    .holdings-simulate-price__input--fx,
+    .holdings-simulate-price__input--unvested {
+      width: 100%;
+      min-width: 0;
+      flex: 1 1 7rem;
+    }
+  }
+
+  /* ICICI: controls + accounts use full width */
+  .icici-accounts { max-width: none; }
+  .icici-controls .icici-field { flex: 1 1 8rem; }
+  .icici-field--grow { flex-basis: 100%; }
+  .icici-controls__apply { width: 100%; }
+  .icici-search { max-width: none; flex-basis: 100%; }
+
+  /* Session-day cards a touch narrower */
+  .live-price-day-ticker__item {
+    min-width: 150px;
+  }
+}
+
+@media (max-width: 480px) {
+  .live-price-chart-wrap { height: 260px; }
+  .section-title { font-size: 0.95rem; }
+  .live-price-day-ticker__item { min-width: 140px; }
+  .news-summary { gap: 1rem; }
 }

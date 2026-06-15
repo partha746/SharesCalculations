@@ -98,6 +98,37 @@ export interface LivePriceHistoryPoint {
   n?: number;
 }
 
+/** One NVIDIA news article with computed sentiment. */
+export interface NewsArticle {
+  headline: string;
+  summary: string;
+  source: string;
+  url: string;
+  image: string;
+  category: string;
+  datetime: number; // ms
+  sentiment: 'positive' | 'negative' | 'neutral';
+  sentimentScore: number; // VADER compound, -1..1
+}
+
+export interface NewsSummary {
+  count: number;
+  positive: number;
+  negative: number;
+  neutral: number;
+  avgScore: number;
+  score100: number;
+  overall: 'positive' | 'negative' | 'neutral';
+  analyzerAvailable: boolean;
+}
+
+export interface NewsResponse {
+  articles: NewsArticle[];
+  summary: NewsSummary;
+  fetchedAt: number;
+  rangeDays: number;
+}
+
 /** One row in the live-price “by day” ticker (grouped by US Eastern calendar day). */
 export interface LivePriceDayTickerItem {
   dateKey: string;

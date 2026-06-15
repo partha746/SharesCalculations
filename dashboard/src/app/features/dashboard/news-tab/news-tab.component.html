@@ -1,0 +1,78 @@
+<div class="news-tab">
+  <div class="news-tab__head">
+    <h2 class="news-tab__title">NVIDIA News & Sentiment</h2>
+    <div class="news-range">
+      <button type="button" class="chip-btn" [class.chip-btn--active]="rangeDays === 1" (click)="setRange(1)">1D</button>
+      <button type="button" class="chip-btn" [class.chip-btn--active]="rangeDays === 7" (click)="setRange(7)">1W</button>
+      <button type="button" class="chip-btn" [class.chip-btn--active]="rangeDays === 30" (click)="setRange(30)">1M</button>
+      <button type="button" class="chip-btn" [disabled]="loading" (click)="load()">{{ loading ? 'Loading…' : 'Refresh' }}</button>
+    </div>
+  </div>
+
+  @if (error) {
+    <p class="news-tab__error">{{ error }}</p>
+  }
+
+  @if (loading && !summary) {
+    <p class="news-tab__hint">Fetching latest NVIDIA news…</p>
+  }
+
+  @if (summary) {
+    <div class="news-summary" [class]="overallClass()">
+      <div class="news-summary__gauge">
+        <div class="news-summary__score">{{ summary.score100 }}<span class="news-summary__score-max">/100</span></div>
+        <div class="news-summary__overall">{{ summary.overall | titlecase }}</div>
+        <div class="news-summary__bar">
+          <div class="news-summary__bar-fill" [style.width.%]="gaugePct"></div>
+          <div class="news-summary__bar-mid"></div>
+        </div>
+        <div class="news-summary__legend">bearish 0 — 50 neutral — 100 bullish</div>
+      </div>
+      <div class="news-summary__counts">
+        <button type="button" class="news-count news-count--all" [class.news-count--active]="filter==='all'" (click)="setFilter('all')">
+          <span class="news-count__n">{{ summary.count }}</span><span class="news-count__l">articles</span>
+        </button>
+        <button type="button" class="news-count news-count--pos" [class.news-count--active]="filter==='positive'" (click)="setFilter('positive')">
+          <span class="news-count__n">{{ summary.positive }}</span><span class="news-count__l">positive</span>
+        </button>
+        <button type="button" class="news-count news-count--neu" [class.news-count--active]="filter==='neutral'" (click)="setFilter('neutral')">
+          <span class="news-count__n">{{ summary.neutral }}</span><span class="news-count__l">neutral</span>
+        </button>
+        <button type="button" class="news-count news-count--neg" [class.news-count--active]="filter==='negative'" (click)="setFilter('negative')">
+          <span class="news-count__n">{{ summary.negative }}</span><span class="news-count__l">negative</span>
+        </button>
+      </div>
+    </div>
+
+    @if (!summary.analyzerAvailable) {
+      <p class="news-tab__hint news-tab__hint--warn">Sentiment analyzer unavailable on the server; scores default to neutral.</p>
+    }
+    @if (fetchedAt) {
+      <p class="news-tab__meta">Source: Finnhub company news · sentiment: VADER · updated {{ relativeTime(fetchedAt) }}</p>
+    }
+
+    <div class="news-list">
+      @for (a of filteredArticles; track a.url || a.headline) {
+        <a class="news-card" [href]="a.url" target="_blank" rel="noopener noreferrer">
+          <div class="news-card__main">
+            <div class="news-card__headline">{{ a.headline }}</div>
+            @if (a.summary) {
+              <div class="news-card__summary">{{ a.summary }}</div>
+            }
+            <div class="news-card__meta">
+              <span class="news-card__source">{{ a.source }}</span>
+              <span class="news-card__dot">·</span>
+              <span class="news-card__time">{{ relativeTime(a.datetime) }}</span>
+            </div>
+          </div>
+          <div class="news-card__sentiment news-card__sentiment--{{ a.sentiment }}">
+            <span class="news-card__sentiment-label">{{ a.sentiment }}</span>
+            <span class="news-card__sentiment-score">{{ a.sentimentScore > 0 ? '+' : '' }}{{ a.sentimentScore | number:'1.2-2' }}</span>
+          </div>
+        </a>
+      } @empty {
+        <p class="news-tab__hint">No articles for this filter.</p>
+      }
+    </div>
+  }
+</div>

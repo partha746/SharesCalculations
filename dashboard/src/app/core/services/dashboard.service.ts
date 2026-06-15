@@ -10,6 +10,7 @@ import {
   LivePriceHistoryPoint,
   LivePriceResponse,
   MarketStatusResponse,
+  NewsResponse,
   SoldRow,
 } from '../models/dashboard.types';
 
@@ -37,6 +38,11 @@ export class DashboardService {
 
   getMarketStatus(): Observable<MarketStatusResponse> {
     return this.http.get<MarketStatusResponse>(`${this.apiUrl}/market-status`);
+  }
+
+  /** Latest NVIDIA news + sentiment. */
+  getNews(days = 7): Observable<NewsResponse> {
+    return this.http.get<NewsResponse>(`${this.apiUrl}/news?days=${days}&t=${Date.now()}`);
   }
 
   /** Server-aggregated OHLC live price history for the chart (bucketed to <= maxPoints). */

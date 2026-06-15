@@ -199,6 +199,14 @@
   box-shadow: 0 4px 24px rgba(0, 0, 0, 0.2);
 }
 
+@media (max-width: 768px) {
+  .fp-card {
+    padding: 0.9rem 0.9rem 1rem;
+    margin-bottom: 0.9rem;
+  }
+  .fp-hero { padding: 0.9rem; }
+}
+
 .fp-card--table {
   padding-bottom: 0.65rem;
 }

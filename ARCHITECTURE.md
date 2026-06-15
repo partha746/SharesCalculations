@@ -41,11 +41,13 @@ dashboard/
       portfolio.py       #   /api/dashboard, /api/holdings, /api/sold, /api/mark-sold*
       tax.py             #   /api/tax-config, /api/generate-tax-doc, /api/export-fa-a3
       breeze.py          #   /api/breeze/*
+      news.py            #   /api/news (NVIDIA news + sentiment)
     services/            # business logic (no Flask request handling)
       market.py          #   market hours, USD/INR helpers, OHLC rollups, recorder loop
       portfolio.py       #   dashboard/holdings/sold builders, mark-sold undo stack
       tax_export.py      #   foreign-asset (Schedule FA) row builder + paths
       breeze.py          #   ICICI Breeze helpers
+      news.py            #   Finnhub company-news fetch + VADER sentiment (cached)
     breeze_icici.py      # Breeze SDK wrapper (optional)
     serve-prod.js        # static file server + /api reverse proxy (zero deps)
   src/app/
@@ -56,6 +58,7 @@ dashboard/
     features/dashboard/
       dashboard.component.*   # shell + per-tab content (routed by :tab)
       data-tab/              # Data tab (iframe) standalone component
+      news-tab/              # News tab (NVIDIA news + sentiment) standalone component
       financial-planning/    # Financial planning tab standalone component
       overview-time-card/, stat-card/, live-price-extended-hint  # presentational components
 legacy/                  # retired CLI / old web app (not used by pm2) - see legacy/README.md

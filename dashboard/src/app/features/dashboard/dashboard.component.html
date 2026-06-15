@@ -160,6 +160,33 @@
         {{ clearGraphInProgress ? 'Clearing…' : 'Clear graph' }}
       </button>
     </div>
+    @if (livePriceChartMode === 'candlestick' && candlestickInsights) {
+      <div class="candle-insights">
+        <div class="candle-insights__row">
+          <span class="candle-insights__chip"
+            [class.candle-insights__chip--up]="candlestickInsights.trendPct > 0"
+            [class.candle-insights__chip--down]="candlestickInsights.trendPct < 0">
+            {{ candlestickInsights.trendLabel }} {{ candlestickInsights.trendPct >= 0 ? '+' : '' }}{{ candlestickInsights.trendPct }}%
+          </span>
+          <span class="candle-insights__chip">{{ candlestickInsights.position }}</span>
+          <span class="candle-insights__chip">{{ candlestickInsights.streak }}</span>
+          <span class="candle-insights__chip candle-insights__chip--signal">Latest: {{ candlestickInsights.latestSignal }}</span>
+          <button type="button" class="candle-insights__help-btn" (click)="toggleCandleHelp()">{{ showCandleHelp ? 'Hide guide' : 'How to read' }}</button>
+        </div>
+        @if (showCandleHelp) {
+          <div class="candle-insights__help">
+            <p>Each candle is one trading day (ET). <strong class="candle-insights__up">Green</strong> = close above open (buyers won the day); <strong class="candle-insights__down">red</strong> = close below open (sellers won).</p>
+            <ul>
+              <li>The thick <strong>body</strong> spans open → close; the thin <strong>wicks</strong> mark the day's high and low.</li>
+              <li><strong>Long lower wick:</strong> price fell but recovered — buyers stepped in (bullish).</li>
+              <li><strong>Long upper wick:</strong> price rose but got sold off — sellers capped it (bearish).</li>
+              <li><strong>Small body</strong> (doji): indecision. Closing near the high = strength; near the low = weakness.</li>
+              <li><strong>Support</strong> = a low that keeps holding; <strong>resistance</strong> = a high that keeps getting rejected.</li>
+            </ul>
+          </div>
+        }
+      </div>
+    }
     @if (livePriceDayTickerItems.length > 0) {
       <div class="live-price-session-strip">
         <div class="live-price-day-ticker-head">NVDA by session day (ET)</div>
@@ -278,6 +305,7 @@
       <button type="button" class="tab-btn" [class.tab-btn--active]="activeTab === 'sold'" (click)="setActiveTab('sold')">Sold Shares</button>
       <button type="button" class="tab-btn" [class.tab-btn--active]="activeTab === 'playground'" (click)="setActiveTab('playground')">Playground</button>
       <button type="button" class="tab-btn" [class.tab-btn--active]="activeTab === 'financial'" (click)="setActiveTab('financial')">Financial planning</button>
+      <button type="button" class="tab-btn" [class.tab-btn--active]="activeTab === 'news'" (click)="setActiveTab('news')">News</button>
       <button type="button" class="tab-btn" [class.tab-btn--active]="activeTab === 'icici'" (click)="setActiveTab('icici')">ICICI Direct</button>
       <button type="button" class="tab-btn" [class.tab-btn--active]="activeTab === 'tax'" (click)="setActiveTab('tax')">Tax Config</button>
       <button type="button" class="tab-btn tab-btn--data" [class.tab-btn--active]="activeTab === 'data'" (click)="setActiveTab('data')">Data</button>
@@ -382,89 +410,118 @@
     @if (activeTab === 'icici') {
       <div class="icici-breeze-tab tax-tab">
         <section class="tax-tab__section">
-          <h2 class="tax-tab__title">ICICI Direct</h2>
-          @if (breezeStatusLoading) {
+          <div class="icici-head">
+            <h2 class="tax-tab__title">ICICI Direct</h2>
+            <button type="button" class="icici-refresh" [disabled]="breezeStatusLoading" (click)="loadBreezeStatus()" title="Refresh status">
+              <span class="icici-refresh__icon" [class.icici-refresh__icon--spin]="breezeStatusLoading">↻</span> Refresh
+            </button>
+          </div>
+          @if (breezeStatusLoading && breezeAccountIds.length === 0) {
             <p class="tax-tab__status">Loading…</p>
           }
-          @if (breezeAccountIds.length > 0 && !breezeStatusLoading) {
-            @for (acctId of breezeAccountIds; track acctId) {
-              @let acct = breezeAccounts[acctId];
-              @if (acct) {
-                <div class="icici-breeze-status-row">
-                  <strong class="icici-breeze-acct-label">Account {{ acctId }}</strong>
-                  @if (!acct.sdkInstalled) {
-                    <span class="tax-tab__error">Install breeze-connect</span>
-                  } @else if (!acct.configured) {
-                    <span class="tax-tab__hint">Not configured</span>
-                  } @else if (acct.connected) {
-                    <span class="icici-breeze-summary icici-breeze-summary--ok">Connected</span>
-                    <button type="button" class="tax-tab__btn tax-tab__btn--reload" (click)="disconnectBreeze(acctId)">Disconnect</button>
-                  } @else {
-                    <span class="icici-breeze-summary">Not connected</span>
-                    @if (acct.loginUrl) {
-                      <a [href]="acct.loginUrl" class="tax-tab__btn tax-tab__btn--save">Log in</a>
+          @if (breezeAccountIds.length > 0) {
+            <div class="icici-accounts">
+              @for (acctId of breezeAccountIds; track acctId) {
+                @let acct = breezeAccounts[acctId];
+                @if (acct) {
+                  <div class="icici-card"
+                    [class.icici-card--ok]="acct.connected"
+                    [class.icici-card--warn]="acct.sdkInstalled && acct.configured && !acct.connected"
+                    [class.icici-card--off]="!acct.sdkInstalled || !acct.configured">
+                    <div class="icici-card__row">
+                      <div class="icici-card__id">
+                        <span class="icici-card__name">Account {{ acctId }}</span>
+                        <span class="icici-card__status">
+                          <span class="icici-card__dot"></span>
+                          @if (!acct.sdkInstalled) { Library missing }
+                          @else if (!acct.configured) { Needs API keys }
+                          @else if (acct.connected) { Connected }
+                          @else { Not connected }
+                        </span>
+                      </div>
+                      <div class="icici-card__actions">
+                        @if (!acct.sdkInstalled) {
+                          <span class="icici-card__note">Install breeze-connect on the server</span>
+                        } @else if (!acct.configured) {
+                          <span class="icici-card__note">Add the API key &amp; secret in settings</span>
+                        } @else if (acct.connected) {
+                          <button type="button" class="icici-btn icici-btn--ghost" (click)="disconnectBreeze(acctId)">Disconnect</button>
+                        } @else if (acct.loginUrl) {
+                          <a [href]="acct.loginUrl" class="icici-btn icici-btn--primary">Connect</a>
+                        }
+                      </div>
+                    </div>
+                    @if (acct.callbackUrl && acct.configured && !acct.connected) {
+                      <details class="icici-setup">
+                        <summary class="icici-setup__summary">First time connecting?</summary>
+                        <div class="icici-setup__body">
+                          <p>One-time step: in your ICICI Direct API app, paste this link into the app's redirect address, then click <strong>Connect</strong>.</p>
+                          <div class="icici-setup__copy">
+                            <input class="icici-setup__url" type="text" [value]="acct.callbackUrl" readonly (focus)="$any($event.target).select()" />
+                            <button type="button" class="icici-btn icici-btn--copy" (click)="copyBreezeCallback(acctId, acct.callbackUrl)">
+                              {{ breezeCopiedAcct === acctId ? 'Copied' : 'Copy' }}
+                            </button>
+                          </div>
+                        </div>
+                      </details>
                     }
-                  }
-                  @if (acct.callbackUrl && acct.configured && !acct.connected) {
-                    <span class="tax-tab__hint icici-breeze-callback-hint" style="margin-left:0.5rem;font-size:0.78rem;">
-                      Redirect URL: <code class="icici-breeze-callback-url">{{ acct.callbackUrl }}</code>
-                    </span>
-                  }
-                </div>
+                  </div>
+                }
               }
-            }
-            <div class="icici-breeze-status-row" style="margin-top:0.25rem;">
-              <button type="button" class="tax-tab__btn tax-tab__btn--reload" [disabled]="breezeStatusLoading" (click)="loadBreezeStatus()">Refresh status</button>
             </div>
             @if (breezeConnectError) {
               <p class="tax-tab__error">{{ breezeConnectError }}</p>
             }
             @if (breezeAnyConnected) {
-              <div class="icici-breeze-actions icici-breeze-actions--wrap">
-                <label class="icici-breeze-inline">
-                  <span class="icici-breeze-inline-label">Exchange</span>
-                  <select class="icici-breeze-select" [(ngModel)]="breezePortfolioExchangeCode" [disabled]="breezeDataLoading">
-                    <option value="NSE">NSE</option>
-                    <option value="NFO">NFO</option>
-                  </select>
-                </label>
-                <label class="icici-breeze-inline">
-                  <span class="icici-breeze-inline-label">From</span>
-                  <input type="datetime-local" class="icici-breeze-input icici-breeze-input--dt" [(ngModel)]="breezePortfolioFromDate" [disabled]="breezeDataLoading" />
-                </label>
-                <label class="icici-breeze-inline">
-                  <span class="icici-breeze-inline-label">To</span>
-                  <input type="datetime-local" class="icici-breeze-input icici-breeze-input--dt" [(ngModel)]="breezePortfolioToDate" [disabled]="breezeDataLoading" />
-                </label>
-                <label class="icici-breeze-inline icici-breeze-inline--grow">
-                  <span class="icici-breeze-inline-label">Stock</span>
-                  <input type="text" class="icici-breeze-input" [(ngModel)]="breezePortfolioStockCode" placeholder="Optional" [disabled]="breezeDataLoading" />
-                </label>
-                <button type="button" class="tax-tab__btn tax-tab__btn--generate" [disabled]="breezeDataLoading" (click)="fetchBreezePortfolioHoldings()">Apply</button>
+              <div class="icici-panel">
+                <div class="icici-panel__head">Portfolio holdings</div>
+                <div class="icici-controls">
+                  <label class="icici-field">
+                    <span class="icici-field__label">Exchange</span>
+                    <select class="icici-field__input" [(ngModel)]="breezePortfolioExchangeCode" [disabled]="breezeDataLoading">
+                      <option value="NSE">NSE</option>
+                      <option value="NFO">NFO</option>
+                    </select>
+                  </label>
+                  <label class="icici-field">
+                    <span class="icici-field__label">From</span>
+                    <input type="datetime-local" class="icici-field__input" [(ngModel)]="breezePortfolioFromDate" [disabled]="breezeDataLoading" />
+                  </label>
+                  <label class="icici-field">
+                    <span class="icici-field__label">To</span>
+                    <input type="datetime-local" class="icici-field__input" [(ngModel)]="breezePortfolioToDate" [disabled]="breezeDataLoading" />
+                  </label>
+                  <label class="icici-field icici-field--grow">
+                    <span class="icici-field__label">Stock (optional)</span>
+                    <input type="text" class="icici-field__input" [(ngModel)]="breezePortfolioStockCode" placeholder="e.g. NVDA" [disabled]="breezeDataLoading" />
+                  </label>
+                  <button type="button" class="icici-btn icici-btn--primary icici-controls__apply" [disabled]="breezeDataLoading" (click)="fetchBreezePortfolioHoldings()">
+                    {{ breezeDataLoading ? 'Loading…' : 'Apply' }}
+                  </button>
+                </div>
               </div>
-              @if (breezeDataLoading) {
-                <p class="tax-tab__status">Loading portfolio…</p>
-              }
               @if (breezeDataError) {
                 <p class="tax-tab__error">{{ breezeDataError }}</p>
               }
               @if (breezeHasPortfolioData) {
                 @if (breezePortfolioHoldingsView(); as ph) {
-                  @if (ph.note) {
-                    <p class="tax-tab__hint icici-breeze-table-note">{{ ph.note }}</p>
-                  }
-                  <div class="icici-breeze-portfolio-toolbar">
-                    <label class="icici-breeze-inline icici-breeze-inline--grow">
-                      <span class="icici-breeze-inline-label">Filter table</span>
-                      <input
-                        type="text"
-                        class="icici-breeze-input"
-                        [(ngModel)]="breezePortfolioTableFilter"
-                        (ngModelChange)="onBreezePortfolioTableFilterChange()"
-                        placeholder="Search stock, account, amounts…"
-                      />
-                    </label>
-                  </div>
+                  <div class="icici-panel icici-panel--table">
+                    <div class="icici-panel__toolbar">
+                      <span class="icici-panel__head icici-panel__head--inline">Holdings</span>
+                      <div class="icici-search">
+                        <span class="icici-search__icon">⌕</span>
+                        <input
+                          type="text"
+                          class="icici-search__input"
+                          [(ngModel)]="breezePortfolioTableFilter"
+                          (ngModelChange)="onBreezePortfolioTableFilterChange()"
+                          placeholder="Search stock, account, amounts…"
+                        />
+                      </div>
+                    </div>
+                    @if (ph.note) {
+                      <p class="tax-tab__hint icici-breeze-table-note">{{ ph.note }}</p>
+                    }
                   <div class="icici-breeze-table-wrap">
                     <table class="holdings-table icici-breeze-data-table icici-breeze-portfolio-table">
                       <thead>
@@ -535,6 +592,7 @@
                       </tfoot>
                     </table>
                   </div>
+                  </div>
                 }
               }
             }
@@ -544,6 +602,10 @@
     }
     @if (activeTab === 'data') {
       <app-data-tab />
+    }
+
+    @if (activeTab === 'news') {
+      <app-news-tab />
     }
     @if (activeTab === 'playground') {
   <div class="playground-section">

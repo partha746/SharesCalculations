@@ -21,15 +21,13 @@ services:
       - "8080:8080"
     volumes:
       - ./configs:/app/configs
+    # Secrets/keys (Finnhub, FMV, ICICI Breeze, ...) come from dashboard/.env.
+    # Optional: helpers/config.py falls back to baked defaults if absent.
+    env_file:
+      - path: ./dashboard/.env
+        required: false
     environment:
       PORT: "8080"
-      FINNHUB_TOKEN: "${FINNHUB_TOKEN:-}"
-      FMV_API_KEY: "${FMV_API_KEY:-}"
-      BREEZE_API_KEY: "${BREEZE_API_KEY:-}"
-      BREEZE_API_SECRET: "${BREEZE_API_SECRET:-}"
-      BREEZE_API_KEY_2: "${BREEZE_API_KEY_2:-}"
-      BREEZE_API_SECRET_2: "${BREEZE_API_SECRET_2:-}"
-      BREEZE_PUBLIC_BASE_URL: "${BREEZE_PUBLIC_BASE_URL:-}"
 
   frontend:
     build:

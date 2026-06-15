@@ -8,6 +8,7 @@ pytz
 requests
 retrying
 tabulate
+vaderSentiment
 yahoo_fin
 yahoofinancials
 yfinance

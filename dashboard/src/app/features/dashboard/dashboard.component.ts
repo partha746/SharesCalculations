@@ -31,8 +31,8 @@ import {
 } from '../../core/utils/format.util';
 
 /** Dashboard tabs, each mapped to a URL path segment (e.g. /holdings). */
-export type DashboardTab = 'holdings' | 'sold' | 'playground' | 'data' | 'financial' | 'tax' | 'icici';
-export const DASHBOARD_TABS: readonly DashboardTab[] = ['holdings', 'sold', 'playground', 'financial', 'icici', 'tax', 'data'];
+export type DashboardTab = 'holdings' | 'sold' | 'playground' | 'data' | 'financial' | 'tax' | 'icici' | 'news';
+export const DASHBOARD_TABS: readonly DashboardTab[] = ['holdings', 'sold', 'playground', 'financial', 'news', 'icici', 'tax', 'data'];
 
 Chart.register(ChartDataLabels, CandlestickController, CandlestickElement, OhlcController, OhlcElement);
 import {
@@ -76,6 +76,7 @@ import { OverviewTimeCardComponent } from './overview-time-card.component';
 import { LivePriceExtendedHintComponent } from './live-price-extended-hint.component';
 import { FinancialPlanningComponent } from './financial-planning/financial-planning.component';
 import { DataTabComponent } from './data-tab/data-tab.component';
+import { NewsTabComponent } from './news-tab/news-tab.component';
 
 const HOLDING_COLS = ['buyPriceUsd', 'type', 'totalPurchaseInr', 'netIfSellTodayInr', 'buyDate', 'qty', 'profitPercent', 'taxToPayInr', 'taxPercent'] as const;
 const DATE_COLS = ['buyDate'];
@@ -95,7 +96,7 @@ const HOLDINGS_COLUMN_ORDER_STORAGE_KEY = 'dashboard.holdingsColumnOrder';
 @Component({
   selector: 'app-dashboard',
   standalone: true,
-  imports: [CommonModule, FormsModule, StatCardComponent, OverviewTimeCardComponent, LivePriceExtendedHintComponent, FinancialPlanningComponent, DataTabComponent],
+  imports: [CommonModule, FormsModule, StatCardComponent, OverviewTimeCardComponent, LivePriceExtendedHintComponent, FinancialPlanningComponent, DataTabComponent, NewsTabComponent],
   templateUrl: './dashboard.component.html',
   styleUrl: './dashboard.component.scss',
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -157,6 +158,8 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
   breezeAccountIds: string[] = [];
   breezeStatusLoading = false;
   breezeConnectError: string | null = null;
+  /** Account id whose callback URL was just copied (for "Copied" feedback). */
+  breezeCopiedAcct: string | null = null;
   /** Per-account raw API data (merged for display). */
   breezePortfolioDataByAcct: Record<string, unknown> = {};
   breezePortfolioExchangeCode = 'NSE';
@@ -617,6 +620,21 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
         this.cdr.markForCheck();
       },
     });
+  }
+
+  /** Copy an account's callback URL to the clipboard and show brief "Copied" feedback. */
+  copyBreezeCallback(acctId: string, url: string): void {
+    navigator.clipboard?.writeText(url).then(
+      () => {
+        this.breezeCopiedAcct = acctId;
+        this.cdr.markForCheck();
+        setTimeout(() => {
+          this.breezeCopiedAcct = null;
+          this.cdr.markForCheck();
+        }, 1500);
+      },
+      () => {},
+    );
   }
 
   loadBreezeStatus(): void {
@@ -1172,6 +1190,87 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
     const latest = this.livePriceDayTickerItems[0];
     if (!latest) return 'Multi-day OHLC view';
     return `O $${this.formatUsd(latest.open)} | H $${this.formatUsd(latest.high)} | L $${this.formatUsd(latest.low)} | C $${this.formatUsd(latest.close)}`;
+  }
+
+  /** Toggle the "how to read candles" help text. */
+  showCandleHelp = false;
+  toggleCandleHelp(): void {
+    this.showCandleHelp = !this.showCandleHelp;
+  }
+
+  /**
+   * Computed insights from the currently visible candles (respects the 1D/1W/2W range).
+   * Returns null when there is not enough data.
+   */
+  get candlestickInsights(): {
+    trendPct: number;
+    trendLabel: string;
+    rangeHigh: number;
+    rangeLow: number;
+    position: string;
+    streak: string;
+    latestSignal: string;
+  } | null {
+    const items = this.livePriceDayTickerItems;
+    if (!items || items.length < 1) return null;
+    const chrono = [...items].reverse(); // oldest -> newest
+    const first = chrono[0];
+    const latest = chrono[chrono.length - 1];
+
+    const rangeHigh = Math.max(...chrono.map((c) => c.high));
+    const rangeLow = Math.min(...chrono.map((c) => c.low));
+
+    const trendPct = first.close ? ((latest.close - first.close) / first.close) * 100 : 0;
+    const trendLabel = chrono.length < 2 ? 'Single session' : trendPct > 1 ? 'Uptrend' : trendPct < -1 ? 'Downtrend' : 'Sideways';
+
+    // Position of latest close within the visible high-low range.
+    const span = rangeHigh - rangeLow;
+    const pos = span > 0 ? ((latest.close - rangeLow) / span) * 100 : 50;
+    const position = pos >= 80 ? `Near range high ~$${this.formatUsd(rangeHigh)} (resistance)`
+      : pos <= 20 ? `Near range low ~$${this.formatUsd(rangeLow)} (support)`
+      : `Mid-range ($${this.formatUsd(rangeLow)}–$${this.formatUsd(rangeHigh)})`;
+
+    // Consecutive up/down streak from newest.
+    let streakDir = latest.close >= latest.open;
+    let streakN = 0;
+    for (let i = chrono.length - 1; i >= 0; i--) {
+      const up = chrono[i].close >= chrono[i].open;
+      if (i === chrono.length - 1 || up === streakDir) streakN++;
+      else break;
+      streakDir = up;
+    }
+    const streak = `${streakN} ${latest.close >= latest.open ? 'up' : 'down'} ${streakN === 1 ? 'day' : 'days'} in a row`;
+
+    // Latest candle shape -> signal.
+    const up = latest.close >= latest.open;
+    const body = Math.abs(latest.close - latest.open);
+    const range = Math.max(latest.high - latest.low, 1e-9);
+    const upperWick = latest.high - Math.max(latest.open, latest.close);
+    const lowerWick = Math.min(latest.open, latest.close) - latest.low;
+    let latestSignal: string;
+    if (body < 0.25 * range) {
+      latestSignal = 'Small body (indecision / doji) — buyers and sellers balanced';
+    } else if (lowerWick > 1.5 * body) {
+      latestSignal = 'Long lower wick — buyers defended the lows (bullish reversal cue)';
+    } else if (upperWick > 1.5 * body) {
+      latestSignal = 'Long upper wick — sellers capped the highs (bearish cue)';
+    } else if (up && upperWick < 0.3 * body) {
+      latestSignal = 'Strong up day, closed near the high (bullish)';
+    } else if (!up && lowerWick < 0.3 * body) {
+      latestSignal = 'Down day, closed near the low (bearish)';
+    } else {
+      latestSignal = up ? 'Up day (buyers in control)' : 'Down day (sellers in control)';
+    }
+
+    return {
+      trendPct: Math.round(trendPct * 100) / 100,
+      trendLabel,
+      rangeHigh,
+      rangeLow,
+      position,
+      streak,
+      latestSignal,
+    };
   }
 
   /** Evenly downsample a day's points to at most maxN, always keeping the first and last. */
@@ -2200,7 +2299,7 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
       }
       if (!this.soldLoading) this.loadSold();
       else if (this.soldRows.length > 0) setTimeout(() => this.initOrUpdateSoldChart(), 0);
-    } else if (tab === 'playground' || tab === 'financial' || tab === 'icici') {
+    } else if (tab === 'playground' || tab === 'financial' || tab === 'icici' || tab === 'news') {
       if (this.holdingsChart) {
         this.holdingsChart.destroy();
         this.holdingsChart = null;
