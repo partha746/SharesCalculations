@@ -430,7 +430,7 @@
                     [class.icici-card--off]="!acct.sdkInstalled || !acct.configured">
                     <div class="icici-card__row">
                       <div class="icici-card__id">
-                        <span class="icici-card__name">Account {{ acctId }}</span>
+                        <span class="icici-card__name">{{ accountLabel(acctId) }}</span>
                         <span class="icici-card__status">
                           <span class="icici-card__dot"></span>
                           @if (!acct.sdkInstalled) { Library missing }
@@ -447,7 +447,14 @@
                         } @else if (acct.connected) {
                           <button type="button" class="icici-btn icici-btn--ghost" (click)="disconnectBreeze(acctId)">Disconnect</button>
                         } @else if (acct.loginUrl) {
-                          <a [href]="acct.loginUrl" class="icici-btn icici-btn--primary">Connect</a>
+                          <button type="button" class="icici-btn icici-btn--primary"
+                            [disabled]="breezeConnectingAcct === acctId"
+                            (click)="connectBreezePopup(acctId, acct.loginUrl)">
+                            {{ breezeConnectingAcct === acctId ? 'Connecting…' : 'Connect' }}
+                          </button>
+                        }
+                        @if (acct.custom) {
+                          <button type="button" class="icici-btn icici-btn--remove" title="Remove account" (click)="removeBreezeAccount(acctId)">Remove</button>
                         }
                       </div>
                     </div>
@@ -468,13 +475,49 @@
                   </div>
                 }
               }
+
+              @if (showAddAccount) {
+                <div class="icici-card icici-card--add">
+                  <div class="icici-add__title">Add account</div>
+                  <p class="icici-add__hint">Register a new ICICI Direct API app, then paste its key &amp; secret here.</p>
+                  <label class="icici-add__field">
+                    <span>Label (optional)</span>
+                    <input type="text" [(ngModel)]="addAccountLabel" placeholder="e.g. Spouse, HUF" [disabled]="addAccountSaving" />
+                  </label>
+                  <label class="icici-add__field">
+                    <span>API key</span>
+                    <input type="text" [(ngModel)]="addAccountApiKey" autocomplete="off" [disabled]="addAccountSaving" />
+                  </label>
+                  <label class="icici-add__field">
+                    <span>API secret</span>
+                    <input type="password" [(ngModel)]="addAccountApiSecret" autocomplete="off" [disabled]="addAccountSaving" />
+                  </label>
+                  @if (addAccountError) {
+                    <p class="icici-add__error">{{ addAccountError }}</p>
+                  }
+                  <div class="icici-add__actions">
+                    <button type="button" class="icici-btn icici-btn--ghost" (click)="toggleAddAccount()" [disabled]="addAccountSaving">Cancel</button>
+                    <button type="button" class="icici-btn icici-btn--primary" (click)="submitAddAccount()" [disabled]="addAccountSaving">
+                      {{ addAccountSaving ? 'Saving…' : 'Save account' }}
+                    </button>
+                  </div>
+                </div>
+              } @else {
+                <button type="button" class="icici-card icici-card--addtile" (click)="toggleAddAccount()">
+                  <span class="icici-card__plus">＋</span>
+                  <span class="icici-card__addlabel">Add account</span>
+                </button>
+              }
             </div>
             @if (breezeConnectError) {
               <p class="tax-tab__error">{{ breezeConnectError }}</p>
             }
+            <!-- Mutual fund management (works without an ICICI login) -->
+            <app-mf-tab [accountNames]="breezeAccountNames" (changed)="loadMfHoldings()"></app-mf-tab>
+
             @if (breezeAnyConnected) {
               <div class="icici-panel">
-                <div class="icici-panel__head">Portfolio holdings</div>
+                <div class="icici-panel__head">Fetch ICICI equity holdings</div>
                 <div class="icici-controls">
                   <label class="icici-field">
                     <span class="icici-field__label">Exchange</span>
@@ -503,99 +546,104 @@
               @if (breezeDataError) {
                 <p class="tax-tab__error">{{ breezeDataError }}</p>
               }
-              @if (breezeHasPortfolioData) {
-                @if (breezePortfolioHoldingsView(); as ph) {
-                  <div class="icici-panel icici-panel--table">
-                    <div class="icici-panel__toolbar">
-                      <span class="icici-panel__head icici-panel__head--inline">Holdings</span>
-                      <div class="icici-search">
-                        <span class="icici-search__icon">⌕</span>
-                        <input
-                          type="text"
-                          class="icici-search__input"
-                          [(ngModel)]="breezePortfolioTableFilter"
-                          (ngModelChange)="onBreezePortfolioTableFilterChange()"
-                          placeholder="Search stock, account, amounts…"
-                        />
-                      </div>
+            }
+
+            <!-- Combined holdings: equity (after Apply) + mutual funds, tagged by type -->
+            @let combined = iciciCombinedHoldings;
+            <div class="icici-panel icici-panel--table">
+              <div class="icici-panel__toolbar">
+                <div class="icici-panel__head icici-panel__head--inline">Holdings (Equity + Mutual funds)</div>
+                @if (combined.total > 0) {
+                  <div class="icici-toolbar-controls">
+                    <label class="icici-groupby">
+                      <span class="icici-groupby__label">Group by</span>
+                      <select class="icici-groupby__select" [(ngModel)]="iciciGroupBy">
+                        <option value="none">None</option>
+                        <option value="type">Type</option>
+                        <option value="account">Account</option>
+                        <option value="name">Name</option>
+                      </select>
+                    </label>
+                    <div class="icici-search">
+                      <span class="icici-search__icon">⌕</span>
+                      <input type="text" class="icici-search__input" placeholder="Search name, type or account…"
+                        [(ngModel)]="iciciSearch" />
+                      @if (iciciSearch) {
+                        <button type="button" class="icici-search__clear" (click)="iciciSearch = ''" title="Clear">✕</button>
+                      }
                     </div>
-                    @if (ph.note) {
-                      <p class="tax-tab__hint icici-breeze-table-note">{{ ph.note }}</p>
-                    }
-                  <div class="icici-breeze-table-wrap">
-                    <table class="holdings-table icici-breeze-data-table icici-breeze-portfolio-table">
-                      <thead>
-                        <tr>
-                          <th class="icici-breeze-th-sort" (click)="setBreezePortfolioSort('account')">
-                            Acct <span class="icici-breeze-sort-ind">{{ breezePortfolioSortIndicator('account') }}</span>
-                          </th>
-                          <th class="icici-breeze-th-sort" (click)="setBreezePortfolioSort('stockCode')">
-                            Stock code <span class="icici-breeze-sort-ind">{{ breezePortfolioSortIndicator('stockCode') }}</span>
-                          </th>
-                          <th class="icici-breeze-th-sort" (click)="setBreezePortfolioSort('qty')">
-                            Qty <span class="icici-breeze-sort-ind">{{ breezePortfolioSortIndicator('qty') }}</span>
-                          </th>
-                          <th class="icici-breeze-th-sort" (click)="setBreezePortfolioSort('avgPrice')">
-                            Avg price <span class="icici-breeze-sort-ind">{{ breezePortfolioSortIndicator('avgPrice') }}</span>
-                          </th>
-                          <th class="icici-breeze-th-sort" (click)="setBreezePortfolioSort('bookedPnl')">
-                            Booked P&amp;L <span class="icici-breeze-sort-ind">{{ breezePortfolioSortIndicator('bookedPnl') }}</span>
-                          </th>
-                          <th class="icici-breeze-th-sort" (click)="setBreezePortfolioSort('currentPrice')">
-                            Current mkt <span class="icici-breeze-sort-ind">{{ breezePortfolioSortIndicator('currentPrice') }}</span>
-                          </th>
-                          <th class="icici-breeze-th-sort" (click)="setBreezePortfolioSort('invested')">
-                            Invested <span class="icici-breeze-sort-ind">{{ breezePortfolioSortIndicator('invested') }}</span>
-                          </th>
-                          <th class="icici-breeze-th-sort" (click)="setBreezePortfolioSort('current')">
-                            Current <span class="icici-breeze-sort-ind">{{ breezePortfolioSortIndicator('current') }}</span>
-                          </th>
-                          <th class="icici-breeze-th-sort" (click)="setBreezePortfolioSort('pl')">
-                            P&amp;L <span class="icici-breeze-sort-ind">{{ breezePortfolioSortIndicator('pl') }}</span>
-                          </th>
-                          <th class="icici-breeze-th-sort" (click)="setBreezePortfolioSort('plPct')">
-                            P&amp;L % <span class="icici-breeze-sort-ind">{{ breezePortfolioSortIndicator('plPct') }}</span>
-                          </th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        @if (ph.rows.length === 0) {
-                          <tr>
-                            <td colspan="10" class="holdings-table__empty">No rows.</td>
-                          </tr>
-                        } @else {
-                          @for (r of ph.rows; track trackPortfolioHoldingRow($index, r)) {
-                            <tr>
-                              <td>{{ r.account }}</td>
-                              <td>{{ r.stockCode }}</td>
-                              <td>{{ r.quantity }}</td>
-                              <td>{{ r.avgPrice }}</td>
-                              <td>{{ r.bookedPnl }}</td>
-                              <td>{{ r.currentPrice }}</td>
-                              <td>{{ r.investedAmt }}</td>
-                              <td>{{ r.currentAmt }}</td>
-                              <td [ngClass]="'icici-breeze-pl icici-breeze-pl--' + r.plKind">{{ r.pl }}</td>
-                              <td [ngClass]="'icici-breeze-pl icici-breeze-pl--' + r.plKind">{{ r.plPct }}</td>
-                            </tr>
-                          }
-                        }
-                      </tbody>
-                      <tfoot>
-                        <tr class="icici-breeze-portfolio-tfoot">
-                          <th colspan="5" scope="row">Total</th>
-                          <td>—</td>
-                          <td>{{ ph.totals.invested }}</td>
-                          <td>{{ ph.totals.current }}</td>
-                          <td [ngClass]="'icici-breeze-pl icici-breeze-pl--' + ph.totals.plKind">{{ ph.totals.pl }}</td>
-                          <td [ngClass]="'icici-breeze-pl icici-breeze-pl--' + ph.totals.plKind">{{ ph.totals.plPct }}</td>
-                        </tr>
-                      </tfoot>
-                    </table>
-                  </div>
                   </div>
                 }
+              </div>
+              @if (combined.total === 0) {
+                <p class="tax-tab__hint">No holdings yet. Add a fund above, or connect an account and Apply to load equity.</p>
+              } @else if (combined.rows.length === 0) {
+                <p class="tax-tab__hint">No holdings match “{{ iciciSearch }}”.</p>
+              } @else {
+                <div class="icici-breeze-table-wrap">
+                  <table class="holdings-table icici-breeze-data-table">
+                    <thead>
+                      <tr>
+                        <th class="icici-th--sort" (click)="setIciciSort('type')">Type <span class="icici-th__sort">{{ iciciSortIndicator('type') }}</span></th>
+                        <th class="icici-th--sort" (click)="setIciciSort('account')">Acct <span class="icici-th__sort">{{ iciciSortIndicator('account') }}</span></th>
+                        <th class="icici-th--sort" (click)="setIciciSort('name')">Name <span class="icici-th__sort">{{ iciciSortIndicator('name') }}</span></th>
+                        <th class="icici-th--sort icici-th--num" (click)="setIciciSort('qty')">Qty / Units <span class="icici-th__sort">{{ iciciSortIndicator('qty') }}</span></th>
+                        <th class="icici-th--sort icici-th--num" (click)="setIciciSort('avg')">Avg <span class="icici-th__sort">{{ iciciSortIndicator('avg') }}</span></th>
+                        <th class="icici-th--sort icici-th--num" (click)="setIciciSort('price')">Price / NAV <span class="icici-th__sort">{{ iciciSortIndicator('price') }}</span></th>
+                        <th class="icici-th--sort icici-th--num" (click)="setIciciSort('invested')">Invested <span class="icici-th__sort">{{ iciciSortIndicator('invested') }}</span></th>
+                        <th class="icici-th--sort icici-th--num" (click)="setIciciSort('value')">Value <span class="icici-th__sort">{{ iciciSortIndicator('value') }}</span></th>
+                        <th class="icici-th--sort icici-th--num" (click)="setIciciSort('pl')">P&amp;L <span class="icici-th__sort">{{ iciciSortIndicator('pl') }}</span></th>
+                        <th class="icici-th--sort icici-th--num" (click)="setIciciSort('plPct')">P&amp;L % <span class="icici-th__sort">{{ iciciSortIndicator('plPct') }}</span></th>
+                        <th></th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      @for (g of combined.groups; track g.key) {
+                        @if (combined.grouped) {
+                          <tr class="icici-group-row">
+                            <th colspan="6" scope="row" class="icici-group-row__head">{{ g.label }} <span class="icici-group-row__count">({{ g.rows.length }})</span></th>
+                            <td>{{ g.totals.invested }}</td>
+                            <td>{{ g.totals.value }}</td>
+                            <td [ngClass]="'icici-breeze-pl icici-breeze-pl--' + g.totals.plKind">{{ g.totals.pl }}</td>
+                            <td [ngClass]="'icici-breeze-pl icici-breeze-pl--' + g.totals.plKind">{{ g.totals.plPct }}</td>
+                            <td></td>
+                          </tr>
+                        }
+                        @for (r of g.rows; track $index) {
+                          <tr>
+                            <td><span class="icici-type" [class.icici-type--mf]="r.type === 'MF'" [class.icici-type--eq]="r.type === 'Equity'">{{ r.type }}</span></td>
+                            <td>{{ accountShortLabel(r.account) }}</td>
+                            <td class="icici-name">{{ r.name }}</td>
+                            <td>{{ r.qty }}</td>
+                            <td>{{ r.avg }}</td>
+                            <td>{{ r.price }}</td>
+                            <td>{{ r.invested }}</td>
+                            <td>{{ r.value }}</td>
+                            <td [ngClass]="'icici-breeze-pl icici-breeze-pl--' + r.plKind">{{ r.pl }}</td>
+                            <td [ngClass]="'icici-breeze-pl icici-breeze-pl--' + r.plKind">{{ r.plPct }}</td>
+                            <td>
+                              @if (r.mfId != null) {
+                                <button type="button" class="icici-del" title="Remove fund" (click)="deleteMfHoldingById(r.mfId)">✕</button>
+                              }
+                            </td>
+                          </tr>
+                        }
+                      }
+                    </tbody>
+                    <tfoot>
+                      <tr class="icici-breeze-portfolio-tfoot">
+                        <th colspan="6" scope="row">Total</th>
+                        <td>{{ combined.totals.invested }}</td>
+                        <td>{{ combined.totals.value }}</td>
+                        <td [ngClass]="'icici-breeze-pl icici-breeze-pl--' + combined.totals.plKind">{{ combined.totals.pl }}</td>
+                        <td [ngClass]="'icici-breeze-pl icici-breeze-pl--' + combined.totals.plKind">{{ combined.totals.plPct }}</td>
+                        <td></td>
+                      </tr>
+                    </tfoot>
+                  </table>
+                </div>
               }
-            }
+            </div>
           }
         </section>
       </div>
@@ -1140,7 +1188,7 @@
         <thead>
           <tr class="holdings-table__header">
             <th class="holdings-table__th--fixed">Select</th>
-            <th class="holdings-table__th--fixed">Sell qty <span class="holdings-table__total-sell">(total: {{ totalSellQty }})</span></th>
+            <th class="holdings-table__th--fixed">Sell qty <span class="holdings-table__total-sell">(total: {{ totalSellQty }} · remaining: {{ totalSellRemaining }})</span></th>
             @for (colKey of holdingsColumnOrder; track colKey; let i = $index) {
               <th
                 class="holdings-table__th--sortable holdings-table__th--draggable"

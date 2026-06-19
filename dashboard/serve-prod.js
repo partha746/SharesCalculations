@@ -11,6 +11,7 @@
  * Deploy new frontend changes with `npm run build` (ng build); this server picks them up on next request.
  */
 const http = require('http');
+const https = require('https');
 const fs = require('fs');
 const path = require('path');
 const { URL } = require('url');
@@ -19,6 +20,10 @@ const PORT = parseInt(process.env.PORT || '4201', 10);
 const API_TARGET = new URL(process.env.API_TARGET || 'http://127.0.0.1:8080');
 const DIST_DIR = path.resolve(__dirname, process.env.DIST_DIR || 'dist/dashboard');
 const INDEX_HTML = path.join(DIST_DIR, 'index.html');
+
+// Optional TLS: if TLS_CERT_FILE + TLS_KEY_FILE point to readable files, serve HTTPS.
+const TLS_CERT_FILE = process.env.TLS_CERT_FILE || '';
+const TLS_KEY_FILE = process.env.TLS_KEY_FILE || '';
 
 const MIME = {
   '.html': 'text/html; charset=utf-8',
@@ -79,7 +84,7 @@ function sendFile(res, filePath, statusCode = 200) {
   fs.createReadStream(filePath).pipe(res);
 }
 
-const server = http.createServer((req, res) => {
+const requestHandler = (req, res) => {
   if (req.url === '/api' || req.url.startsWith('/api/')) {
     return proxyApi(req, res);
   }
@@ -111,10 +116,22 @@ const server = http.createServer((req, res) => {
     res.writeHead(404);
     res.end('Not found');
   });
-});
+};
+
+let server;
+let scheme = 'http';
+if (TLS_CERT_FILE && TLS_KEY_FILE && fs.existsSync(TLS_CERT_FILE) && fs.existsSync(TLS_KEY_FILE)) {
+  server = https.createServer(
+    { cert: fs.readFileSync(TLS_CERT_FILE), key: fs.readFileSync(TLS_KEY_FILE) },
+    requestHandler,
+  );
+  scheme = 'https';
+} else {
+  server = http.createServer(requestHandler);
+}
 
 server.listen(PORT, '0.0.0.0', () => {
-  console.log(`Static dashboard server listening on http://0.0.0.0:${PORT}`);
+  console.log(`Static dashboard server listening on ${scheme}://0.0.0.0:${PORT}`);
   console.log(`Serving: ${DIST_DIR}`);
   console.log(`Proxying /api -> ${API_TARGET.origin}`);
   if (!fs.existsSync(INDEX_HTML)) {

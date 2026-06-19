@@ -10,6 +10,8 @@ import {
   LivePriceHistoryPoint,
   LivePriceResponse,
   MarketStatusResponse,
+  MfHoldingsResponse,
+  MfSearchResult,
   NewsResponse,
   SoldRow,
 } from '../models/dashboard.types';
@@ -43,6 +45,24 @@ export class DashboardService {
   /** Latest NVIDIA news + sentiment. */
   getNews(days = 7): Observable<NewsResponse> {
     return this.http.get<NewsResponse>(`${this.apiUrl}/news?days=${days}&t=${Date.now()}`);
+  }
+
+  /** Mutual funds: scheme search (AMFI), holdings list (live NAV), add, delete. */
+  mfSearch(q: string): Observable<MfSearchResult[]> {
+    return this.http.get<MfSearchResult[]>(`${this.apiUrl}/mf/search?q=${encodeURIComponent(q)}`);
+  }
+  getMfHoldings(account: string = 'all'): Observable<MfHoldingsResponse> {
+    const acct = account && account !== 'all' ? `&account=${encodeURIComponent(account)}` : '';
+    return this.http.get<MfHoldingsResponse>(`${this.apiUrl}/mf/holdings?t=${Date.now()}${acct}`);
+  }
+  addMfHolding(body: { schemeCode: string; schemeName: string; units: number; invested?: number | null; folio?: string; account?: string }): Observable<{ id: number }> {
+    return this.http.post<{ id: number }>(`${this.apiUrl}/mf/holdings`, body);
+  }
+  deleteMfHolding(id: number): Observable<{ ok: boolean }> {
+    return this.http.delete<{ ok: boolean }>(`${this.apiUrl}/mf/holdings/${id}`);
+  }
+  importMfCsv(account: string, csv: string): Observable<{ imported: any[]; skipped: any[] }> {
+    return this.http.post<{ imported: any[]; skipped: any[] }>(`${this.apiUrl}/mf/import`, { account, csv });
   }
 
   /** Server-aggregated OHLC live price history for the chart (bucketed to <= maxPoints). */
@@ -130,6 +150,21 @@ export class DashboardService {
 
   postBreezeDisconnect(acct: string = '1'): Observable<{ success: boolean }> {
     return this.http.post<{ success: boolean }>(`${this.apiUrl}/breeze/disconnect/${acct}`, {});
+  }
+
+  /** Add a custom Breeze account (stored in the DB). */
+  addBreezeAccount(payload: { label?: string; apiKey: string; apiSecret: string }): Observable<{ success: boolean; id: string }> {
+    return this.http.post<{ success: boolean; id: string }>(`${this.apiUrl}/breeze/accounts`, payload);
+  }
+
+  /** Remove a custom Breeze account. */
+  deleteBreezeAccount(acct: string): Observable<{ success: boolean }> {
+    return this.http.delete<{ success: boolean }>(`${this.apiUrl}/breeze/accounts/${acct}`);
+  }
+
+  /** Mutual-fund unit holdings for a Breeze account (legacy ICICI /mf endpoint). */
+  getBreezeMfHoldings(acct: string = '1'): Observable<unknown> {
+    return this.http.get(`${this.apiUrl}/breeze/mf-holdings/${acct}?t=${Date.now()}`);
   }
 
   getBreezePortfolioHoldings(options: {

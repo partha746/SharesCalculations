@@ -38,9 +38,14 @@ services:
     restart: unless-stopped
     ports:
       - "4201:4201"
+    volumes:
+      - ./certs:/app/certs:ro
     environment:
       PORT: "4201"
       API_TARGET: "http://backend:8080"
+      # HTTPS: present these to serve TLS (self-signed). Remove to fall back to HTTP.
+      TLS_CERT_FILE: "/app/certs/cert.pem"
+      TLS_KEY_FILE: "/app/certs/key.pem"
     depends_on:
       backend:
         condition: service_healthy

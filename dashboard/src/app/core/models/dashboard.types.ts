@@ -3,6 +3,12 @@ export interface BreezeAccountStatus {
   sdkInstalled: boolean;
   configured: boolean;
   connected: boolean;
+  /** Account holder name (from ICICI customer details) when connected. */
+  name?: string | null;
+  /** User-supplied label for custom (DB-stored) accounts. */
+  label?: string | null;
+  /** True for accounts added at runtime (removable); false for built-in env accounts. */
+  custom?: boolean;
   loginUrl: string | null;
   callbackUrl?: string | null;
   message?: string;
@@ -15,6 +21,42 @@ export interface BreezeStatusAllResponse {
 
 /** Legacy single-account shape (kept for per-account endpoint). */
 export type BreezeStatusResponse = BreezeAccountStatus;
+
+/** Sortable column keys for the combined (Equity + MF) ICICI holdings table. */
+export type IciciSortCol =
+  | 'type'
+  | 'account'
+  | 'name'
+  | 'qty'
+  | 'avg'
+  | 'price'
+  | 'invested'
+  | 'value'
+  | 'pl'
+  | 'plPct';
+
+/** One row of the combined ICICI holdings table (display strings + numeric sort keys). */
+export interface IciciCombinedRow {
+  type: 'Equity' | 'MF';
+  account: string;
+  name: string;
+  qty: string;
+  avg: string;
+  price: string;
+  invested: string;
+  value: string;
+  pl: string;
+  plPct: string;
+  plKind: string;
+  mfId: number | null;
+  qtyNum: number | null;
+  avgNum: number | null;
+  priceNum: number | null;
+  investedNum: number | null;
+  valueNum: number | null;
+  plNum: number | null;
+  plPctNum: number | null;
+}
 
 /** Sortable column keys for ICICI portfolio table (UI). */
 export type BreezePortfolioSortCol =
@@ -96,6 +138,39 @@ export interface LivePriceHistoryPoint {
   low?: number;
   avg?: number;
   n?: number;
+}
+
+/** Mutual fund scheme search result (AMFI via mfapi.in). */
+export interface MfSearchResult {
+  schemeCode: string;
+  schemeName: string;
+}
+
+/** A manually-added mutual fund holding with live NAV-derived values. */
+export interface MfHolding {
+  id: number;
+  account: string;
+  schemeCode: string;
+  schemeName: string;
+  units: number;
+  nav: number | null;
+  navDate: string;
+  value: number | null;
+  invested: number | null;
+  pnl: number | null;
+  pnlPct: number | null;
+  navUnavailable: boolean;
+  folio: string;
+}
+
+export interface MfHoldingsResponse {
+  holdings: MfHolding[];
+  totals: {
+    value: number;
+    invested: number | null;
+    pnl: number | null;
+    pnlPct: number | null;
+  };
 }
 
 /** One NVIDIA news article with computed sentiment. */

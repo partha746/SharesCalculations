@@ -12,7 +12,7 @@ bp = Blueprint("breeze", __name__)
 @bp.route("/api/breeze/callback/<acct>", methods=["GET", "POST"])
 def breeze_oauth_callback(acct):
     _reload_dashboard_env()
-    if breeze_icici is None or acct not in breeze_icici.VALID_ACCOUNT_IDS:
+    if breeze_icici is None or acct not in breeze_icici.valid_account_ids():
         return _breeze_js_redirect(_breeze_dashboard_url() + "&breeze_error=invalid_account")
     token = _extract_breeze_session_token()
     print(f"[breeze-callback/{acct}] token={'YES' if token else 'EMPTY'}, query={request.query_string.decode()}", flush=True)
@@ -47,12 +47,16 @@ def breeze_status(acct):
             "loginUrl": None, "callbackUrl": callback_url,
             "message": "breeze_icici module not found",
         })
-    if acct not in breeze_icici.VALID_ACCOUNT_IDS:
+    if acct not in breeze_icici.valid_account_ids():
         return jsonify({"error": f"Invalid account id: {acct}"}), 400
+    connected = breeze_icici.get_client(acct) is not None
     return jsonify({
         "sdkInstalled": breeze_icici.sdk_installed(),
         "configured": breeze_icici.is_configured(acct),
-        "connected": breeze_icici.get_client(acct) is not None,
+        "connected": connected,
+        "name": breeze_icici.get_account_name(acct) if connected else None,
+        "label": breeze_icici.account_label(acct),
+        "custom": not breeze_icici.is_env_account(acct),
         "loginUrl": breeze_icici.login_url(acct),
         "callbackUrl": callback_url,
     })
@@ -65,22 +69,52 @@ def breeze_status_all():
     if breeze_icici is None:
         return jsonify({"accounts": {}})
     result = {}
-    for acct in breeze_icici.VALID_ACCOUNT_IDS:
+    for acct in breeze_icici.valid_account_ids():
+        connected = breeze_icici.get_client(acct) is not None
         result[acct] = {
             "sdkInstalled": breeze_icici.sdk_installed(),
             "configured": breeze_icici.is_configured(acct),
-            "connected": breeze_icici.get_client(acct) is not None,
+            "connected": connected,
+            "name": breeze_icici.get_account_name(acct) if connected else None,
+            "label": breeze_icici.account_label(acct),
+            "custom": not breeze_icici.is_env_account(acct),
             "loginUrl": breeze_icici.login_url(acct),
             "callbackUrl": _breeze_callback_url_for_acct(acct),
         }
     return jsonify({"accounts": result})
 
 
+@bp.route("/api/breeze/accounts", methods=["POST"])
+def breeze_add_account():
+    if breeze_icici is None:
+        return jsonify({"error": "Breeze module unavailable"}), 500
+    data = request.get_json(silent=True) or {}
+    label = (data.get("label") or "").strip()
+    api_key = (data.get("apiKey") or data.get("api_key") or "").strip()
+    api_secret = (data.get("apiSecret") or data.get("api_secret") or "").strip()
+    try:
+        new_id = breeze_icici.add_db_account(label, api_key, api_secret)
+        return jsonify({"success": True, "id": new_id})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 400
+
+
+@bp.route("/api/breeze/accounts/<acct>", methods=["DELETE"])
+def breeze_delete_account(acct):
+    if breeze_icici is None:
+        return jsonify({"error": "Breeze module unavailable"}), 500
+    try:
+        breeze_icici.delete_db_account(acct)
+        return jsonify({"success": True})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 400
+
+
 @bp.route("/api/breeze/disconnect/<acct>", methods=["POST"])
 def breeze_disconnect(acct):
     if breeze_icici is None:
         return jsonify({"error": "Breeze module unavailable"}), 500
-    if acct not in breeze_icici.VALID_ACCOUNT_IDS:
+    if acct not in breeze_icici.valid_account_ids():
         return jsonify({"error": f"Invalid account id: {acct}"}), 400
     breeze_icici.disconnect(acct)
     return jsonify({"success": True})
@@ -90,7 +124,7 @@ def breeze_disconnect(acct):
 def breeze_portfolio_holdings(acct):
     if breeze_icici is None:
         return jsonify({"error": "Breeze module unavailable"}), 500
-    if acct not in breeze_icici.VALID_ACCOUNT_IDS:
+    if acct not in breeze_icici.valid_account_ids():
         return jsonify({"error": f"Invalid account id: {acct}"}), 400
     exchange_code = (request.args.get("exchange_code") or request.args.get("exchangeCode") or "").strip()
     if not exchange_code:
@@ -111,7 +145,7 @@ def breeze_portfolio_holdings(acct):
 def breeze_portfolio_positions(acct):
     if breeze_icici is None:
         return jsonify({"error": "Breeze module unavailable"}), 500
-    if acct not in breeze_icici.VALID_ACCOUNT_IDS:
+    if acct not in breeze_icici.valid_account_ids():
         return jsonify({"error": f"Invalid account id: {acct}"}), 400
     try:
         return jsonify(breeze_icici.api_get_portfolio_positions(acct))
@@ -123,10 +157,23 @@ def breeze_portfolio_positions(acct):
 def breeze_demat_holdings(acct):
     if breeze_icici is None:
         return jsonify({"error": "Breeze module unavailable"}), 500
-    if acct not in breeze_icici.VALID_ACCOUNT_IDS:
+    if acct not in breeze_icici.valid_account_ids():
         return jsonify({"error": f"Invalid account id: {acct}"}), 400
     try:
         return jsonify(breeze_icici.api_get_demat_holdings(acct))
+    except Exception as e:
+        return jsonify({"error": str(e)}), 400
+
+
+@bp.route("/api/breeze/mf-holdings/<acct>", methods=["GET"])
+def breeze_mf_holdings(acct):
+    if breeze_icici is None:
+        return jsonify({"error": "Breeze module unavailable"}), 500
+    if acct not in breeze_icici.valid_account_ids():
+        return jsonify({"error": f"Invalid account id: {acct}"}), 400
+    portfolio_type = (request.args.get("portfolio_type") or request.args.get("portfolioType") or "A").strip()
+    try:
+        return jsonify(breeze_icici.api_get_mf_holdings(acct, portfolio_type))
     except Exception as e:
         return jsonify({"error": str(e)}), 400
 

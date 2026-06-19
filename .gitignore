@@ -50,3 +50,4 @@ Thumbs.db
 # Local / temp
 test*
 main.py
+certs/

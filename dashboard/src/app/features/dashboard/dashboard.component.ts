@@ -42,8 +42,11 @@ import {
   BreezePortfolioSortCol,
   DashboardResponse,
   HoldingRow,
+  IciciCombinedRow,
+  IciciSortCol,
   LivePriceDayTickerItem,
   LivePriceHistoryPoint,
+  MfHolding,
   SoldRow,
 } from '../../core/models/dashboard.types';
 
@@ -77,6 +80,7 @@ import { LivePriceExtendedHintComponent } from './live-price-extended-hint.compo
 import { FinancialPlanningComponent } from './financial-planning/financial-planning.component';
 import { DataTabComponent } from './data-tab/data-tab.component';
 import { NewsTabComponent } from './news-tab/news-tab.component';
+import { MfTabComponent } from './mf-tab/mf-tab.component';
 
 const HOLDING_COLS = ['buyPriceUsd', 'type', 'totalPurchaseInr', 'netIfSellTodayInr', 'buyDate', 'qty', 'profitPercent', 'taxToPayInr', 'taxPercent'] as const;
 const DATE_COLS = ['buyDate'];
@@ -96,7 +100,7 @@ const HOLDINGS_COLUMN_ORDER_STORAGE_KEY = 'dashboard.holdingsColumnOrder';
 @Component({
   selector: 'app-dashboard',
   standalone: true,
-  imports: [CommonModule, FormsModule, StatCardComponent, OverviewTimeCardComponent, LivePriceExtendedHintComponent, FinancialPlanningComponent, DataTabComponent, NewsTabComponent],
+  imports: [CommonModule, FormsModule, StatCardComponent, OverviewTimeCardComponent, LivePriceExtendedHintComponent, FinancialPlanningComponent, DataTabComponent, NewsTabComponent, MfTabComponent],
   templateUrl: './dashboard.component.html',
   styleUrl: './dashboard.component.scss',
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -160,6 +164,9 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
   breezeConnectError: string | null = null;
   /** Account id whose callback URL was just copied (for "Copied" feedback). */
   breezeCopiedAcct: string | null = null;
+  /** Account id currently being connected via the login popup (shows "Connecting…"). */
+  breezeConnectingAcct: string | null = null;
+  private breezeConnectPollId: ReturnType<typeof setInterval> | null = null;
   /** Per-account raw API data (merged for display). */
   breezePortfolioDataByAcct: Record<string, unknown> = {};
   breezePortfolioExchangeCode = 'NSE';
@@ -171,6 +178,10 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
   breezePortfolioSortDir: 1 | -1 = 1;
   breezeDataLoading = false;
   breezeDataError: string | null = null;
+
+  /** Manual mutual-fund holdings (with live AMFI NAV); merged with ICICI equity in the combined table. */
+  mfHoldings: MfHolding[] = [];
+  mfHoldingsLoading = false;
 
   taxConfig: any = null;
   taxConfigRaw = '';
@@ -622,6 +633,52 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
     });
   }
 
+  /**
+   * Open the ICICI login in a popup (credentials/OTP stay on ICICI's page) and auto-detect
+   * connection by polling /api/breeze/status. Closes the popup and refreshes once connected.
+   * Falls back to a full-page redirect if the popup is blocked.
+   */
+  connectBreezePopup(acctId: string, loginUrl: string): void {
+    const popup = window.open(loginUrl, 'icici_login', 'width=480,height=760,menubar=no,toolbar=no');
+    if (!popup) {
+      window.location.href = loginUrl; // popup blocked -> fall back to redirect flow
+      return;
+    }
+    if (this.breezeConnectPollId != null) clearInterval(this.breezeConnectPollId);
+    this.breezeConnectingAcct = acctId;
+    this.breezeConnectError = null;
+    this.cdr.markForCheck();
+    const start = Date.now();
+    const stop = () => {
+      if (this.breezeConnectPollId != null) {
+        clearInterval(this.breezeConnectPollId);
+        this.breezeConnectPollId = null;
+      }
+      this.breezeConnectingAcct = null;
+    };
+    this.breezeConnectPollId = setInterval(() => {
+      const timedOut = Date.now() - start > 5 * 60 * 1000;
+      const closed = !!popup.closed;
+      this.dashboardService.getBreezeStatus(acctId).subscribe({
+        next: (st) => {
+          if (st?.connected) {
+            stop();
+            try { popup.close(); } catch { /* cross-origin close may be blocked */ }
+            this.loadBreezeStatus();
+            this.cdr.markForCheck();
+          } else if (timedOut || closed) {
+            stop();
+            this.loadBreezeStatus();
+            this.cdr.markForCheck();
+          }
+        },
+        error: () => {
+          if (timedOut || closed) { stop(); this.cdr.markForCheck(); }
+        },
+      });
+    }, 2500);
+  }
+
   /** Copy an account's callback URL to the clipboard and show brief "Copied" feedback. */
   copyBreezeCallback(acctId: string, url: string): void {
     navigator.clipboard?.writeText(url).then(
@@ -635,6 +692,91 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
       },
       () => {},
     );
+  }
+
+  /** Display label for an account id: holder name when connected, else its custom label, else "Account N". */
+  accountLabel(id: string): string {
+    const a = this.breezeAccounts[id];
+    return a?.name || a?.label || `Account ${id}`;
+  }
+
+  /** Compact label for tables: just the holder's first name (falls back to "Account N"). */
+  accountShortLabel(id: string): string {
+    const a = this.breezeAccounts[id];
+    const name = (a?.name || a?.label || '').trim();
+    if (name) return name.split(/\s+/)[0];
+    return `Account ${id}`;
+  }
+
+  // --- Add / remove custom Breeze accounts ---
+  showAddAccount = false;
+  addAccountLabel = '';
+  addAccountApiKey = '';
+  addAccountApiSecret = '';
+  addAccountSaving = false;
+  addAccountError: string | null = null;
+
+  toggleAddAccount(): void {
+    this.showAddAccount = !this.showAddAccount;
+    this.addAccountError = null;
+    if (!this.showAddAccount) {
+      this.addAccountLabel = '';
+      this.addAccountApiKey = '';
+      this.addAccountApiSecret = '';
+    }
+    this.cdr.markForCheck();
+  }
+
+  submitAddAccount(): void {
+    const apiKey = this.addAccountApiKey.trim();
+    const apiSecret = this.addAccountApiSecret.trim();
+    if (!apiKey || !apiSecret) {
+      this.addAccountError = 'API key and secret are required.';
+      this.cdr.markForCheck();
+      return;
+    }
+    this.addAccountSaving = true;
+    this.addAccountError = null;
+    this.cdr.markForCheck();
+    this.dashboardService
+      .addBreezeAccount({ label: this.addAccountLabel.trim(), apiKey, apiSecret })
+      .subscribe({
+        next: () => {
+          this.addAccountSaving = false;
+          this.showAddAccount = false;
+          this.addAccountLabel = '';
+          this.addAccountApiKey = '';
+          this.addAccountApiSecret = '';
+          this.loadBreezeStatus();
+          this.cdr.markForCheck();
+        },
+        error: (err) => {
+          this.addAccountSaving = false;
+          this.addAccountError = err?.error?.error || 'Failed to add account.';
+          this.cdr.markForCheck();
+        },
+      });
+  }
+
+  removeBreezeAccount(acct: string): void {
+    if (!confirm(`Remove ${this.accountLabel(acct)}? Its stored API keys will be deleted.`)) return;
+    this.dashboardService.deleteBreezeAccount(acct).subscribe({
+      next: () => {
+        this.breezePortfolioDataByAcct[acct] = null;
+        this.loadBreezeStatus();
+      },
+      error: (err) => {
+        this.breezeConnectError = err?.error?.error || 'Failed to remove account.';
+        this.cdr.markForCheck();
+      },
+    });
+  }
+
+  /** Map of account id -> display name, for child components (MF add/import selector). */
+  get breezeAccountNames(): Record<string, string> {
+    const out: Record<string, string> = {};
+    for (const id of this.breezeAccountIds) out[id] = this.accountLabel(id);
+    return out;
   }
 
   loadBreezeStatus(): void {
@@ -718,6 +860,192 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
   /** Are there any portfolio results loaded? */
   get breezeHasPortfolioData(): boolean {
     return Object.values(this.breezePortfolioDataByAcct).some((d) => d != null);
+  }
+
+  /** Load manual MF holdings (all accounts) for the combined ICICI table. */
+  loadMfHoldings(): void {
+    this.mfHoldingsLoading = true;
+    this.cdr.markForCheck();
+    this.dashboardService.getMfHoldings('all').subscribe({
+      next: (res) => {
+        this.mfHoldings = res.holdings ?? [];
+        this.mfHoldingsLoading = false;
+        this.cdr.markForCheck();
+      },
+      error: () => {
+        this.mfHoldings = [];
+        this.mfHoldingsLoading = false;
+        this.cdr.markForCheck();
+      },
+    });
+  }
+
+  deleteMfHoldingById(id: number): void {
+    this.dashboardService.deleteMfHolding(id).subscribe({
+      next: () => this.loadMfHoldings(),
+      error: () => {},
+    });
+  }
+
+  private _money2(n: number | null | undefined): string {
+    if (n == null) return '—';
+    return '\u20B9 ' + new Intl.NumberFormat('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n);
+  }
+  private _moneyInr(n: number | null | undefined, signed = false): string {
+    if (n == null) return '—';
+    const s = signed && n > 0 ? '+' : '';
+    return s + '\u20B9 ' + this.formatInr(n);
+  }
+  private _pct(n: number | null | undefined): string {
+    if (n == null) return '—';
+    return (n > 0 ? '+' : '') + n.toFixed(2) + '%';
+  }
+  private _plKind(n: number | null | undefined): 'pos' | 'neg' | 'zero' | 'na' {
+    if (n == null) return 'na';
+    if (Math.abs(n) < 1e-6) return 'zero';
+    return n > 0 ? 'pos' : 'neg';
+  }
+
+  // --- Combined holdings table: search + sort + group ---
+  iciciSearch = '';
+  iciciSortCol: IciciSortCol | null = null;
+  iciciSortDir: 'asc' | 'desc' = 'asc';
+  iciciGroupBy: 'none' | 'type' | 'account' | 'name' = 'none';
+
+  setIciciSort(col: IciciSortCol): void {
+    if (this.iciciSortCol === col) {
+      this.iciciSortDir = this.iciciSortDir === 'asc' ? 'desc' : 'asc';
+    } else {
+      this.iciciSortCol = col;
+      this.iciciSortDir = 'asc';
+    }
+  }
+
+  iciciSortIndicator(col: IciciSortCol): string {
+    if (this.iciciSortCol !== col) return '';
+    return this.iciciSortDir === 'asc' ? '▲' : '▼';
+  }
+
+  private _combinedTotals(rows: IciciCombinedRow[]): { invested: string; value: string; pl: string; plPct: string; plKind: string } {
+    let invSum = 0, valSum = 0, plSum = 0, haveInv = false, haveVal = false;
+    for (const r of rows) {
+      if (r.investedNum != null) { invSum += r.investedNum; haveInv = true; }
+      if (r.valueNum != null) { valSum += r.valueNum; haveVal = true; }
+      if (r.plNum != null) plSum += r.plNum;
+    }
+    const totalPl = haveInv ? plSum : null;
+    const totalPlPct = haveInv && invSum > 0 ? (plSum / invSum) * 100 : null;
+    return {
+      invested: haveInv ? this._moneyInr(invSum) : '—',
+      value: haveVal ? this._moneyInr(valSum) : '—',
+      pl: this._moneyInr(totalPl, true),
+      plPct: this._pct(totalPlPct),
+      plKind: this._plKind(totalPl),
+    };
+  }
+
+  private _groupKeyFor(r: IciciCombinedRow): string {
+    if (this.iciciGroupBy === 'type') return r.type;
+    if (this.iciciGroupBy === 'account') return this.accountLabel(r.account);
+    return r.name;
+  }
+
+  /** Equity (when fetched) + manual MF holdings merged into one Type-tagged table, filtered, sorted & grouped. */
+  get iciciCombinedHoldings(): {
+    rows: IciciCombinedRow[];
+    groups: Array<{ key: string; label: string | null; rows: IciciCombinedRow[]; totals: { invested: string; value: string; pl: string; plPct: string; plKind: string } }>;
+    grouped: boolean;
+    totals: { invested: string; value: string; pl: string; plPct: string; plKind: string };
+    total: number;
+  } {
+    const raw: IciciCombinedRow[] = [];
+
+    const eq = this.breezePortfolioHoldingsView();
+    if (eq && eq.rows) {
+      for (const r of eq.rows) {
+        const qtyNum = parseFloat(String(r.quantity).replace(/,/g, ''));
+        raw.push({
+          type: 'Equity', account: r.account, name: r.stockCode,
+          qty: r.quantity, avg: this._money2(r.avgNum), price: this._money2(r.curPxNum),
+          invested: this._money2(r.investedNum) === '—' ? '—' : this._moneyInr(r.investedNum),
+          value: this._moneyInr(r.currentNum), pl: this._moneyInr(r.plNum, true),
+          plPct: this._pct(r.plPctNum), plKind: r.plKind, mfId: null,
+          qtyNum: isFinite(qtyNum) ? qtyNum : null, avgNum: r.avgNum, priceNum: r.curPxNum,
+          investedNum: r.investedNum, valueNum: r.currentNum, plNum: r.plNum, plPctNum: r.plPctNum,
+        });
+      }
+    }
+    for (const m of this.mfHoldings) {
+      const avg = m.invested != null && m.units ? m.invested / m.units : null;
+      raw.push({
+        type: 'MF', account: m.account, name: m.schemeName,
+        qty: new Intl.NumberFormat('en-IN', { maximumFractionDigits: 3 }).format(m.units),
+        avg: this._money2(avg),
+        price: m.navUnavailable || m.nav == null ? '—' : this._money2(m.nav),
+        invested: this._moneyInr(m.invested), value: this._moneyInr(m.value),
+        pl: this._moneyInr(m.pnl, true), plPct: this._pct(m.pnlPct),
+        plKind: this._plKind(m.pnl), mfId: m.id,
+        qtyNum: m.units, avgNum: avg, priceNum: m.navUnavailable ? null : m.nav,
+        investedNum: m.invested, valueNum: m.value, plNum: m.pnl, plPctNum: m.pnlPct,
+      });
+    }
+
+    // Filter by search across type, account name, and scheme/stock name.
+    const q = this.iciciSearch.trim().toLowerCase();
+    let view = raw;
+    if (q) {
+      view = raw.filter((r) =>
+        r.name.toLowerCase().includes(q) ||
+        r.type.toLowerCase().includes(q) ||
+        this.accountLabel(r.account).toLowerCase().includes(q) ||
+        this.accountShortLabel(r.account).toLowerCase().includes(q),
+      );
+    }
+
+    // Sort.
+    if (this.iciciSortCol) {
+      const col = this.iciciSortCol;
+      const dir = this.iciciSortDir === 'asc' ? 1 : -1;
+      view = [...view].sort((a, b) => {
+        if (col === 'type' || col === 'name' || col === 'account') {
+          const av = col === 'account' ? this.accountShortLabel(a.account) : (a as any)[col];
+          const bv = col === 'account' ? this.accountShortLabel(b.account) : (b as any)[col];
+          return String(av).localeCompare(String(bv)) * dir;
+        }
+        const an = (a as any)[col + 'Num'] as number | null;
+        const bn = (b as any)[col + 'Num'] as number | null;
+        if (an == null && bn == null) return 0;
+        if (an == null) return 1; // nulls always last
+        if (bn == null) return -1;
+        return (an - bn) * dir;
+      });
+    }
+
+    // Group the visible rows (or a single pseudo-group when grouping is off).
+    const grouped = this.iciciGroupBy !== 'none';
+    let groups: Array<{ key: string; label: string | null; rows: IciciCombinedRow[]; totals: ReturnType<DashboardComponent['_combinedTotals']> }>;
+    if (!grouped) {
+      groups = [{ key: '__all__', label: null, rows: view, totals: this._combinedTotals(view) }];
+    } else {
+      const map = new Map<string, IciciCombinedRow[]>();
+      for (const r of view) {
+        const key = this._groupKeyFor(r);
+        const bucket = map.get(key);
+        if (bucket) bucket.push(r);
+        else map.set(key, [r]);
+      }
+      groups = [...map.entries()]
+        .map(([key, rows]) => ({ key, label: key, rows, totals: this._combinedTotals(rows) }))
+        .sort((a, b) => a.key.localeCompare(b.key));
+    }
+
+    return {
+      rows: view,
+      groups,
+      grouped,
+      total: raw.length,
+      totals: this._combinedTotals(view),
+    };
   }
 
   /** Portfolio holdings: note + filtered/sorted rows + footer totals. */
@@ -1033,6 +1361,10 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
 
   ngOnDestroy(): void {
     this.stopLivePricePolling();
+    if (this.breezeConnectPollId != null) {
+      clearInterval(this.breezeConnectPollId);
+      this.breezeConnectPollId = null;
+    }
     if (this.routeSub) {
       this.routeSub.unsubscribe();
       this.routeSub = null;
@@ -2287,6 +2619,7 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
     this.activeTab = tab;
     if (tab === 'icici') {
       this.loadBreezeStatus();
+      this.loadMfHoldings();
     }
     if (tab === 'tax') {
       if (!this.taxConfig && !this.taxConfigLoading) this.loadTaxConfig();
@@ -3224,6 +3557,16 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
   /** Total qty set to sell across all visible (filtered) rows. */
   get totalSellQty(): number {
     return this.holdingsFilteredSorted.reduce((sum, r) => sum + this.getSellQty(r), 0);
+  }
+
+  /** Total shares available across all visible (filtered) lots. */
+  get holdingsTotalQty(): number {
+    return this.holdingsFilteredSorted.reduce((sum, r) => sum + r.qty, 0);
+  }
+
+  /** Shares that remain held after the entered sell quantities. */
+  get totalSellRemaining(): number {
+    return this.holdingsTotalQty - this.totalSellQty;
   }
 
   /** Rows that have sell qty > 0 (for mark-as-sold payload). */
