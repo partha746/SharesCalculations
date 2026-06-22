@@ -17,6 +17,12 @@ services:
     image: shares-backend
     container_name: shares-backend
     restart: unless-stopped
+    # Host uses systemd-resolved (127.0.0.53) but exposes no upstream file Docker can
+    # read, leaving the container's embedded resolver with no external DNS. Pin public
+    # resolvers so outbound API calls (Frankfurter, Finnhub, AMFI, ICICI) resolve.
+    dns:
+      - 1.1.1.1
+      - 8.8.8.8
     ports:
       - "8080:8080"
     volumes:
