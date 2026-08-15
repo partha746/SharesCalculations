@@ -55,6 +55,39 @@ def _db_accounts() -> Dict[str, dict]:
         return {}
 
 
+def _ensure_names_table(conn):
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS breeze_account_names (
+           id TEXT PRIMARY KEY, name TEXT NOT NULL, updated_at TEXT NOT NULL
+        )"""
+    )
+
+
+def stored_account_name(acct: str) -> Optional[str]:
+    """Last holder name seen for this account. Persisted so cards stay named across restarts
+    and while disconnected (the live session cache is cleared on both)."""
+    try:
+        with get_db() as conn:
+            _ensure_names_table(conn)
+            row = conn.execute("SELECT name FROM breeze_account_names WHERE id = ?", (acct,)).fetchone()
+        return (row["name"] or "").strip() or None if row else None
+    except Exception:
+        return None
+
+
+def _save_account_name(acct: str, name: str) -> None:
+    try:
+        with get_db() as conn:
+            _ensure_names_table(conn)
+            conn.execute(
+                "INSERT INTO breeze_account_names (id, name, updated_at) VALUES (?, ?, ?) "
+                "ON CONFLICT(id) DO UPDATE SET name = excluded.name, updated_at = excluded.updated_at",
+                (acct, name, datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")),
+            )
+    except Exception:
+        pass  # naming is cosmetic; never fail a request over it
+
+
 def valid_account_ids() -> tuple:
     ids = list(_ENV_ACCOUNT_IDS)
     for k in _db_accounts():
@@ -99,7 +132,9 @@ def delete_db_account(acct: str) -> None:
     disconnect(acct)
     with get_db() as conn:
         _ensure_accounts_table(conn)
+        _ensure_names_table(conn)
         conn.execute("DELETE FROM breeze_accounts WHERE id = ?", (acct,))
+        conn.execute("DELETE FROM breeze_account_names WHERE id = ?", (acct,))
 
 
 def sdk_installed() -> bool:
@@ -201,6 +236,7 @@ def get_account_name(acct: str = "1") -> Optional[str]:
                 if val and str(val).strip():
                     name = str(val).strip().title()
                     _account_names[acct] = name
+                    _save_account_name(acct, name)
                     return name
             print(f"[breeze] account {acct} customer-details keys: {sorted(success.keys())}", flush=True)
         else:
@@ -264,7 +300,9 @@ def api_get_mf_holdings(acct: str = "1", portfolio_type: str = "A") -> Any:
     b = _require_client(acct)
     api_key = getattr(b, "api_key", "")
     secret = getattr(b, "secret_key", "")
-    session = getattr(b, "session_key", "")
+    # generate_session() replaces b.session_key with the decoded value used for the breezeapi
+    # X-SessionToken header; the legacy /mf endpoint wants the original API session token.
+    session = _session_tokens.get(acct) or getattr(b, "session_key", "")
     userid = getattr(b, "user_id", "")
     if not (api_key and secret and session and userid):
         raise RuntimeError("Account session is missing credentials; reconnect the account")

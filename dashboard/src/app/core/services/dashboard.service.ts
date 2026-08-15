@@ -14,6 +14,8 @@ import {
   MarketStatusResponse,
   MfHoldingsResponse,
   MfSearchResult,
+  NetworthItem,
+  NetworthItemsResponse,
   NewsResponse,
   SoldRow,
 } from '../models/dashboard.types';
@@ -70,11 +72,6 @@ export class DashboardService {
   /** Server-aggregated OHLC live price history for the chart (bucketed to <= maxPoints). */
   getLivePriceHistory(days = 7, maxPoints = 1500): Observable<LivePriceHistoryPoint[]> {
     return this.http.get<LivePriceHistoryPoint[]>(`${this.apiUrl}/live-price-history?days=${days}&maxPoints=${maxPoints}`);
-  }
-
-  /** Persist one poll point to DB (fire-and-forget from component). */
-  appendLivePriceHistory(point: LivePriceHistoryPoint): Observable<unknown> {
-    return this.http.post(`${this.apiUrl}/live-price-history`, point);
   }
 
   /** Clear all stored live price history (graph data). */
@@ -152,6 +149,23 @@ export class DashboardService {
 
   postBreezeDisconnect(acct: string = '1'): Observable<{ success: boolean }> {
     return this.http.post<{ success: boolean }>(`${this.apiUrl}/breeze/disconnect/${acct}`, {});
+  }
+
+  // --- Net worth: manually-entered assets & liabilities ---
+  getNetworthItems(): Observable<NetworthItemsResponse> {
+    return this.http.get<NetworthItemsResponse>(`${this.apiUrl}/networth/items?t=${Date.now()}`);
+  }
+
+  addNetworthItem(item: Omit<NetworthItem, 'id' | 'updatedAt'>): Observable<{ id: number }> {
+    return this.http.post<{ id: number }>(`${this.apiUrl}/networth/items`, item);
+  }
+
+  updateNetworthItem(id: number, item: Omit<NetworthItem, 'id' | 'updatedAt'>): Observable<{ ok: boolean }> {
+    return this.http.put<{ ok: boolean }>(`${this.apiUrl}/networth/items/${id}`, item);
+  }
+
+  deleteNetworthItem(id: number): Observable<{ ok: boolean }> {
+    return this.http.delete<{ ok: boolean }>(`${this.apiUrl}/networth/items/${id}`);
   }
 
   // --- Financial planning: save/load the planner snapshot ---

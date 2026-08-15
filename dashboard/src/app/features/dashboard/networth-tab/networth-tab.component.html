@@ -1,0 +1,204 @@
+@let t = totals;
+
+<div class="nw-root">
+  <div class="nw-head">
+    <h2 class="nw-title">Net worth</h2>
+    <button type="button" class="nw-refresh" [disabled]="trackedLoading" (click)="refreshTracked.emit()" title="Re-fetch live prices, mutual-fund NAV and ICICI holdings">
+      <span class="nw-refresh__icon" [class.nw-refresh__icon--spin]="trackedLoading">↻</span>
+      {{ trackedLoading ? 'Refreshing…' : 'Refresh tracked' }}
+    </button>
+  </div>
+
+  @if (error) {
+    <p class="nw-error">{{ error }}</p>
+  }
+
+  <!-- Headline -->
+  <div class="nw-summary">
+    <div class="nw-card nw-card--net">
+      <span class="nw-card__label">Net worth</span>
+      <span class="nw-card__value">₹ {{ formatInrShort(t.net) }}</span>
+      <span class="nw-card__sub">₹ {{ formatInr(t.net) }}</span>
+    </div>
+    <div class="nw-card nw-card--assets">
+      <span class="nw-card__label">Total assets</span>
+      <span class="nw-card__value">₹ {{ formatInrShort(t.assets) }}</span>
+      <span class="nw-card__sub">₹ {{ formatInr(t.assets) }}</span>
+    </div>
+    <div class="nw-card nw-card--liab">
+      <span class="nw-card__label">Total liabilities</span>
+      <span class="nw-card__value">₹ {{ formatInrShort(t.liabilities) }}</span>
+      <span class="nw-card__sub">₹ {{ formatInr(t.liabilities) }}</span>
+    </div>
+    <div class="nw-card">
+      <span class="nw-card__label">Liquid</span>
+      <span class="nw-card__value">₹ {{ formatInrShort(t.liquid) }}</span>
+      <span class="nw-card__sub">{{ t.liquidPct | number : '1.0-1' }}% of assets</span>
+    </div>
+    <div class="nw-card">
+      <span class="nw-card__label">Illiquid</span>
+      <span class="nw-card__value">₹ {{ formatInrShort(t.illiquid) }}</span>
+      <span class="nw-card__sub">{{ t.illiquidPct | number : '1.0-1' }}% of assets</span>
+    </div>
+  </div>
+
+  <!-- Liquidity split -->
+  @if (t.assets > 0) {
+    <div class="nw-split">
+      <div class="nw-split__bar" [title]="'Liquid ' + (t.liquidPct | number : '1.0-1') + '% · Illiquid ' + (t.illiquidPct | number : '1.0-1') + '%'">
+        <span class="nw-split__liquid" [style.width.%]="t.liquidPct"></span>
+        <span class="nw-split__illiquid" [style.width.%]="t.illiquidPct"></span>
+      </div>
+      <div class="nw-split__legend">
+        <span><i class="nw-dot nw-dot--liquid"></i> Liquid — can be converted to cash quickly</span>
+        <span><i class="nw-dot nw-dot--illiquid"></i> Illiquid — locked in or slow to sell</span>
+      </div>
+    </div>
+  }
+
+  <!-- Tracked automatically -->
+  <section class="nw-section">
+    <div class="nw-section__head">
+      <h3 class="nw-subtitle">Tracked automatically <span class="nw-badge">live</span></h3>
+      <span class="nw-section__total">₹ {{ formatInr(trackedTotalInr) }}</span>
+    </div>
+    <p class="nw-hint">These come straight from the rest of the dashboard and update on their own — no need to enter them.</p>
+    <div class="nw-table-wrap">
+      <table class="nw-table">
+        <thead>
+          <tr><th>Asset</th><th>Category</th><th>Liquidity</th><th class="nw-num">Value ₹</th><th>Source</th></tr>
+        </thead>
+        <tbody>
+          @for (r of trackedRows; track r.key) {
+            <tr>
+              <td class="nw-strong">{{ r.label }}</td>
+              <td>{{ r.category }}</td>
+              <td><span class="nw-pill nw-pill--liquid">liquid</span></td>
+              <td class="nw-num">
+                @if (r.valueInr != null) { ₹ {{ formatInr(r.valueInr) }} } @else { <span class="nw-muted">not loaded</span> }
+              </td>
+              <td class="nw-muted nw-src">{{ r.hint }}</td>
+            </tr>
+          }
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- Manual entries -->
+  <section class="nw-section">
+    <div class="nw-section__head">
+      <h3 class="nw-subtitle">Your entries</h3>
+      <span class="nw-section__total">
+        assets ₹ {{ formatInr(t.assets - trackedTotalInr) }} · liabilities ₹ {{ formatInr(t.liabilities) }}
+      </span>
+    </div>
+    <p class="nw-hint">Add anything the dashboard can't see — bank balances, property, gold, EPF, and loans. Edits save as soon as you leave the field.</p>
+
+    <div class="nw-table-wrap">
+      <table class="nw-table">
+        <thead>
+          <tr>
+            <th class="nw-th--sort" (click)="setSort('label')">Name <span class="nw-th__sort">{{ sortIndicator('label') }}</span></th>
+            <th class="nw-th--sort" (click)="setSort('kind')">Type <span class="nw-th__sort">{{ sortIndicator('kind') }}</span></th>
+            <th class="nw-th--sort" (click)="setSort('category')">Category <span class="nw-th__sort">{{ sortIndicator('category') }}</span></th>
+            <th class="nw-th--sort" (click)="setSort('liquidity')">Liquidity <span class="nw-th__sort">{{ sortIndicator('liquidity') }}</span></th>
+            <th class="nw-th--sort nw-num" (click)="setSort('valueInr')">Value ₹ <span class="nw-th__sort">{{ sortIndicator('valueInr') }}</span></th>
+            <th class="nw-th--sort" (click)="setSort('note')">Note <span class="nw-th__sort">{{ sortIndicator('note') }}</span></th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          @for (it of sortedItems; track it.id) {
+            <tr [class.nw-row--liability]="it.kind === 'liability'">
+              <td><input type="text" class="nw-input nw-input--wide" [(ngModel)]="it.label" (blur)="saveItem(it)" /></td>
+              <td>
+                <select class="nw-input" [(ngModel)]="it.kind" (ngModelChange)="saveItem(it)">
+                  <option value="asset">Asset</option>
+                  <option value="liability">Liability</option>
+                </select>
+              </td>
+              <td>
+                <select class="nw-input" [(ngModel)]="it.category" (ngModelChange)="saveItem(it)">
+                  @for (c of categoryOptions(it.kind); track c) {
+                    <option [value]="c">{{ c }}</option>
+                  }
+                </select>
+              </td>
+              <td>
+                @if (it.kind === 'asset') {
+                  <select class="nw-input" [(ngModel)]="it.liquidity" (ngModelChange)="saveItem(it)">
+                    <option value="liquid">Liquid</option>
+                    <option value="illiquid">Illiquid</option>
+                  </select>
+                } @else {
+                  <span class="nw-muted">—</span>
+                }
+              </td>
+              <td class="nw-num">
+                <input type="text" inputmode="numeric" appIndianNumber class="nw-input nw-input--num" [(ngModel)]="it.valueInr" (blur)="saveItem(it)" />
+              </td>
+              <td><input type="text" class="nw-input nw-input--wide" [(ngModel)]="it.note" (blur)="saveItem(it)" placeholder="optional" /></td>
+              <td class="nw-actions">
+                @if (savingId === it.id) { <span class="nw-saving">saving…</span> }
+                <button type="button" class="nw-del" title="Remove row" (click)="deleteItem(it)">✕</button>
+              </td>
+            </tr>
+          } @empty {
+            <tr><td colspan="7" class="nw-empty">Nothing added yet — use the row below to add your first entry.</td></tr>
+          }
+        </tbody>
+        <tfoot>
+          <tr class="nw-addrow">
+            <td><input type="text" class="nw-input nw-input--wide" [(ngModel)]="newLabel" placeholder="e.g. HDFC savings" /></td>
+            <td>
+              <select class="nw-input" [(ngModel)]="newKind" (ngModelChange)="onNewKindChange()">
+                <option value="asset">Asset</option>
+                <option value="liability">Liability</option>
+              </select>
+            </td>
+            <td>
+              <select class="nw-input" [(ngModel)]="newCategory" (ngModelChange)="onNewCategoryChange()">
+                @for (c of categoryOptions(newKind); track c) {
+                  <option [value]="c">{{ c }}</option>
+                }
+              </select>
+            </td>
+            <td>
+              @if (newKind === 'asset') {
+                <select class="nw-input" [(ngModel)]="newLiquidity">
+                  <option value="liquid">Liquid</option>
+                  <option value="illiquid">Illiquid</option>
+                </select>
+              } @else {
+                <span class="nw-muted">—</span>
+              }
+            </td>
+            <td class="nw-num"><input type="text" inputmode="numeric" appIndianNumber class="nw-input nw-input--num" [(ngModel)]="newValue" placeholder="0" /></td>
+            <td><input type="text" class="nw-input nw-input--wide" [(ngModel)]="newNote" placeholder="optional" /></td>
+            <td class="nw-actions">
+              <button type="button" class="nw-add" [disabled]="adding" (click)="addItem()">{{ adding ? 'Adding…' : '+ Add' }}</button>
+            </td>
+          </tr>
+        </tfoot>
+      </table>
+    </div>
+  </section>
+
+  <!-- Mix -->
+  @if (categoryBreakdown.length > 0) {
+    <section class="nw-section">
+      <h3 class="nw-subtitle">Asset mix</h3>
+      <div class="nw-mix">
+        @for (c of categoryBreakdown; track c.category) {
+          <div class="nw-mix__row">
+            <span class="nw-mix__label">{{ c.category }}</span>
+            <span class="nw-mix__track"><span class="nw-mix__fill" [style.width.%]="c.pct"></span></span>
+            <span class="nw-mix__value">₹ {{ formatInr(c.valueInr) }}</span>
+            <span class="nw-mix__pct">{{ c.pct | number : '1.0-1' }}%</span>
+          </div>
+        }
+      </div>
+    </section>
+  }
+</div>

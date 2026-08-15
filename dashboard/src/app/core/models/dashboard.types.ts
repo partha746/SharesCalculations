@@ -287,6 +287,28 @@ export interface HoldingRow {
   taxPercent: number;
 }
 
+/** How quickly a net-worth holding can be converted to cash. */
+export type NetworthLiquidity = 'liquid' | 'illiquid';
+
+/** Whether a net-worth row adds to (asset) or subtracts from (liability) the total. */
+export type NetworthKind = 'asset' | 'liability';
+
+/** A manually-entered net-worth line item (things the app can't track automatically). */
+export interface NetworthItem {
+  id: number;
+  label: string;
+  category: string;
+  liquidity: NetworthLiquidity;
+  kind: NetworthKind;
+  valueInr: number;
+  note: string;
+  updatedAt: string;
+}
+
+export interface NetworthItemsResponse {
+  items: NetworthItem[];
+}
+
 /** A single lot's share reservation ("earmark") for a planned sale at a target price. */
 export interface Earmark {
   id: number;

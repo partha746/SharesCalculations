@@ -315,6 +315,7 @@
       <button type="button" class="tab-btn" [class.tab-btn--active]="activeTab === 'holdings'" (click)="setActiveTab('holdings')">Holdings</button>
       <button type="button" class="tab-btn" [class.tab-btn--active]="activeTab === 'sold'" (click)="setActiveTab('sold')">Sold Shares</button>
       <button type="button" class="tab-btn" [class.tab-btn--active]="activeTab === 'playground'" (click)="setActiveTab('playground')">Playground</button>
+      <button type="button" class="tab-btn" [class.tab-btn--active]="activeTab === 'networth'" (click)="setActiveTab('networth')">Net worth</button>
       <button type="button" class="tab-btn" [class.tab-btn--active]="activeTab === 'financial'" (click)="setActiveTab('financial')">Financial planning</button>
       <button type="button" class="tab-btn" [class.tab-btn--active]="activeTab === 'news'" (click)="setActiveTab('news')">News</button>
       <button type="button" class="tab-btn" [class.tab-btn--active]="activeTab === 'icici'" (click)="setActiveTab('icici')">ICICI Direct</button>
@@ -413,6 +414,16 @@
         </section>
       </div>
     }
+    @if (activeTab === 'networth') {
+      <app-networth-tab
+        [nvdaNetInr]="data.netInBankIfSellNow"
+        [mfValueInr]="networthMfValueInr"
+        [iciciEquityValueInr]="networthIciciEquityValueInr"
+        [iciciEquityLoaded]="networthIciciEquityLoaded"
+        [trackedLoading]="networthTrackedLoading"
+        (refreshTracked)="refreshNetworthTracked()" />
+    }
+
     @if (activeTab === 'financial') {
       <div class="financial-planning-tab">
         <app-financial-planning [dashboardNetInBankIfSellNow]="data.netInBankIfSellNow" (refreshNvidiaNet)="onRefreshNvidiaNetForFinancial()" />

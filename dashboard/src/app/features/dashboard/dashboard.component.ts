@@ -31,8 +31,8 @@ import {
 } from '../../core/utils/format.util';
 
 /** Dashboard tabs, each mapped to a URL path segment (e.g. /holdings). */
-export type DashboardTab = 'holdings' | 'sold' | 'playground' | 'data' | 'financial' | 'tax' | 'icici' | 'news';
-export const DASHBOARD_TABS: readonly DashboardTab[] = ['holdings', 'sold', 'playground', 'financial', 'news', 'icici', 'tax', 'data'];
+export type DashboardTab = 'holdings' | 'sold' | 'playground' | 'data' | 'financial' | 'networth' | 'tax' | 'icici' | 'news';
+export const DASHBOARD_TABS: readonly DashboardTab[] = ['holdings', 'sold', 'playground', 'networth', 'financial', 'news', 'icici', 'tax', 'data'];
 
 Chart.register(ChartDataLabels, CandlestickController, CandlestickElement, OhlcController, OhlcElement);
 import {
@@ -82,6 +82,7 @@ import { FinancialPlanningComponent } from './financial-planning/financial-plann
 import { DataTabComponent } from './data-tab/data-tab.component';
 import { NewsTabComponent } from './news-tab/news-tab.component';
 import { MfTabComponent } from './mf-tab/mf-tab.component';
+import { NetworthTabComponent } from './networth-tab/networth-tab.component';
 
 const HOLDING_COLS = ['buyPriceUsd', 'type', 'totalPurchaseInr', 'netIfSellTodayInr', 'buyDate', 'qty', 'profitPercent', 'taxToPayInr', 'taxPercent'] as const;
 const DATE_COLS = ['buyDate'];
@@ -101,7 +102,7 @@ const HOLDINGS_COLUMN_ORDER_STORAGE_KEY = 'dashboard.holdingsColumnOrder';
 @Component({
   selector: 'app-dashboard',
   standalone: true,
-  imports: [CommonModule, FormsModule, StatCardComponent, OverviewTimeCardComponent, LivePriceExtendedHintComponent, FinancialPlanningComponent, DataTabComponent, NewsTabComponent, MfTabComponent],
+  imports: [CommonModule, FormsModule, StatCardComponent, OverviewTimeCardComponent, LivePriceExtendedHintComponent, FinancialPlanningComponent, DataTabComponent, NewsTabComponent, MfTabComponent, NetworthTabComponent],
   templateUrl: './dashboard.component.html',
   styleUrl: './dashboard.component.scss',
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -615,13 +616,14 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
         const now = Date.now();
         const point = { timestamp: now, livePriceUsd: res.livePriceUsd, usdToInrRate: res.usdToInrRate };
         if (this.marketOpen) {
+          // In-memory only: the backend recorder is the single writer of live_price_history, so
+          // posting here too would double every tick (and inflate the OHLC bucket counts).
           this.livePriceHistory.push(point);
           const cutoff = now - DashboardComponent.LIVE_PRICE_HISTORY_DAYS_MS;
           this.livePriceHistory = this.livePriceHistory.filter((p) => p.timestamp >= cutoff);
           if (this.livePriceHistory.length > DashboardComponent.LIVE_PRICE_HISTORY_MAX) {
             this.livePriceHistory = this.livePriceHistory.slice(-DashboardComponent.LIVE_PRICE_HISTORY_MAX);
           }
-          this.dashboardService.appendLivePriceHistory(point).subscribe({ error: () => { /* persist best-effort */ } });
         }
         this.refreshLivePriceDayTickerCache();
         this.initOrUpdateLivePriceChart();
@@ -909,6 +911,56 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
       next: () => this.loadMfHoldings(),
       error: () => {},
     });
+  }
+
+  // ===== Net worth tab: values this app already tracks =====
+
+  /** Live mutual-fund value (null when nothing is loaded / no NAV available yet). */
+  get networthMfValueInr(): number | null {
+    if (this.mfHoldings.length === 0) return null;
+    let sum = 0;
+    let any = false;
+    for (const m of this.mfHoldings) {
+      if (m.value != null && Number.isFinite(m.value)) {
+        sum += m.value;
+        any = true;
+      }
+    }
+    return any ? sum : null;
+  }
+
+  /** Live ICICI equity value (null until holdings have been fetched for a connected account). */
+  get networthIciciEquityValueInr(): number | null {
+    const rows = this.breezePortfolioHoldingsView().rows;
+    if (rows.length === 0) return null;
+    let sum = 0;
+    let any = false;
+    for (const r of rows) {
+      if (r.currentNum != null && Number.isFinite(r.currentNum)) {
+        sum += r.currentNum;
+        any = true;
+      }
+    }
+    return any ? sum : null;
+  }
+
+  get networthIciciEquityLoaded(): boolean {
+    return this.networthIciciEquityValueInr != null;
+  }
+
+  networthTrackedLoading = false;
+
+  /** Re-fetch every source the net-worth tab tracks automatically. */
+  refreshNetworthTracked(): void {
+    this.networthTrackedLoading = true;
+    this.cdr.markForCheck();
+    this.loadMfHoldings();
+    this.loadBreezeStatus(); // fetches ICICI equity holdings when an account is connected
+    this.fetchAndPushLivePrice(); // refreshes the NVDA net-if-sold figure
+    setTimeout(() => {
+      this.networthTrackedLoading = false;
+      this.cdr.markForCheck();
+    }, 1500);
   }
 
   private _money2(n: number | null | undefined): string {
@@ -2651,6 +2703,7 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
     { id: 'holdings', label: 'Holdings' },
     { id: 'sold', label: 'Sold Shares' },
     { id: 'playground', label: 'Playground' },
+    { id: 'networth', label: 'Net worth' },
     { id: 'financial', label: 'Financial planning' },
     { id: 'news', label: 'News' },
     { id: 'icici', label: 'ICICI Direct' },
@@ -2688,7 +2741,7 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
       }
       if (!this.soldLoading) this.loadSold();
       else if (this.soldRows.length > 0) setTimeout(() => this.initOrUpdateSoldChart(), 0);
-    } else if (tab === 'playground' || tab === 'financial' || tab === 'icici' || tab === 'news') {
+    } else if (tab === 'playground' || tab === 'financial' || tab === 'icici' || tab === 'news' || tab === 'networth') {
       if (this.holdingsChart) {
         this.holdingsChart.destroy();
         this.holdingsChart = null;
@@ -2699,6 +2752,8 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
       }
       // Reflect the Holdings tab selection into the playground (only when nothing picked yet there).
       if (tab === 'playground') this.seedPlayMultiFromHoldings(false);
+      // Net worth needs the tracked sources (MF NAV + ICICI equity) loaded to show live values.
+      if (tab === 'networth') this.refreshNetworthTracked();
     } else {
       if (this.soldChart) {
         this.soldChart.destroy();

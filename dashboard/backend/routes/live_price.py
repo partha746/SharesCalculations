@@ -12,6 +12,11 @@ from services.market import (
 
 bp = Blueprint("live_price", __name__)
 
+# The background recorder writes a tick every 14s while the market is open. Any client POST landing
+# within this window of an existing tick is treated as a duplicate of it and dropped, so raw rows and
+# OHLC bucket counts stay accurate no matter how many dashboards are open.
+_HISTORY_DEDUPE_WINDOW_MS = 10_000
+
 @bp.route("/api/live-price-history", methods=["GET"])
 def get_live_price_history():
     """Server-aggregated OHLC history for charts. Params: days (1..370), maxPoints (100..5000).
@@ -106,6 +111,12 @@ def append_live_price_history():
     ts_ms = int(ts)
     with get_db() as conn:
         _ensure_live_price_history_table(conn)
+        duplicate = conn.execute(
+            "SELECT 1 FROM live_price_history WHERE timestamp_ms BETWEEN ? AND ? LIMIT 1",
+            (ts_ms - _HISTORY_DEDUPE_WINDOW_MS, ts_ms + _HISTORY_DEDUPE_WINDOW_MS),
+        ).fetchone()
+        if duplicate:
+            return jsonify({"ok": True, "skipped": "duplicate"}), 200
         conn.execute(
             "INSERT INTO live_price_history (timestamp_ms, live_price_usd, usd_to_inr_rate) VALUES (?, ?, ?)",
             (ts_ms, float(price), float(rate)),
