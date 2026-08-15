@@ -1,5 +1,5 @@
 import { ChangeDetectionStrategy, ChangeDetectorRef, Component, Input, OnDestroy, OnInit } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import { formatCountdownWithSeconds } from './countdown-utils';
 
 /**
@@ -8,7 +8,7 @@ import { formatCountdownWithSeconds } from './countdown-utils';
  */
 @Component({
     selector: 'app-live-price-extended-hint',
-    imports: [CommonModule],
+    imports: [],
     templateUrl: './live-price-extended-hint.component.html',
     styleUrl: './live-price-extended-hint.component.scss',
     changeDetection: ChangeDetectionStrategy.OnPush

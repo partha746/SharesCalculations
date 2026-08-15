@@ -1,5 +1,5 @@
 import { ChangeDetectionStrategy, ChangeDetectorRef, Component, EventEmitter, Input, Output } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import { FormsModule } from '@angular/forms';
 import { DashboardService } from '../../../core/services/dashboard.service';
 import { MfSearchResult } from '../../../core/models/dashboard.types';
@@ -8,7 +8,7 @@ import { MfSearchResult } from '../../../core/models/dashboard.types';
  * so the parent can reload the combined holdings table. */
 @Component({
     selector: 'app-mf-tab',
-    imports: [CommonModule, FormsModule],
+    imports: [FormsModule],
     templateUrl: './mf-tab.component.html',
     styleUrl: './mf-tab.component.scss',
     changeDetection: ChangeDetectionStrategy.OnPush

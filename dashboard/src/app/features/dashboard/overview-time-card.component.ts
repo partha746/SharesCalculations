@@ -1,10 +1,10 @@
 import { ChangeDetectionStrategy, ChangeDetectorRef, Component, Input, OnDestroy, OnInit } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import { formatCountdown, formatCountdownWithSeconds } from './countdown-utils';
 
 @Component({
     selector: 'app-overview-time-card',
-    imports: [CommonModule],
+    imports: [],
     templateUrl: './overview-time-card.component.html',
     styleUrl: './overview-time-card.component.scss',
     changeDetection: ChangeDetectionStrategy.OnPush

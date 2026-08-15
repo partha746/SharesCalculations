@@ -1,9 +1,9 @@
 import { Component, Input } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 
 @Component({
     selector: 'app-stat-card',
-    imports: [CommonModule],
+    imports: [],
     templateUrl: './stat-card.component.html',
     styleUrl: './stat-card.component.scss'
 })
