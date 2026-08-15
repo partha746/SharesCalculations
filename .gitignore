@@ -51,3 +51,9 @@ Thumbs.db
 test*
 main.py
 certs/
+
+# Personal broker exports — import these through the UI, never commit them
+*PortfolioData*.csv
+
+# Generated caches (re-downloaded on demand)
+configs/icici_nse_scrip_map.json
