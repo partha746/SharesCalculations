@@ -1,15 +1,22 @@
-Django
-elasticsearch
-flask
-openpyxl
-python-dotenv
-pandas
-pytz
-requests
-retrying
-tabulate
-vaderSentiment
-yahoo_fin
-yahoofinancials
-yfinance
+# Runtime dependencies for the dashboard backend.
+# Lower bounds are security floors - keep them at or above these versions.
+
+flask>=3.0.3
+werkzeug>=3.0.6
+jinja2>=3.1.6
+python-dotenv>=1.0.1
+
+pandas>=2.2.3
+openpyxl>=3.1.5
+yfinance>=0.2.54
 breeze-connect>=1.0.68
+
+requests>=2.32.4
+urllib3>=2.5.0
+certifi>=2024.7.4
+retrying>=1.3.4
+
+vaderSentiment>=3.3.2
+
+# Legacy ELK push (helpers/eks.py) is not used by the dashboard. Install
+# separately if you need it:  pip install elasticsearch pytz

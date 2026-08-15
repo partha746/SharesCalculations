@@ -7,6 +7,15 @@ from helpers.db import DB
 from helpers.market import RupeeConv
 from helpers.tax import Tax
 from helpers.stock_data import OwnStockData
-from helpers.eks import EksHelper
 
 __all__ = ["DataCleaner", "DB", "RupeeConv", "Tax", "OwnStockData", "EksHelper"]
+
+
+def __getattr__(name):
+    # EksHelper drags in elasticsearch/pytz, which the dashboard never needs.
+    # Resolve it on first access so those stay optional installs.
+    if name == "EksHelper":
+        from helpers.eks import EksHelper
+
+        return EksHelper
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
