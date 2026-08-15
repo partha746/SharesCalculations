@@ -1,4 +1,5 @@
 """Tax config path + ITR foreign-asset (Schedule FA) row builder."""
+import math
 import os
 from datetime import date, datetime
 
@@ -9,11 +10,47 @@ REPO_ROOT = config.REPO_ROOT
 _TAX_CONFIG_PATH = os.path.join(REPO_ROOT, "configs", "tax_config.json")
 
 
+def default_assessment_year(today=None):
+    """Assessment year of the *current* Indian financial year (Apr–Mar).
+
+    The Indian FY rolls over on 1 April, so the calendar year alone is off by one from April
+    onward: August 2026 sits in FY 2026–27, whose AY is 2027 (period ending 31 Mar 2027), not 2026.
+    """
+    d = today or date.today()
+    return d.year + 1 if d.month >= 4 else d.year
+
+
+def _lot_export_key(row, stock_type, invest_date):
+    """Identify one holding lot as "YYYY-MM-DD|TYPE|price|qty|totalInr".
+
+    Must stay byte-identical to holdingExportKey() in the Angular component, which builds the same
+    string from the /api/holdings payload — hence the same source columns (ESPP is priced off
+    TDS_Price, matching buyPriceUsd) and the same fixed formatting.
+    """
+    price_col = "TDS_Price_raw" if stock_type == "ESPP" else "Price_Bought_raw"
+    try:
+        price = float(row[price_col])
+    except (TypeError, ValueError, KeyError):
+        price = 0.0
+    try:
+        qty = int(float(row["Available_Sell"])) if row["Available_Sell"] is not None else 0
+    except (TypeError, ValueError):
+        qty = 0
+    try:
+        # floor(x + 0.5) matches JS Math.round for the positive values involved; Python's round()
+        # is banker's rounding and would disagree on exact .5.
+        total = int(math.floor(float(row["InitialValue_raw"]) + 0.5))
+    except (TypeError, ValueError, KeyError):
+        total = 0
+    return f"{invest_date.strftime('%Y-%m-%d')}|{stock_type}|{price:.4f}|{qty}|{total}"
+
+
 def _build_foreign_asset_rows(fy_year, selected_keys=None):
     """Shared row builder for the foreign-asset (Schedule FA) data.
     Returns (rows, template, error_tuple). One entry per holding lot acquired on/before FY end.
     rows[i] has template keys plus InterestAcquiringDate, InitialValOfInvstmnt, PeakBalanceDuringPeriod, ClosingBalance.
-    selected_keys: optional set of lot keys "YYYY-MM-DD|TYPE|qty" to restrict the export to checked holdings.
+    selected_keys: optional set of lot keys "YYYY-MM-DD|TYPE|price|qty|totalInr" (see _lot_export_key)
+    to restrict the export to checked holdings.
     """
     import json as _json
     from helpers import gather_data
@@ -51,12 +88,7 @@ def _build_foreign_asset_rows(fy_year, selected_keys=None):
             if invest_date > fy_end:
                 continue
             if selected_keys is not None:
-                try:
-                    lot_qty = int(float(row["Available_Sell"])) if row["Available_Sell"] is not None else 0
-                except (TypeError, ValueError):
-                    lot_qty = 0
-                lot_key = f"{invest_date.strftime('%Y-%m-%d')}|{stock_type}|{lot_qty}"
-                if lot_key not in selected_keys:
+                if _lot_export_key(row, stock_type, invest_date) not in selected_keys:
                     continue
             entry = dict(template)
             entry["InterestAcquiringDate"] = invest_date.strftime("%Y-%m-%d")

@@ -46,13 +46,23 @@ const MIME = {
 };
 
 function proxyApi(req, res) {
+  // Keep the browser's Host and add the standard X-Forwarded-* headers. The backend builds
+  // absolute URLs (e.g. the ICICI OAuth callback) from these; overwriting Host with the internal
+  // backend name made it advertise http://backend:8080/... instead of the origin the user is on.
+  const forwardedProto = req.headers['x-forwarded-proto'] || (req.socket.encrypted ? 'https' : 'http');
+  const forwardedHost = req.headers['x-forwarded-host'] || req.headers.host || '';
   const options = {
     protocol: API_TARGET.protocol,
     hostname: API_TARGET.hostname,
     port: API_TARGET.port,
     method: req.method,
     path: req.url,
-    headers: { ...req.headers, host: API_TARGET.host },
+    headers: {
+      ...req.headers,
+      'x-forwarded-proto': forwardedProto,
+      'x-forwarded-host': forwardedHost,
+      'x-forwarded-for': req.socket.remoteAddress || '',
+    },
   };
   const upstream = http.request(options, (up) => {
     res.writeHead(up.statusCode || 502, up.headers);

@@ -1,19 +1,23 @@
 """SQLite access for the nvShares database (NSU/ESPP/SellOut tables)."""
 import os
 import sqlite3
-import sys
 
 import pandas as pd
+
+from helpers import config
 
 
 class DB:
     """_summary_
     """
     def __init__(self) -> None:
-        """_summary_
+        """Use the same database as the rest of the app.
+
+        config.DB_PATH honours NVSHARES_DB_PATH and is anchored to the repo root, so readers here
+        and writers going through the backend's get_db() can never end up on different files (the
+        old sys.path[0] lookup ignored the env var and depended on the entrypoint's directory).
         """
-        db_name = 'nvShares.db'
-        self.db_path = os.path.join(sys.path[0], 'configs', db_name)
+        self.db_path = config.DB_PATH
     
     def create_tables(self, db_path):
         """Create NSU, ESPP, SellOut tables if they do not exist."""

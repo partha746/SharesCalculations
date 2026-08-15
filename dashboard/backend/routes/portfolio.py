@@ -127,6 +127,7 @@ def mark_sold():
     _PRICE_EPS = 0.006
 
     sellout_rowids = []
+    requested_for_lot = {}
     with get_db() as conn:
         for v in validated:
             table = "NSU" if v["type"] == "NSU" else "ESPP"
@@ -153,9 +154,20 @@ def mark_sold():
             if not row:
                 return jsonify({"error": f"Lot not found: {v['type']} {v['buy_date_str']}"}), 400
             avail = int(row[0]) if row[0] is not None else 0
-            if avail < v["qty"]:
+            # Several items in one request can resolve to the same lot; each would otherwise be
+            # checked against the full availability (nothing is deducted until the insert loop
+            # below), letting the combined quantity oversell it. Track the running total per lot.
+            lot_id = (
+                v["type"], v["_match_buy_date"], round(v["_match_price_bought"], 4),
+                round(v.get("_match_tds_price", 0.0), 4),
+            )
+            requested_for_lot[lot_id] = requested_for_lot.get(lot_id, 0) + v["qty"]
+            if avail < requested_for_lot[lot_id]:
                 return jsonify({
-                    "error": f"Insufficient available qty for lot {v['buy_date_str']}: has {avail}, need {v['qty']}",
+                    "error": (
+                        f"Insufficient available qty for lot {v['buy_date_str']}: "
+                        f"has {avail}, need {requested_for_lot[lot_id]}"
+                    ),
                 }), 400
 
         inserted = 0

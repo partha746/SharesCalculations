@@ -11,7 +11,8 @@ import sys
 
 _BACKEND_DIR = os.path.dirname(os.path.abspath(__file__))
 REPO_ROOT = os.path.dirname(os.path.dirname(_BACKEND_DIR))
-# REPO_ROOT must be sys.path[0]: helpers.DB derives the db path from sys.path[0].
+# REPO_ROOT on the path so `from helpers import ...` resolves. (The db path itself comes from
+# helpers/config.py, not from sys.path, so ordering here no longer affects which DB is used.)
 if REPO_ROOT not in sys.path:
     sys.path.insert(0, REPO_ROOT)
 # The backend dir is the script dir (already importable); ensure it stays on the path

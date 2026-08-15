@@ -4,10 +4,15 @@ The route handlers live in routes/* (blueprints); business logic in services/*;
 shared DB access in db.py; secrets/paths in helpers/config.py.
 """
 from flask import Flask
+from werkzeug.middleware.proxy_fix import ProxyFix
 
 
 def create_app():
     app = Flask(__name__)
+    # We always sit behind serve-prod.js, which forwards /api. Trust its X-Forwarded-* headers so
+    # request.url_root reflects the browser's origin (scheme + host) rather than the internal
+    # backend address — absolute URLs such as the ICICI OAuth callback are derived from it.
+    app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
     from routes.tables import bp as tables_bp
     from routes.market import bp as market_bp
     from routes.live_price import bp as live_price_bp

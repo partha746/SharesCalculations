@@ -1,11 +1,12 @@
 """/api/tax-config + /api/generate-tax-doc + /api/export-fa-a3 blueprint."""
 import os
-from datetime import date, datetime
+from datetime import datetime
 
 from flask import Blueprint, jsonify, request, send_file
 
 from services.tax_export import (
     _TAX_CONFIG_PATH, _FA_A3_COUNTRY_BY_CODE, _FA_TEMPLATE_PATH, _build_foreign_asset_rows,
+    default_assessment_year,
 )
 
 bp = Blueprint("tax", __name__)
@@ -46,9 +47,9 @@ def put_tax_config():
 def generate_tax_doc():
     """Generate the ITR foreign-asset schedule JSON from holdings data + tax_config template.
     Query param `fy` = assessment year (e.g. 2026 for AY 2026–27, FY starting 1 Apr 2025).
-    Defaults to current calendar year.
+    Defaults to the assessment year of the current Indian financial year.
     """
-    fy_year = request.args.get("fy", type=int) or date.today().year
+    fy_year = request.args.get("fy", type=int) or default_assessment_year()
     rows, _template, err = _build_foreign_asset_rows(fy_year)
     if err is not None:
         return jsonify({"error": err[0]}), err[1]
@@ -61,12 +62,12 @@ def generate_tax_doc():
 @bp.route("/api/export-fa-a3", methods=["GET"])
 def export_fa_a3():
     """Fill the FA-A3 sheet of the ClearTax Schedule FA template with holdings data and return the xlsx.
-    Query param `fy` = assessment year (defaults to current calendar year).
+    Query param `fy` = assessment year (defaults to the current Indian financial year's AY).
     """
     from io import BytesIO
     import openpyxl
 
-    fy_year = request.args.get("fy", type=int) or date.today().year
+    fy_year = request.args.get("fy", type=int) or default_assessment_year()
     keys_param = request.args.get("keys", type=str)
     selected_keys = set(k for k in keys_param.split(";;") if k) if keys_param else None
     rows, template, err = _build_foreign_asset_rows(fy_year, selected_keys=selected_keys)

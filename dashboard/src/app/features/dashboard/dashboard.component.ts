@@ -30,6 +30,14 @@ import {
   typeLabel,
 } from '../../core/utils/format.util';
 
+/**
+ * Assessment year of the current Indian financial year (Apr–Mar). The FY rolls over on 1 April,
+ * so from April the calendar year is one behind: Aug 2026 is FY 2026–27, i.e. AY 2027.
+ */
+export function currentAssessmentYear(now: Date = new Date()): number {
+  return now.getMonth() >= 3 ? now.getFullYear() + 1 : now.getFullYear();
+}
+
 /** Dashboard tabs, each mapped to a URL path segment (e.g. /holdings). */
 export type DashboardTab = 'holdings' | 'sold' | 'playground' | 'data' | 'financial' | 'networth' | 'tax' | 'icici' | 'news';
 export const DASHBOARD_TABS: readonly DashboardTab[] = ['holdings', 'sold', 'playground', 'networth', 'financial', 'news', 'icici', 'tax', 'data'];
@@ -207,15 +215,15 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
   taxDocFyLabel = '';
   taxDocLoading = false;
   taxDocError: string | null = null;
-  taxDocSelectedFy: number = new Date().getFullYear();
+  taxDocSelectedFy: number = currentAssessmentYear();
   readonly taxDocFyOptions: number[] = (() => {
-    const cur = new Date().getFullYear();
+    const cur = currentAssessmentYear();
     const opts: number[] = [];
     for (let y = cur + 1; y >= cur - 5; y--) opts.push(y);
     return opts;
   })();
   /** FA-A3 export (Holdings section): selected assessment year + in-progress flag. */
-  faExportFy: number = new Date().getFullYear();
+  faExportFy: number = currentAssessmentYear();
   faExportInProgress = false;
   faExportError: string | null = null;
   soldRows: SoldRow[] = [];
@@ -2632,14 +2640,25 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
     URL.revokeObjectURL(url);
   }
 
-  /** Lot keys (buyDate|type|qty) for the holdings currently checked — used to filter the FA-A3 export. */
+  /**
+   * Export key for one lot: buyDate|type|price|qty|totalInr, matching the backend's builder.
+   *
+   * Price and total are formatted to fixed precision so both languages produce byte-identical
+   * strings. Date+type+qty alone is not unique — two lots bought the same day with the same
+   * remaining quantity but different prices would collide and drag each other into the export.
+   */
+  private holdingExportKey(row: HoldingRow): string {
+    const date = String(row.buyDate ?? '').split('T')[0];
+    const price = (Number(row.buyPriceUsd) || 0).toFixed(4);
+    const total = Math.round(Number(row.totalPurchaseInr) || 0);
+    return `${date}|${row.type}|${price}|${row.qty}|${total}`;
+  }
+
+  /** Export keys for the holdings currently checked — used to filter the FA-A3 export. */
   private selectedHoldingLotKeys(): string[] {
     const keys: string[] = [];
     for (const r of this.holdingsFilteredSorted) {
-      if (this.selectedRowKeys.has(this.getRowKey(r))) {
-        const date = String(r.buyDate ?? '').split('T')[0];
-        keys.push(`${date}|${r.type}|${r.qty}`);
-      }
+      if (this.selectedRowKeys.has(this.getRowKey(r))) keys.push(this.holdingExportKey(r));
     }
     return keys;
   }
@@ -3767,7 +3786,22 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
 
   /** Total qty set to sell across all visible (filtered) rows. */
   get totalSellQty(): number {
-    return this.holdingsFilteredSorted.reduce((sum, r) => sum + this.getSellQty(r), 0);
+    // Sell quantities are stored per getRowKey(), so identical lots rendered as separate rows
+    // share one value — count each key once instead of once per row.
+    return this.dedupeByRowKey(this.holdingsFilteredSorted).reduce((sum, r) => sum + this.getSellQty(r), 0);
+  }
+
+  /** First row for each distinct getRowKey(), preserving order. */
+  private dedupeByRowKey(rows: HoldingRow[]): HoldingRow[] {
+    const seen = new Set<string>();
+    const out: HoldingRow[] = [];
+    for (const r of rows) {
+      const key = this.getRowKey(r);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push(r);
+    }
+    return out;
   }
 
   /** Total shares available across all visible (filtered) lots. */
@@ -3947,7 +3981,9 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
 
   /** Rows that have sell qty > 0 (for mark-as-sold payload). */
   get markSoldRows(): HoldingRow[] {
-    return this.holdingsFilteredSorted.filter((r) => this.getSellQty(r) > 0);
+    // Deduped: rows sharing a getRowKey() share one sell quantity, so emitting each of them would
+    // send the same lot twice and deduct the quantity more than once.
+    return this.dedupeByRowKey(this.holdingsFilteredSorted).filter((r) => this.getSellQty(r) > 0);
   }
 
   openMarkSoldModal(): void {
