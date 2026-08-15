@@ -287,6 +287,22 @@ export interface HoldingRow {
   taxPercent: number;
 }
 
+/** A single lot's share reservation ("earmark") for a planned sale at a target price. */
+export interface Earmark {
+  id: number;
+  batchId: string;
+  /** Frontend lot key: "buyDate|type|price|qty|total". */
+  lotKey: string;
+  qty: number;
+  priceUsd: number;
+  label: string;
+  createdAt: string;
+}
+
+export interface EarmarksResponse {
+  earmarks: Earmark[];
+}
+
 export interface SoldRow {
   sellDate: string;
   buyDate: string;

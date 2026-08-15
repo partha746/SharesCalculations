@@ -3,6 +3,82 @@
   text-align: center;
   color: #8b949e;
 }
+
+/* --- Floating quick-nav (tabs) --- */
+.tab-fab {
+  position: fixed;
+  right: 1.25rem;
+  bottom: 1.25rem;
+  z-index: 1000;
+  width: 3.25rem;
+  height: 3.25rem;
+  border-radius: 50%;
+  border: 1px solid #388bfd;
+  background: #1f6feb;
+  color: #fff;
+  font-size: 1.4rem;
+  line-height: 1;
+  cursor: pointer;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: transform 0.12s ease, background 0.12s ease;
+  &:hover { background: #388bfd; transform: translateY(-1px); }
+  &--open { background: #30363d; border-color: #484f58; }
+}
+.tab-fab__icon { pointer-events: none; }
+.tab-fab__backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 999;
+  background: transparent;
+}
+.tab-fab__menu {
+  position: fixed;
+  right: 1.25rem;
+  bottom: 4.9rem;
+  z-index: 1001;
+  min-width: 12rem;
+  background: #161b22;
+  border: 1px solid #30363d;
+  border-radius: 10px;
+  padding: 0.4rem;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+.tab-fab__menu-title {
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #8b949e;
+  padding: 0.35rem 0.6rem 0.25rem;
+}
+.tab-fab__menu-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  font: inherit;
+  font-size: 0.9rem;
+  text-align: left;
+  padding: 0.5rem 0.6rem;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: #c9d1d9;
+  cursor: pointer;
+  &:hover { background: #21262d; color: #e6edf3; }
+  &--active { color: #58a6ff; font-weight: 600; }
+}
+.tab-fab__menu-dot { font-size: 0.55rem; color: #58a6ff; }
+
+@media (max-width: 480px) {
+  .tab-fab { right: 0.9rem; bottom: 0.9rem; width: 3rem; height: 3rem; }
+  .tab-fab__menu { right: 0.9rem; bottom: 4.4rem; }
+}
 .dashboard-error {
   padding: 2rem;
   text-align: center;
@@ -20,6 +96,50 @@
 }
 .retry-btn:hover {
   background: #21262d;
+}
+.retry-btn--sm {
+  padding: 0.2rem 0.6rem;
+  font-size: 0.8rem;
+}
+
+/* Subtle inline "Refreshing…" pill shown during background reloads (page stays visible). */
+.dashboard-refreshing {
+  position: fixed;
+  top: 0.75rem;
+  right: 0.75rem;
+  z-index: 900;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.35rem 0.75rem;
+  font-size: 0.8rem;
+  color: #c9d1d9;
+  background: rgba(22, 27, 34, 0.92);
+  border: 1px solid #30363d;
+  border-radius: 999px;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.35);
+  backdrop-filter: blur(4px);
+}
+.dashboard-refreshing__spinner {
+  display: inline-block;
+  animation: dashboard-spin 0.8s linear infinite;
+}
+@keyframes dashboard-spin {
+  to { transform: rotate(360deg); }
+}
+/* Non-blocking error banner when a refresh fails but existing data is still shown. */
+.dashboard-refresh-error {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin: 0 0 0.75rem;
+  padding: 0.5rem 0.85rem;
+  font-size: 0.85rem;
+  color: #ffb4ac;
+  background: rgba(248, 81, 73, 0.12);
+  border: 1px solid rgba(248, 81, 73, 0.4);
+  border-radius: 8px;
 }
 .section-title {
   font-size: 1rem;
@@ -1759,6 +1879,15 @@ details[open] > .icici-setup__summary::before { content: '⌄ '; }
     letter-spacing: 0.03em;
     color: #8b949e;
   }
+  .playground-multi-table__filter th {
+    padding: 0.25rem 0.4rem;
+    background: #0d1117;
+  }
+  .playground-multi-table__filter .holdings-table__filter-input {
+    width: 100%;
+    min-width: 3.5rem;
+    box-sizing: border-box;
+  }
   .playground-multi-table__row--selected {
     background: rgba(56, 139, 253, 0.07);
   }
@@ -1916,6 +2045,128 @@ details[open] > .icici-setup__summary::before { content: '⌄ '; }
   color: #8b949e;
   margin-left: 0.25rem;
 }
+
+/* --- Earmarks --- */
+.earmark-bar {
+  background: #161b22;
+  border: 1px solid #30363d;
+  border-radius: 8px;
+  padding: 0.75rem 0.9rem;
+  margin-bottom: 0.75rem;
+}
+.earmark-bar__head {
+  display: flex;
+  align-items: baseline;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.6rem;
+}
+.earmark-bar__title { font-size: 0.9rem; font-weight: 600; color: #e6edf3; }
+.earmark-bar__hint { font-size: 0.78rem; color: #8b949e; }
+.earmark-bar__fields {
+  display: flex;
+  align-items: flex-end;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+}
+.earmark-bar__field { display: flex; flex-direction: column; gap: 0.25rem; }
+.earmark-bar__field--grow { flex: 1 1 160px; min-width: 140px; }
+.earmark-bar__label {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: #8b949e;
+}
+.earmark-bar__input {
+  font: inherit;
+  font-size: 0.85rem;
+  padding: 0.4rem 0.55rem;
+  background: #0d1117;
+  border: 1px solid #30363d;
+  border-radius: 6px;
+  color: #e6edf3;
+  width: 8rem;
+  &:focus { outline: none; border-color: #58a6ff; }
+  &:disabled { opacity: 0.6; }
+}
+.earmark-bar__field--grow .earmark-bar__input { width: 100%; }
+.earmark-bar__btn {
+  font: inherit;
+  font-size: 0.85rem;
+  font-weight: 500;
+  padding: 0.45rem 1rem;
+  border-radius: 6px;
+  background: #1f6feb;
+  color: #fff;
+  border: 1px solid #388bfd;
+  cursor: pointer;
+  &:hover:not(:disabled) { background: #388bfd; }
+  &:disabled { opacity: 0.5; cursor: not-allowed; }
+}
+.earmark-bar__status { font-size: 0.78rem; color: #8b949e; align-self: center; }
+.earmark-bar__error { margin: 0.5rem 0 0; font-size: 0.8rem; color: #f85149; }
+
+.earmark-summary {
+  background: #12171f;
+  border: 1px solid #21262d;
+  border-radius: 8px;
+  padding: 0.65rem 0.9rem;
+  margin-bottom: 0.75rem;
+}
+.earmark-summary__head {
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #8b949e;
+  font-weight: 600;
+  margin-bottom: 0.5rem;
+}
+.earmark-summary__total { color: #58a6ff; text-transform: none; letter-spacing: 0; }
+.earmark-summary__list { display: flex; flex-direction: column; gap: 0.4rem; }
+.earmark-summary__row {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+}
+.earmark-summary__chip {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: #e6edf3;
+  background: rgba(31, 111, 235, 0.15);
+  border: 1px solid rgba(56, 139, 253, 0.4);
+  border-radius: 999px;
+  padding: 0.15rem 0.6rem;
+}
+.earmark-summary__label { font-size: 0.82rem; color: #c9d1d9; }
+.earmark-summary__meta { font-size: 0.78rem; color: #8b949e; }
+.earmark-summary__del {
+  margin-left: auto;
+  width: 20px;
+  height: 20px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 50%;
+  background: #21262d;
+  color: #8b949e;
+  cursor: pointer;
+  &:hover { background: #f85149; color: #fff; }
+}
+
+.holdings-table__cell--earmark { white-space: nowrap; }
+.earmark-chip {
+  display: inline-block;
+  font-size: 0.75rem;
+  color: #a5d6ff;
+  background: rgba(31, 111, 235, 0.15);
+  border: 1px solid rgba(56, 139, 253, 0.35);
+  border-radius: 4px;
+  padding: 0.05rem 0.35rem;
+  margin: 0.1rem 0.15rem 0.1rem 0;
+}
+.earmark-chip--none { color: #6e7681; }
 .holdings-table-wrap {
   overflow-x: auto;
   overflow-y: visible;

@@ -6,6 +6,8 @@ import {
   BreezeStatusAllResponse,
   BreezeStatusResponse,
   DashboardResponse,
+  Earmark,
+  EarmarksResponse,
   HoldingRow,
   LivePriceHistoryPoint,
   LivePriceResponse,
@@ -150,6 +152,32 @@ export class DashboardService {
 
   postBreezeDisconnect(acct: string = '1'): Observable<{ success: boolean }> {
     return this.http.post<{ success: boolean }>(`${this.apiUrl}/breeze/disconnect/${acct}`, {});
+  }
+
+  // --- Financial planning: save/load the planner snapshot ---
+  getFinancePlan(): Observable<{ plan: Record<string, unknown> | null; updatedAt: string | null }> {
+    return this.http.get<{ plan: Record<string, unknown> | null; updatedAt: string | null }>(`${this.apiUrl}/finance-plan?t=${Date.now()}`);
+  }
+
+  saveFinancePlan(data: Record<string, unknown>): Observable<{ ok: boolean; updatedAt: string }> {
+    return this.http.post<{ ok: boolean; updatedAt: string }>(`${this.apiUrl}/finance-plan`, { data });
+  }
+
+  // --- Earmarks: shares reserved for a planned sale at a target price ---
+  getEarmarks(): Observable<EarmarksResponse> {
+    return this.http.get<EarmarksResponse>(`${this.apiUrl}/earmarks?t=${Date.now()}`);
+  }
+
+  addEarmarks(payload: { priceUsd: number; label?: string; allocations: Array<{ lotKey: string; qty: number }> }): Observable<{ batchId: string; count: number }> {
+    return this.http.post<{ batchId: string; count: number }>(`${this.apiUrl}/earmarks`, payload);
+  }
+
+  deleteEarmarkBatch(batchId: string): Observable<{ ok: boolean; deleted: number }> {
+    return this.http.delete<{ ok: boolean; deleted: number }>(`${this.apiUrl}/earmarks/batch/${batchId}`);
+  }
+
+  deleteEarmark(id: number): Observable<{ ok: boolean }> {
+    return this.http.delete<{ ok: boolean }>(`${this.apiUrl}/earmarks/${id}`);
   }
 
   /** Add a custom Breeze account (stored in the DB). */

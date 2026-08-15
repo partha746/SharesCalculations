@@ -1,11 +1,22 @@
-@if (loading) {
+@if (loading && !data) {
   <div class="dashboard-loading">Loading dashboard…</div>
-} @else if (error) {
+} @else if (error && !data) {
   <div class="dashboard-error">
     <p>{{ error }}</p>
     <button type="button" class="retry-btn" (click)="load()">Retry</button>
   </div>
 } @else if (data) {
+  @if (loading) {
+    <div class="dashboard-refreshing" role="status" aria-live="polite">
+      <span class="dashboard-refreshing__spinner">↻</span> Refreshing…
+    </div>
+  }
+  @if (error) {
+    <div class="dashboard-refresh-error" role="alert">
+      <span>{{ error }}</span>
+      <button type="button" class="retry-btn retry-btn--sm" (click)="load()">Retry</button>
+    </div>
+  }
   <section class="dashboard-section">
     <h2 class="section-title">Overview</h2>
     <div class="stat-grid stat-grid--primary">
@@ -404,7 +415,7 @@
     }
     @if (activeTab === 'financial') {
       <div class="financial-planning-tab">
-        <app-financial-planning [dashboardNetInBankIfSellNow]="data.netInBankIfSellNow" />
+        <app-financial-planning [dashboardNetInBankIfSellNow]="data.netInBankIfSellNow" (refreshNvidiaNet)="onRefreshNvidiaNetForFinancial()" />
       </div>
     }
     @if (activeTab === 'icici') {
@@ -828,6 +839,9 @@
         <div class="playground-multi-actions">
           <button type="button" class="export-btn" (click)="playMultiSelectAllVisible()">Select all visible lots</button>
           <button type="button" class="export-btn" (click)="playMultiClearSelection()">Clear selection</button>
+          <button type="button" class="export-btn" [disabled]="holdingsSelectionCount === 0" (click)="seedPlayMultiFromHoldings(true)" title="Use the lots selected on the Holdings tab">
+            Copy Holdings selection ({{ holdingsSelectionCount }})
+          </button>
           <span class="playground-multi-meta">USD→INR: ₹ {{ formatPlayNum(playUsdToInr, 2) }}</span>
         </div>
         <p class="holdings-table__hint playground-multi-tax-hint">
@@ -841,11 +855,11 @@
             <thead>
               <tr class="holdings-table__header">
                 <th></th>
-                <th>Type</th>
-                <th>Buy date</th>
-                <th [attr.title]="playMultiBuyColumnTitle">Buy $</th>
-                <th>Max</th>
-                <th>Qty sim</th>
+                <th class="holdings-table__th--sortable" (click)="setPlayMultiSort('type')">Type {{ playMultiSortIndicator('type') }}</th>
+                <th class="holdings-table__th--sortable" (click)="setPlayMultiSort('buyDate')">Buy date {{ playMultiSortIndicator('buyDate') }}</th>
+                <th class="holdings-table__th--sortable" [attr.title]="playMultiBuyColumnTitle" (click)="setPlayMultiSort('buyPriceUsd')">Buy $ {{ playMultiSortIndicator('buyPriceUsd') }}</th>
+                <th class="holdings-table__th--sortable" (click)="setPlayMultiSort('qty')">Max {{ playMultiSortIndicator('qty') }}</th>
+                <th class="holdings-table__th--sortable" (click)="setPlayMultiSort('qtySim')">Qty sim {{ playMultiSortIndicator('qtySim') }}</th>
                 @for (sc of playMultiScenarioList; track sc.key; let si = $index) {
                   <th [attr.colspan]="3" class="playground-multi-table__scenario-head">
                     <div class="playground-multi-table__scenario-head-inner">
@@ -870,15 +884,26 @@
               </tr>
               <tr class="holdings-table__header playground-multi-table__subhead">
                 <th colspan="6"></th>
+                @for (sc of playMultiScenarioList; track sc.key; let si = $index) {
+                  <th class="holdings-table__th--sortable" (click)="setPlayMultiSort('sc:' + si + ':value')">Value ₹ {{ playMultiSortIndicator('sc:' + si + ':value') }}</th>
+                  <th class="holdings-table__th--sortable" (click)="setPlayMultiSort('sc:' + si + ':tax')">Tax ₹ {{ playMultiSortIndicator('sc:' + si + ':tax') }}</th>
+                  <th class="holdings-table__th--sortable" (click)="setPlayMultiSort('sc:' + si + ':net')">Net ₹ {{ playMultiSortIndicator('sc:' + si + ':net') }}</th>
+                }
+              </tr>
+              <tr class="holdings-table__filter playground-multi-table__filter">
+                <th></th>
+                <th><input type="text" [(ngModel)]="playMultiFilter['type']" placeholder="Filter…" class="holdings-table__filter-input" /></th>
+                <th><input type="text" [(ngModel)]="playMultiFilter['buyDate']" placeholder="Filter…" class="holdings-table__filter-input" /></th>
+                <th><input type="text" [(ngModel)]="playMultiFilter['buyPriceUsd']" placeholder="Filter…" class="holdings-table__filter-input" /></th>
+                <th><input type="text" [(ngModel)]="playMultiFilter['qty']" placeholder="Filter…" class="holdings-table__filter-input" /></th>
+                <th><input type="text" [(ngModel)]="playMultiFilter['qtySim']" placeholder="Filter…" class="holdings-table__filter-input" /></th>
                 @for (sc of playMultiScenarioList; track sc.key) {
-                  <th>Value ₹</th>
-                  <th>Tax ₹</th>
-                  <th>Net ₹</th>
+                  <th colspan="3"></th>
                 }
               </tr>
             </thead>
             <tbody>
-              @for (row of holdingsFilteredSorted; track getRowKey(row)) {
+              @for (row of playMultiRowsView; track getRowKey(row)) {
                 <tr [class.playground-multi-table__row--selected]="isPlayMultiSelected(row)">
                   <td>
                     <input type="checkbox" [checked]="isPlayMultiSelected(row)" (change)="togglePlayMultiRow(row)" [attr.aria-label]="'Select lot ' + getRowKey(row)" />
@@ -1183,12 +1208,57 @@
       </div>
     }
     <p class="holdings-table__hint">Drag column headers to reorder; order is saved. Select rows and set sell qty to see totals above.</p>
+
+    <div class="earmark-bar">
+      <div class="earmark-bar__head">
+        <span class="earmark-bar__title">Earmark shares for sale</span>
+        <span class="earmark-bar__hint">Select lots below, enter a total qty &amp; target price, then earmark.</span>
+      </div>
+      <div class="earmark-bar__fields">
+        <label class="earmark-bar__field">
+          <span class="earmark-bar__label">Shares</span>
+          <input type="number" min="1" step="1" class="earmark-bar__input" [(ngModel)]="earmarkQty" placeholder="qty" [disabled]="earmarkSaving" />
+        </label>
+        <label class="earmark-bar__field">
+          <span class="earmark-bar__label">Target price (USD)</span>
+          <input type="number" min="0" step="0.01" class="earmark-bar__input" [(ngModel)]="earmarkPriceUsd" placeholder="e.g. 200" [disabled]="earmarkSaving" />
+        </label>
+        <label class="earmark-bar__field earmark-bar__field--grow">
+          <span class="earmark-bar__label">Label (optional)</span>
+          <input type="text" class="earmark-bar__input" [(ngModel)]="earmarkLabel" placeholder="e.g. Q3 target" [disabled]="earmarkSaving" />
+        </label>
+        <button type="button" class="earmark-bar__btn" [disabled]="earmarkSaving || earmarkTargetRows.length === 0" (click)="createEarmark()">
+          {{ earmarkSaving ? 'Saving…' : 'Earmark selected' }}
+        </button>
+        <span class="earmark-bar__status">{{ earmarkTargetRows.length }} lot(s) selected · {{ earmarkSelectableCapacity }} free</span>
+      </div>
+      @if (earmarkError) { <p class="earmark-bar__error">{{ earmarkError }}</p> }
+    </div>
+
+    @if (earmarkBatches.length > 0) {
+      <div class="earmark-summary">
+        <div class="earmark-summary__head">Earmarked plans <span class="earmark-summary__total">({{ earmarkTotalQty }} shares reserved)</span></div>
+        <div class="earmark-summary__list">
+          @for (b of earmarkBatches; track b.batchId) {
+            <div class="earmark-summary__row">
+              <span class="earmark-summary__chip">{{ b.qty }} sh &#64; {{ formatUsd(b.priceUsd) }}</span>
+              @if (b.label) { <span class="earmark-summary__label">{{ b.label }}</span> }
+              <span class="earmark-summary__meta">{{ b.lots }} lot(s)</span>
+              <span class="earmark-summary__meta">≈ ₹ {{ formatInr(b.grossInr) }}</span>
+              <button type="button" class="earmark-summary__del" title="Remove earmark" (click)="deleteEarmarkBatch(b.batchId)">✕</button>
+            </div>
+          }
+        </div>
+      </div>
+    }
+
     <div class="holdings-table-wrap">
       <table class="holdings-table holdings-table--sticky-sell-cols">
         <thead>
           <tr class="holdings-table__header">
             <th class="holdings-table__th--fixed">Select</th>
             <th class="holdings-table__th--fixed">Sell qty <span class="holdings-table__total-sell">(total: {{ totalSellQty }} · remaining: {{ totalSellRemaining }})</span></th>
+            <th class="holdings-table__th--fixed">Earmarked @if (earmarkTotalQty > 0) { <span class="holdings-table__total-sell">(total: {{ earmarkTotalQty }})</span> }</th>
             @for (colKey of holdingsColumnOrder; track colKey; let i = $index) {
               <th
                 class="holdings-table__th--sortable holdings-table__th--draggable"
@@ -1206,6 +1276,7 @@
               <button type="button" class="holdings-table__action-btn" (click)="selectAllVisible()">Select all</button>
               <button type="button" class="holdings-table__action-btn" (click)="deselectAllVisible()">Deselect all</button>
             </th>
+            <th></th>
             <th></th>
             @for (colKey of holdingsColumnOrder; track colKey) {
               <th><input type="text" [(ngModel)]="holdingsFilter[colKey]" placeholder="Filter…" class="holdings-table__filter-input" /></th>
@@ -1226,12 +1297,19 @@
                 <input type="text" inputmode="numeric" [value]="getSellQty(row)" (input)="onSellQtyInput(row, $event)" (focus)="onSellQtyFocus($event)" [attr.max]="row.qty" placeholder="0" class="holdings-table__sellqty-input" aria-label="Sell qty" />
                 <span class="holdings-table__sellqty-max">/ {{ row.qty }}</span>
               </td>
+              <td class="holdings-table__cell--earmark">
+                @for (e of earmarksForLot(row); track e.id) {
+                  <span class="earmark-chip" [title]="e.label || ('Earmarked ' + e.qty + ' @ ' + formatUsd(e.priceUsd))">{{ e.qty }} &#64; {{ formatUsd(e.priceUsd) }}</span>
+                } @empty {
+                  <span class="earmark-chip--none">—</span>
+                }
+              </td>
               @for (colKey of holdingsColumnOrder; track colKey) {
                 <td>{{ formatCell(row, colKey) }}</td>
               }
             </tr>
           } @empty {
-            <tr><td [attr.colspan]="holdingsColumnOrder.length + 2" class="holdings-table__empty">No holdings or no rows match the filter.</td></tr>
+            <tr><td [attr.colspan]="holdingsColumnOrder.length + 3" class="holdings-table__empty">No holdings or no rows match the filter.</td></tr>
           }
         </tbody>
       </table>
@@ -1387,4 +1465,21 @@
       </div>
     </div>
   }
+
+  <!-- Floating quick-nav: always-visible button (bottom-right) to jump to any tab -->
+  @if (showTabMenu) {
+    <div class="tab-fab__backdrop" (click)="showTabMenu = false"></div>
+    <div class="tab-fab__menu" role="menu">
+      <div class="tab-fab__menu-title">Go to tab</div>
+      @for (t of tabNavItems; track t.id) {
+        <button type="button" class="tab-fab__menu-item" [class.tab-fab__menu-item--active]="activeTab === t.id" (click)="goToTab(t.id)" role="menuitem">
+          {{ t.label }}
+          @if (activeTab === t.id) { <span class="tab-fab__menu-dot">●</span> }
+        </button>
+      }
+    </div>
+  }
+  <button type="button" class="tab-fab" [class.tab-fab--open]="showTabMenu" (click)="toggleTabMenu()" [attr.aria-expanded]="showTabMenu" aria-label="Quick navigation to tabs" title="Go to tabs">
+    <span class="tab-fab__icon">{{ showTabMenu ? '✕' : '☰' }}</span>
+  </button>
 }

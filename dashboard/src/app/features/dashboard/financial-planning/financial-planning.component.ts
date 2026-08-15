@@ -1,6 +1,8 @@
-import { Component, Input } from '@angular/core';
+import { ChangeDetectorRef, Component, EventEmitter, Input, OnChanges, OnInit, Output, SimpleChanges } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
+import { DashboardService } from '../../../core/services/dashboard.service';
+import { IndianNumberDirective } from '../../../core/directives/indian-number.directive';
 import {
   FinancialRequirement,
   FinancialSimRow,
@@ -11,6 +13,21 @@ import {
   YearlyExpenseStream,
   YearlyIncomeStream,
 } from './financial-planning.types';
+
+/** Editable planner fields that get persisted (a snapshot of user inputs). */
+const FINANCE_PLAN_SCALAR_KEYS = [
+  'currentAge', 'retirementAge', 'lifeExpectancy',
+  'inflationPct', 'capitalGainsTaxPct', 'incomeTaxPct',
+  'startingCashSavingsInr', 'startingIndianMarketInr', 'nvidiaNetIfSellInr',
+  'percentKeepInNvidia', 'nvidiaGrowthPct',
+  'postRetirementMonthlyTodaysInr', 'stepUpSavingsPct',
+  'useComputedAnnualContribution', 'manualAnnualContributionInr',
+] as const;
+const FINANCE_PLAN_ARRAY_KEYS = [
+  'incomeStreams', 'rentalStreams', 'yearlyIncomeStreams',
+  'expenseStreams', 'yearlyExpenseStreams',
+  'workingPortfolio', 'retiredPortfolio', 'requirements',
+] as const;
 
 /** Normalize shares to sum to 1 without mutating inputs */
 function normalizedShareWeights(buckets: PortfolioBucket[]): number[] {
@@ -110,13 +127,98 @@ function estateCroresHeadline(inr: number): { croresRounded: number; words: stri
 @Component({
   selector: 'app-financial-planning',
   standalone: true,
-  imports: [CommonModule, FormsModule],
+  imports: [CommonModule, FormsModule, IndianNumberDirective],
   templateUrl: './financial-planning.component.html',
   styleUrl: './financial-planning.component.scss',
 })
-export class FinancialPlanningComponent {
+export class FinancialPlanningComponent implements OnChanges, OnInit {
   /** Dashboard Overview “In bank if you sell now”; optional one-click fill for NVIDIA net field */
   @Input() dashboardNetInBankIfSellNow: number | null = null;
+
+  constructor(private dashboardService: DashboardService, private cdr: ChangeDetectorRef) {}
+
+  // --- Save / load plan ---
+  planSaving = false;
+  planLoading = false;
+  planSavedAt: string | null = null;
+  planSaveError: string | null = null;
+  /** Transient "Saved ✓" flag after a successful save. */
+  planJustSaved = false;
+
+  ngOnInit(): void {
+    this.loadPlan();
+  }
+
+  private loadPlan(): void {
+    this.planLoading = true;
+    this.dashboardService.getFinancePlan().subscribe({
+      next: (res) => {
+        if (res?.plan) this.applyPlanState(res.plan);
+        this.planSavedAt = res?.updatedAt ?? null;
+        this.planLoading = false;
+        this.cdr.markForCheck();
+      },
+      error: () => {
+        this.planLoading = false;
+        this.cdr.markForCheck();
+      },
+    });
+  }
+
+  savePlan(): void {
+    this.planSaving = true;
+    this.planSaveError = null;
+    this.cdr.markForCheck();
+    this.dashboardService.saveFinancePlan(this.capturePlanState()).subscribe({
+      next: (res) => {
+        this.planSaving = false;
+        this.planSavedAt = res?.updatedAt ?? null;
+        this.planJustSaved = true;
+        setTimeout(() => { this.planJustSaved = false; this.cdr.markForCheck(); }, 2500);
+        this.cdr.markForCheck();
+      },
+      error: (err) => {
+        this.planSaving = false;
+        this.planSaveError = err?.error?.error || 'Failed to save plan.';
+        this.cdr.markForCheck();
+      },
+    });
+  }
+
+  /** Snapshot all editable planner fields for persistence. */
+  private capturePlanState(): Record<string, unknown> {
+    const self = this as unknown as Record<string, unknown>;
+    const out: Record<string, unknown> = {};
+    for (const k of FINANCE_PLAN_SCALAR_KEYS) out[k] = self[k];
+    for (const k of FINANCE_PLAN_ARRAY_KEYS) out[k] = self[k];
+    return out;
+  }
+
+  /** Restore planner fields from a saved snapshot (defensive: only apply present/valid values). */
+  private applyPlanState(plan: Record<string, unknown>): void {
+    const self = this as unknown as Record<string, unknown>;
+    for (const k of FINANCE_PLAN_SCALAR_KEYS) {
+      const v = plan[k];
+      if (v !== undefined && v !== null) self[k] = v;
+    }
+    for (const k of FINANCE_PLAN_ARRAY_KEYS) {
+      const v = plan[k];
+      if (Array.isArray(v)) self[k] = v;
+    }
+  }
+
+  /** Human-friendly "last saved" label. */
+  get planSavedLabel(): string {
+    if (!this.planSavedAt) return 'Not saved yet';
+    const d = new Date(this.planSavedAt);
+    if (isNaN(d.getTime())) return this.planSavedAt;
+    return d.toLocaleString();
+  }
+
+  /** Ask the parent to re-fetch the live price so the NVIDIA net-if-sell value refreshes. */
+  @Output() refreshNvidiaNet = new EventEmitter<void>();
+  /** True while a manual NVIDIA-net refresh is in flight (button spinner). */
+  refreshingNvidiaNet = false;
 
   /** Timeline */
   currentAge = 36;
@@ -220,7 +322,7 @@ export class FinancialPlanningComponent {
   readonly expenseCategoryOptions: ('need' | 'want')[] = ['need', 'want'];
 
   /** Yearly lump expenses; add/remove. Today’s INR, inflated like monthly expenses. */
-  yearlyExpenseStreams: YearlyExpenseStream[] = [{ id: 'ye1', label: 'Travel', yearlyTodaysInr: 500_000 }];
+  yearlyExpenseStreams: YearlyExpenseStream[] = [{ id: 'ye1', label: 'Travel', yearlyTodaysInr: 500_000, incrementPctPerYear: 0 }];
 
   workingPortfolio: PortfolioBucket[] = [
     { label: 'Fixed', returnPct: 7, taxPct: 12.5, sharePct: 30 },
@@ -258,6 +360,26 @@ export class FinancialPlanningComponent {
   applyDashboardNvidiaNet(): void {
     const v = this.dashboardNetInBankIfSellNow;
     if (v != null && Number.isFinite(v) && v > 0) this.nvidiaNetIfSellInr = Math.round(v);
+  }
+
+  /** Manual refresh: ask the parent to re-fetch the live price; the new value is applied on arrival. */
+  refreshNvidiaNetFromLive(): void {
+    this.refreshingNvidiaNet = true;
+    this.refreshNvidiaNet.emit();
+    // Fallback: stop the spinner (and apply the latest known value) even if the number didn't change.
+    setTimeout(() => {
+      if (this.refreshingNvidiaNet) {
+        this.applyDashboardNvidiaNet();
+        this.refreshingNvidiaNet = false;
+      }
+    }, 6000);
+  }
+
+  ngOnChanges(changes: SimpleChanges): void {
+    if (changes['dashboardNetInBankIfSellNow'] && this.refreshingNvidiaNet) {
+      this.applyDashboardNvidiaNet();
+      this.refreshingNvidiaNet = false;
+    }
   }
 
   formatInr(n: number): string {
@@ -444,11 +566,28 @@ export class FinancialPlanningComponent {
     return this.yearlyExpenseStreams.reduce((a, st) => a + (Number.isFinite(st.yearlyTodaysInr) ? Math.max(0, st.yearlyTodaysInr) : 0), 0);
   }
 
+  /**
+   * One yearly-expense stream's nominal ₹ in simulation year y.
+   * incrementPctPerYear is the TOTAL nominal annual growth. If 0, the expense grows with global
+   * inflation only (real value preserved); if > 0, it grows at that rate per year from year 0.
+   */
+  yearlyExpenseStreamNominal(y: number, st: YearlyExpenseStream): number {
+    const base = Math.max(0, st.yearlyTodaysInr);
+    const inc = Math.max(0, st.incrementPctPerYear) / 100;
+    if (inc <= 0) return base * this.inflFactor(y);
+    return base * Math.pow(1 + inc, y);
+  }
+
+  /** Sum of all yearly lump expenses at their nominal value in simulation year y. */
+  yearlyLumpyExpenseNominalTotalForYear(y: number): number {
+    return this.yearlyExpenseStreams.reduce((a, st) => a + this.yearlyExpenseStreamNominal(y, st), 0);
+  }
+
   addYearlyExpenseStream(): void {
     const n = this.yearlyExpenseStreams.length + 1;
     this.yearlyExpenseStreams = [
       ...this.yearlyExpenseStreams,
-      { id: `yl-${Date.now()}`, label: `Yearly expense ${n}`, yearlyTodaysInr: 0 },
+      { id: `yl-${Date.now()}`, label: `Yearly expense ${n}`, yearlyTodaysInr: 0, incrementPctPerYear: 0 },
     ];
   }
 
@@ -489,7 +628,7 @@ export class FinancialPlanningComponent {
     const coreM = this.monthlyIncomeNominalTotalForYear(y);
     const rentM = this.rentalMonthlyNominalTotalForYear(y);
     const yearlyInc = (coreM + rentM) * 12 + this.totalYearlyExtraIncomeInr * f;
-    const yearlyExp = this.monthlyExpenseNominalTotalForYear(y) * 12 + this.totalYearlyLumpyExpenseInr * f;
+    const yearlyExp = this.monthlyExpenseNominalTotalForYear(y) * 12 + this.yearlyLumpyExpenseNominalTotalForYear(y);
     return yearlyInc - yearlyExp;
   }
 

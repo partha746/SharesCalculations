@@ -1,5 +1,21 @@
 <div class="fp-root">
   @let estate = endOfLifeEstate;
+
+  <div class="fp-savebar">
+    <div class="fp-savebar__status">
+      @if (planJustSaved) {
+        <span class="fp-savebar__saved">Saved ✓</span>
+      } @else if (planSaveError) {
+        <span class="fp-savebar__error">{{ planSaveError }}</span>
+      } @else {
+        <span class="fp-savebar__meta">Last saved: {{ planSavedLabel }}</span>
+      }
+    </div>
+    <button type="button" class="fp-save-btn" (click)="savePlan()" [disabled]="planSaving">
+      {{ planSaving ? 'Saving…' : 'Save plan' }}
+    </button>
+  </div>
+
   <header class="fp-hero" aria-label="Estate at end of life">
     <p class="fp-hero-kicker">End of plan snapshot · age {{ lifeExpectancy }}</p>
     <div class="fp-hero-grid">
@@ -80,7 +96,7 @@
           @for (st of incomeStreams; track st.id) {
             <tr>
               <td><input type="text" class="fp-input fp-input--wide" [(ngModel)]="st.label" /></td>
-              <td><input type="number" min="0" class="fp-input fp-input--green fp-input--wide" [(ngModel)]="st.monthlyTodaysInr" /></td>
+              <td><input type="text" inputmode="numeric" appIndianNumber class="fp-input fp-input--green fp-input--wide" [(ngModel)]="st.monthlyTodaysInr" /></td>
               <td>
                 <input
                   type="number"
@@ -118,7 +134,7 @@
           @for (st of rentalStreams; track st.id) {
             <tr>
               <td><input type="text" class="fp-input fp-input--wide" [(ngModel)]="st.label" /></td>
-              <td><input type="number" min="0" class="fp-input fp-input--green fp-input--wide" [(ngModel)]="st.monthlyTodaysInr" /></td>
+              <td><input type="text" inputmode="numeric" appIndianNumber class="fp-input fp-input--green fp-input--wide" [(ngModel)]="st.monthlyTodaysInr" /></td>
               <td><input type="number" min="0" class="fp-input fp-input--green fp-input--end-yrs" [(ngModel)]="st.startsInYears" title="Plan year index when rent begins (0 = first year)" /></td>
               <td><input type="number" min="0" step="0.1" class="fp-input fp-input--green" [(ngModel)]="st.incrementPctPerYear" title="Total nominal annual growth rate on this stream from its start year; 0 = grows with inflation only" /></td>
               <td>
@@ -179,7 +195,7 @@
           @for (st of yearlyIncomeStreams; track st.id) {
             <tr>
               <td><input type="text" class="fp-input fp-input--wide" [(ngModel)]="st.label" /></td>
-              <td><input type="number" min="0" class="fp-input fp-input--green fp-input--wide" [(ngModel)]="st.yearlyTodaysInr" /></td>
+              <td><input type="text" inputmode="numeric" appIndianNumber class="fp-input fp-input--green fp-input--wide" [(ngModel)]="st.yearlyTodaysInr" /></td>
               <td>
                 <button type="button" class="fp-btn-remove" (click)="removeYearlyIncomeStream(st.id)">Remove</button>
               </td>
@@ -226,7 +242,7 @@
           @for (st of expenseStreams; track st.id) {
             <tr>
               <td><input type="text" class="fp-input fp-input--wide" [(ngModel)]="st.label" /></td>
-              <td><input type="number" min="0" class="fp-input fp-input--green fp-input--wide" [(ngModel)]="st.monthlyTodaysInr" /></td>
+              <td><input type="text" inputmode="numeric" appIndianNumber class="fp-input fp-input--green fp-input--wide" [(ngModel)]="st.monthlyTodaysInr" /></td>
               <td>
                 <select class="fp-select" [(ngModel)]="st.category">
                   @for (c of expenseCategoryOptions; track c) {
@@ -257,13 +273,14 @@
     <button type="button" class="fp-btn-add" (click)="addExpenseStream()">+ Add expense</button>
 
     <h3 class="fp-subtitle">Yearly expenses</h3>
-    <p class="fp-muted fp-hint">Lump sums in today’s ₹ (travel, insurance, etc.); inflated like monthly expenses.</p>
+    <p class="fp-muted fp-hint">Lump sums in today’s ₹ (travel, insurance, etc.). Set an <strong>increase %/yr</strong> per row for its own nominal growth; leave 0 to grow with global inflation.</p>
     <div class="fp-table-scroll">
       <table class="fp-table fp-table--yearly-streams">
         <thead>
           <tr>
             <th>Label</th>
             <th>Yearly ₹</th>
+            <th title="Total nominal annual growth for this line; 0 = follow global inflation">Increase %/yr</th>
             <th></th>
           </tr>
         </thead>
@@ -271,15 +288,16 @@
           @for (st of yearlyExpenseStreams; track st.id) {
             <tr>
               <td><input type="text" class="fp-input fp-input--wide" [(ngModel)]="st.label" /></td>
-              <td><input type="number" min="0" class="fp-input fp-input--green fp-input--wide" [(ngModel)]="st.yearlyTodaysInr" /></td>
+              <td><input type="text" inputmode="numeric" appIndianNumber class="fp-input fp-input--green fp-input--wide" [(ngModel)]="st.yearlyTodaysInr" /></td>
+              <td><input type="number" min="0" step="0.5" class="fp-input fp-input--green" [(ngModel)]="st.incrementPctPerYear" title="0 = grows with global inflation; otherwise this % per year" /></td>
               <td>
                 <button type="button" class="fp-btn-remove" (click)="removeYearlyExpenseStream(st.id)">Remove</button>
               </td>
             </tr>
           }
           <tr class="fp-row-total">
-            <td>Yearly lump-sum total</td>
-            <td colspan="2">₹ {{ formatInr(totalYearlyLumpyExpenseInr) }}</td>
+            <td>Yearly lump-sum total (today’s ₹)</td>
+            <td colspan="3">₹ {{ formatInr(totalYearlyLumpyExpenseInr) }}</td>
           </tr>
         </tbody>
       </table>
@@ -313,10 +331,17 @@
       Starting money is <strong>cash + Indian market + NVIDIA (net if sell)</strong>. <strong>% keep in NVIDIA</strong> splits the starting corpus: the <strong>kept</strong> slice grows at <strong>NVIDIA growth %</strong> (below); <strong>cash + Indian + the sold NVDA portion</strong> grow with your working/retired portfolio mix. Surplus while earning is added to that mix. The <strong>total</strong> below is what the year-by-year table uses.
     </p>
     <div class="fp-grid fp-grid--savings">
-      <label>Cash / liquid savings (INR) <input type="number" min="0" class="fp-input fp-input--green fp-input--wide" [(ngModel)]="startingCashSavingsInr" /></label>
-      <label>Indian market investments (INR) <input type="number" min="0" class="fp-input fp-input--green fp-input--wide" [(ngModel)]="startingIndianMarketInr" /></label>
+      <label>Cash / liquid savings (INR) <input type="text" inputmode="numeric" appIndianNumber class="fp-input fp-input--green fp-input--wide" [(ngModel)]="startingCashSavingsInr" /></label>
+      <label>Indian market investments (INR) <input type="text" inputmode="numeric" appIndianNumber class="fp-input fp-input--green fp-input--wide" [(ngModel)]="startingIndianMarketInr" /></label>
       <div class="fp-field fp-field--nvidia">
-        <label>NVIDIA — net if sell now (INR) <input type="number" min="0" class="fp-input fp-input--green fp-input--wide" [(ngModel)]="nvidiaNetIfSellInr" title="Total NVDA position in INR after tax if liquidated today" /></label>
+        <label class="fp-field__label-row">
+          <span>NVIDIA — net if sell now (INR)</span>
+          <button type="button" class="fp-refresh-btn" (click)="refreshNvidiaNetFromLive()" [disabled]="refreshingNvidiaNet" title="Refresh from the live NVDA price (net in bank if sold now)">
+            <span class="fp-refresh-btn__icon" [class.fp-refresh-btn__icon--spin]="refreshingNvidiaNet">↻</span>
+            {{ refreshingNvidiaNet ? 'Refreshing…' : 'Refresh' }}
+          </button>
+        </label>
+        <input type="text" inputmode="numeric" appIndianNumber class="fp-input fp-input--green fp-input--wide" [(ngModel)]="nvidiaNetIfSellInr" title="Total NVDA position in INR after tax if liquidated today" />
         @if (dashboardNetInBankIfSellNow != null && dashboardNetInBankIfSellNow > 0) {
           <button type="button" class="fp-sync-overview" (click)="applyDashboardNvidiaNet()">Use Overview “In bank if you sell now” (₹ {{ formatInr(dashboardNetInBankIfSellNow) }})</button>
         }
@@ -354,7 +379,7 @@
     </table>
     <div class="fp-grid fp-grid--savings">
       <div class="fp-field fp-field--withdrawal">
-        <label>Post-retirement monthly need (today’s INR) <input type="number" min="0" class="fp-input fp-input--green fp-input--wide" [(ngModel)]="postRetirementMonthlyTodaysInr" /></label>
+        <label>Post-retirement monthly need (today’s INR) <input type="text" inputmode="numeric" appIndianNumber class="fp-input fp-input--green fp-input--wide" [(ngModel)]="postRetirementMonthlyTodaysInr" /></label>
         <div class="fp-max-withdrawal">
           <button type="button" class="fp-sync-overview" (click)="applyMaxWithdrawal()">Use max sustainable: ₹ {{ formatInr(maxSustainableMonthlyWithdrawal) }} / month</button>
           <span class="fp-muted fp-max-withdrawal-hint">Highest monthly draw (today’s ₹) that keeps portfolio ≥ 0 at age {{ lifeExpectancy }}, rounded down to ₹1,000</span>
@@ -366,7 +391,7 @@
         Use yearly excess as annual contribution while earning
       </label>
       @if (!useComputedAnnualContribution) {
-        <label>Manual annual contribution (INR) <input type="number" min="0" class="fp-input fp-input--green fp-input--wide" [(ngModel)]="manualAnnualContributionInr" /></label>
+        <label>Manual annual contribution (INR) <input type="text" inputmode="numeric" appIndianNumber class="fp-input fp-input--green fp-input--wide" [(ngModel)]="manualAnnualContributionInr" /></label>
       }
     </div>
   </section>
@@ -392,7 +417,7 @@
             <td><input type="text" class="fp-input" [(ngModel)]="req.name" /></td>
             <td><input type="number" min="0" class="fp-input fp-input--green" [(ngModel)]="req.yearsFromNow" /></td>
             <td><input type="number" min="1" class="fp-input fp-input--green" [(ngModel)]="req.durationYears" /></td>
-            <td><input type="number" min="0" class="fp-input fp-input--green fp-input--wide" [(ngModel)]="req.yearlyAmountTodaysInr" /></td>
+            <td><input type="text" inputmode="numeric" appIndianNumber class="fp-input fp-input--green fp-input--wide" [(ngModel)]="req.yearlyAmountTodaysInr" /></td>
             <td><button type="button" class="fp-btn-remove" (click)="removeRequirement(req.id)">Remove</button></td>
           </tr>
         }

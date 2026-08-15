@@ -73,9 +73,11 @@ export interface YearlyIncomeStream {
   yearlyTodaysInr: number;
 }
 
-/** Yearly lump expense (travel etc.), today’s INR; inflated each year */
+/** Yearly lump expense (travel etc.), today’s INR. */
 export interface YearlyExpenseStream {
   id: string;
   label: string;
   yearlyTodaysInr: number;
+  /** Total nominal annual growth rate % (0 = grows with global inflation only; N = N% per year). */
+  incrementPctPerYear: number;
 }

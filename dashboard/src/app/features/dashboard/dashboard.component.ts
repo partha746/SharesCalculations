@@ -41,6 +41,7 @@ import {
   BreezePortfolioHoldingsTotals,
   BreezePortfolioSortCol,
   DashboardResponse,
+  Earmark,
   HoldingRow,
   IciciCombinedRow,
   IciciSortCol,
@@ -135,6 +136,18 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
   selectedRowKeys = new Set<string>();
   /** Sell qty per row key (qty to sell from that lot; used for simulation). */
   rowSellQty: Record<string, number> = {};
+
+  // --- Earmarks: shares reserved for a planned sale at a target price ---
+  earmarks: Earmark[] = [];
+  earmarksLoading = false;
+  /** Total qty to earmark across the selected lots. */
+  earmarkQty: number | null = null;
+  /** Target sell price (USD) for the new earmark. */
+  earmarkPriceUsd: number | null = null;
+  /** Optional label to identify the earmark plan. */
+  earmarkLabel = '';
+  earmarkSaving = false;
+  earmarkError: string | null = null;
   /** Override current price (USD) for Holdings table simulation; null = use live price. */
   holdingsSimulatePriceUsd: number | null = null;
   /** Override USD→INR for Holdings table simulation; null = use dashboard rate. */
@@ -273,9 +286,14 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
   /** Playground: recommend only long-term, only short-term, or mixed (all) lots */
   playRecommendationTermFilter: 'long' | 'short' | 'mixed' = 'mixed';
 
-  /** Multi-price playground: selected lots (independent of Holdings tab). */
+  /** Multi-price playground: selected lots (seeded from Holdings selection). */
   playMultiSelectedKeys = new Set<string>();
   playMultiRowQty: Record<string, number> = {};
+  /** Per-column search for the multi-price table (base lot columns). */
+  playMultiFilter: Record<string, string> = {};
+  /** Sort state for the multi-price table (base column key or "sc:<index>:<value|tax|net>"). */
+  playMultiSortKey = '';
+  playMultiSortDir: 1 | -1 = 1;
   /** Up to five extra USD prices to compare with live (same tax slab per lot as dashboard). */
   readonly playMultiPriceSlotIndices = [0, 1, 2, 3, 4] as const;
   playMultiScenarioPrices: (number | null)[] = [null, null, null, null, null];
@@ -340,6 +358,7 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
       this.applyTab(tab);
     });
     this.load();
+    this.loadEarmarks();
     this.updateCanUndoMarkSold();
   }
 
@@ -548,6 +567,11 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
       clearInterval(this.livePricePollingInterval);
       this.livePricePollingInterval = null;
     }
+  }
+
+  /** Financial-planning tab requested a fresh NVDA net-if-sell value: re-fetch the live price. */
+  onRefreshNvidiaNetForFinancial(): void {
+    this.fetchAndPushLivePrice();
   }
 
   private fetchAndPushLivePrice(): void {
@@ -2614,6 +2638,38 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
     this.router.navigate(['/', tab]);
   }
 
+  /** Floating quick-nav (bottom-right FAB) open state. */
+  showTabMenu = false;
+
+  toggleTabMenu(): void {
+    this.showTabMenu = !this.showTabMenu;
+    this.cdr.markForCheck();
+  }
+
+  /** Tabs listed in the floating quick-nav menu. */
+  readonly tabNavItems: { id: DashboardTab; label: string }[] = [
+    { id: 'holdings', label: 'Holdings' },
+    { id: 'sold', label: 'Sold Shares' },
+    { id: 'playground', label: 'Playground' },
+    { id: 'financial', label: 'Financial planning' },
+    { id: 'news', label: 'News' },
+    { id: 'icici', label: 'ICICI Direct' },
+    { id: 'tax', label: 'Tax Config' },
+    { id: 'data', label: 'Data' },
+  ];
+
+  /** Jump to a tab from the floating menu, then scroll up so the tab bar is in view. */
+  goToTab(tab: DashboardTab): void {
+    this.showTabMenu = false;
+    this.setActiveTab(tab);
+    try {
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    } catch {
+      window.scrollTo(0, 0);
+    }
+    this.cdr.markForCheck();
+  }
+
   /** Apply a tab: set active state and run its data-load / chart lifecycle side-effects. Called from the route param subscription. */
   private applyTab(tab: DashboardTab): void {
     this.activeTab = tab;
@@ -2641,6 +2697,8 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
         this.soldChart.destroy();
         this.soldChart = null;
       }
+      // Reflect the Holdings tab selection into the playground (only when nothing picked yet there).
+      if (tab === 'playground') this.seedPlayMultiFromHoldings(false);
     } else {
       if (this.soldChart) {
         this.soldChart.destroy();
@@ -2988,7 +3046,95 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
   }
 
   get playMultiSelectedRows(): HoldingRow[] {
-    return this.holdingsFilteredSorted.filter((r) => this.playMultiSelectedKeys.has(this.getRowKey(r)));
+    return this.playMultiRowsView.filter((r) => this.playMultiSelectedKeys.has(this.getRowKey(r)));
+  }
+
+  /** Copy the Holdings-tab selection into the playground. When force=false, only seeds if empty. */
+  seedPlayMultiFromHoldings(force = false): void {
+    if (!force && this.playMultiSelectedKeys.size > 0) return;
+    const next = new Set<string>();
+    const qty: Record<string, number> = { ...this.playMultiRowQty };
+    for (const r of this.holdings) {
+      const k = this.getRowKey(r);
+      if (this.selectedRowKeys.has(k)) {
+        next.add(k);
+        const sell = this.rowSellQty[k];
+        qty[k] = typeof sell === 'number' && sell > 0 ? Math.min(sell, r.qty) : r.qty;
+      }
+    }
+    this.playMultiSelectedKeys = next;
+    this.playMultiRowQty = qty;
+    this.cdr.markForCheck();
+  }
+
+  /** How many lots are selected on the Holdings tab (for the "copy selection" button). */
+  get holdingsSelectionCount(): number {
+    return this.selectedRowKeys.size;
+  }
+
+  setPlayMultiSort(key: string): void {
+    if (this.playMultiSortKey === key) this.playMultiSortDir = this.playMultiSortDir === 1 ? -1 : 1;
+    else {
+      this.playMultiSortKey = key;
+      this.playMultiSortDir = 1;
+    }
+  }
+
+  playMultiSortIndicator(key: string): string {
+    if (this.playMultiSortKey !== key) return '';
+    return this.playMultiSortDir === 1 ? '↑' : '↓';
+  }
+
+  private playMultiCompare(a: HoldingRow, b: HoldingRow, key: string): number {
+    switch (key) {
+      case 'type':
+        return this.typeLabel(a.type).localeCompare(this.typeLabel(b.type));
+      case 'buyDate':
+        return this.parseDate(String(a.buyDate)) - this.parseDate(String(b.buyDate));
+      case 'buyPriceUsd':
+        return (a.buyPriceUsd || 0) - (b.buyPriceUsd || 0);
+      case 'qty':
+        return (a.qty || 0) - (b.qty || 0);
+      case 'qtySim':
+        return this.getPlayMultiQty(a) - this.getPlayMultiQty(b);
+      default: {
+        if (key.startsWith('sc:')) {
+          const [, siStr, field] = key.split(':');
+          const sc = this.playMultiScenarioList[parseInt(siStr, 10)];
+          if (!sc) return 0;
+          const ma = this.playMultiLotMetrics(a, sc.priceUsd);
+          const mb = this.playMultiLotMetrics(b, sc.priceUsd);
+          const fa = field === 'value' ? ma.valueInr : field === 'tax' ? ma.taxInr : ma.netInr;
+          const fb = field === 'value' ? mb.valueInr : field === 'tax' ? mb.taxInr : mb.netInr;
+          return fa - fb;
+        }
+        return 0;
+      }
+    }
+  }
+
+  /** Multi-price table rows: independent per-column search + sort over all holdings lots. */
+  get playMultiRowsView(): HoldingRow[] {
+    const f = this.playMultiFilter;
+    const has = (key: string) => (f[key] || '').trim().length > 0;
+    const hit = (val: string, key: string) => val.toLowerCase().includes((f[key] || '').trim().toLowerCase());
+    let list = this.holdings.slice();
+    if (has('type') || has('buyDate') || has('buyPriceUsd') || has('qty') || has('qtySim')) {
+      list = list.filter(
+        (r) =>
+          (!has('type') || hit(this.typeLabel(r.type), 'type')) &&
+          (!has('buyDate') || hit(this.formatDate(r.buyDate), 'buyDate')) &&
+          (!has('buyPriceUsd') || hit(this.formatUsd(r.buyPriceUsd), 'buyPriceUsd')) &&
+          (!has('qty') || hit(String(r.qty), 'qty')) &&
+          (!has('qtySim') || hit(String(this.getPlayMultiQty(r)), 'qtySim')),
+      );
+    }
+    if (this.playMultiSortKey) {
+      const key = this.playMultiSortKey;
+      const dir = this.playMultiSortDir;
+      list.sort((a, b) => dir * this.playMultiCompare(a, b, key));
+    }
+    return list;
   }
 
   getPlayMultiQty(row: HoldingRow): number {
@@ -3032,7 +3178,7 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
   playMultiSelectAllVisible(): void {
     const next = new Set(this.playMultiSelectedKeys);
     const qty = { ...this.playMultiRowQty };
-    for (const r of this.holdingsFilteredSorted) {
+    for (const r of this.playMultiRowsView) {
       const k = this.getRowKey(r);
       next.add(k);
       if (qty[k] == null) qty[k] = r.qty;
@@ -3567,6 +3713,171 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
   /** Shares that remain held after the entered sell quantities. */
   get totalSellRemaining(): number {
     return this.holdingsTotalQty - this.totalSellQty;
+  }
+
+  // ===== Earmarks =====
+
+  /** lotKey -> earmarks on that lot (rebuilt whenever the earmark list changes). */
+  private earmarksByLotKey = new Map<string, Earmark[]>();
+
+  private rebuildEarmarkIndex(): void {
+    const map = new Map<string, Earmark[]>();
+    for (const e of this.earmarks) {
+      const list = map.get(e.lotKey);
+      if (list) list.push(e);
+      else map.set(e.lotKey, [e]);
+    }
+    this.earmarksByLotKey = map;
+  }
+
+  loadEarmarks(): void {
+    this.earmarksLoading = true;
+    this.dashboardService.getEarmarks().subscribe({
+      next: (res) => {
+        this.earmarks = res.earmarks || [];
+        this.rebuildEarmarkIndex();
+        this.earmarksLoading = false;
+        this.cdr.markForCheck();
+      },
+      error: () => {
+        this.earmarksLoading = false;
+        this.cdr.markForCheck();
+      },
+    });
+  }
+
+  /** Earmarks attached to a given lot (may be several at different prices). */
+  earmarksForLot(row: HoldingRow): Earmark[] {
+    return this.earmarksByLotKey.get(this.getRowKey(row)) || [];
+  }
+
+  /** Total shares already earmarked on a lot. */
+  lotEarmarkedQty(row: HoldingRow): number {
+    return this.earmarksForLot(row).reduce((sum, e) => sum + e.qty, 0);
+  }
+
+  /** Shares on a lot still free to earmark. */
+  lotAvailableToEarmark(row: HoldingRow): number {
+    return Math.max(0, row.qty - this.lotEarmarkedQty(row));
+  }
+
+  /** Selected lots, in the current table order (target of a new earmark). */
+  get earmarkTargetRows(): HoldingRow[] {
+    return this.holdingsFilteredSorted.filter((r) => this.selectedRowKeys.has(this.getRowKey(r)));
+  }
+
+  /** Free capacity across the selected lots (how many shares can still be earmarked). */
+  get earmarkSelectableCapacity(): number {
+    return this.earmarkTargetRows.reduce((sum, r) => sum + this.lotAvailableToEarmark(r), 0);
+  }
+
+  /** Create an earmark: distribute earmarkQty across selected lots in table order, capped per lot. */
+  createEarmark(): void {
+    this.earmarkError = null;
+    const rows = this.earmarkTargetRows;
+    if (rows.length === 0) {
+      this.earmarkError = 'Select at least one lot first.';
+      this.cdr.markForCheck();
+      return;
+    }
+    const price = Number(this.earmarkPriceUsd);
+    if (!price || price <= 0) {
+      this.earmarkError = 'Enter a target price.';
+      this.cdr.markForCheck();
+      return;
+    }
+    let remaining = Math.floor(Number(this.earmarkQty) || 0);
+    if (remaining <= 0) {
+      this.earmarkError = 'Enter how many shares to earmark.';
+      this.cdr.markForCheck();
+      return;
+    }
+    const capacity = this.earmarkSelectableCapacity;
+    if (remaining > capacity) {
+      this.earmarkError = `Only ${capacity} share(s) free to earmark across the selected lots.`;
+      this.cdr.markForCheck();
+      return;
+    }
+    const allocations: Array<{ lotKey: string; qty: number }> = [];
+    for (const r of rows) {
+      if (remaining <= 0) break;
+      const free = this.lotAvailableToEarmark(r);
+      if (free <= 0) continue;
+      const take = Math.min(free, remaining);
+      allocations.push({ lotKey: this.getRowKey(r), qty: take });
+      remaining -= take;
+    }
+    if (allocations.length === 0) {
+      this.earmarkError = 'No free shares to earmark in the selected lots.';
+      this.cdr.markForCheck();
+      return;
+    }
+    this.earmarkSaving = true;
+    this.cdr.markForCheck();
+    this.dashboardService.addEarmarks({ priceUsd: price, label: this.earmarkLabel.trim(), allocations }).subscribe({
+      next: () => {
+        this.earmarkSaving = false;
+        this.earmarkQty = null;
+        this.earmarkPriceUsd = null;
+        this.earmarkLabel = '';
+        this.loadEarmarks();
+        this.cdr.markForCheck();
+      },
+      error: (err) => {
+        this.earmarkSaving = false;
+        this.earmarkError = err?.error?.error || 'Failed to save earmark.';
+        this.cdr.markForCheck();
+      },
+    });
+  }
+
+  deleteEarmarkBatch(batchId: string): void {
+    this.dashboardService.deleteEarmarkBatch(batchId).subscribe({
+      next: () => this.loadEarmarks(),
+      error: (err) => {
+        this.earmarkError = err?.error?.error || 'Failed to remove earmark.';
+        this.cdr.markForCheck();
+      },
+    });
+  }
+
+  /** Earmarks grouped into batches for the summary panel. */
+  get earmarkBatches(): Array<{
+    batchId: string;
+    label: string;
+    priceUsd: number;
+    qty: number;
+    lots: number;
+    grossUsd: number;
+    grossInr: number;
+    createdAt: string;
+  }> {
+    const rate = this.data?.usdToInrRate ?? 0;
+    const map = new Map<string, { label: string; priceUsd: number; qty: number; lots: number; createdAt: string }>();
+    for (const e of this.earmarks) {
+      const g = map.get(e.batchId);
+      if (g) {
+        g.qty += e.qty;
+        g.lots += 1;
+      } else {
+        map.set(e.batchId, { label: e.label, priceUsd: e.priceUsd, qty: e.qty, lots: 1, createdAt: e.createdAt });
+      }
+    }
+    return [...map.entries()].map(([batchId, g]) => ({
+      batchId,
+      label: g.label,
+      priceUsd: g.priceUsd,
+      qty: g.qty,
+      lots: g.lots,
+      grossUsd: g.qty * g.priceUsd,
+      grossInr: g.qty * g.priceUsd * rate,
+      createdAt: g.createdAt,
+    }));
+  }
+
+  /** Grand total of shares earmarked (all batches). */
+  get earmarkTotalQty(): number {
+    return this.earmarks.reduce((sum, e) => sum + e.qty, 0);
   }
 
   /** Rows that have sell qty > 0 (for mark-as-sold payload). */

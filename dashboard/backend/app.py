@@ -16,8 +16,10 @@ def create_app():
     from routes.breeze import bp as breeze_bp
     from routes.news import bp as news_bp
     from routes.mf import bp as mf_bp
+    from routes.earmarks import bp as earmarks_bp
+    from routes.finance_plan import bp as finance_plan_bp
 
-    for bp in (tables_bp, market_bp, live_price_bp, portfolio_bp, tax_bp, breeze_bp, news_bp, mf_bp):
+    for bp in (tables_bp, market_bp, live_price_bp, portfolio_bp, tax_bp, breeze_bp, news_bp, mf_bp, earmarks_bp, finance_plan_bp):
         app.register_blueprint(bp)
     return app
 
