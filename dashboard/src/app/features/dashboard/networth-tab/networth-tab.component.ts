@@ -70,6 +70,8 @@ export class NetworthTabComponent implements OnInit, OnChanges {
   /** NVDA share count and the USD→INR rate, for the NVIDIA dividend row. */
   @Input() nvdaShares = 0;
   @Input() usdToInr = 0;
+  /** The NVDA grant is held by the primary account holder, so its income is attributed there. */
+  @Input() nvdaAccountId = '1';
 
   /** Ask the parent to re-fetch the tracked sources (live price, MF NAV, ICICI holdings). */
   @Output() refreshTracked = new EventEmitter<void>();
@@ -169,9 +171,11 @@ export class NetworthTabComponent implements OnInit, OnChanges {
     });
   }
 
-  /** Account ids present in the holdings (for the selector). */
+  /** Account ids present in the income rows (for the selector), including NVDA's holder. */
   get incomeAccountIds(): string[] {
-    return [...new Set((this.iciciEquityRows || []).map((r) => r.account))].sort((a, b) => Number(a) - Number(b));
+    const ids = new Set((this.iciciEquityRows || []).map((r) => r.account));
+    if (this.nvdaShares > 0) ids.add(this.nvdaAccountId);
+    return [...ids].filter((id) => !!id).sort((a, b) => Number(a) - Number(b));
   }
 
   acctLabel(id: string): string {
@@ -205,14 +209,13 @@ export class NetworthTabComponent implements OnInit, OnChanges {
     }
     if (this.nvdaShares > 0) {
       const p = this.payouts['NVDA'];
-      const valueInr = null;
-      const row = build('NVDA', 'NVIDIA (NVDA)', '—', this.nvdaShares, valueInr);
+      const row = build('NVDA', 'NVIDIA (NVDA)', this.nvdaAccountId, this.nvdaShares, null);
       if (p) rows.push(row);
     }
     return rows;
   }
 
-  /** Rows that actually pay, honouring the account filter. NVDA only shows under "All sources". */
+  /** Rows that actually pay, honouring the account filter. */
   get incomeRows(): IncomeRow[] {
     return this.allIncomeRows()
       .filter((r) => (r.payoutPerUnit ?? 0) > 0)

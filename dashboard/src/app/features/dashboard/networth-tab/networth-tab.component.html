@@ -162,7 +162,7 @@
             @for (r of incomeRows; track r.key + r.account) {
               <tr>
                 <td class="nw-strong">{{ r.label }}</td>
-                <td>{{ r.account === '—' ? '—' : acctLabel(r.account) }}</td>
+                <td>{{ r.account ? acctLabel(r.account) : '—' }}</td>
                 <td class="nw-num">{{ r.qty }}</td>
                 <td class="nw-num">{{ r.currency === 'USD' ? '$' : '₹' }} {{ r.payoutPerUnit }}</td>
                 <td class="nw-num">₹ {{ formatInr(r.annualInr) }}</td>
@@ -202,7 +202,7 @@
               @for (r of incomeGapRows; track r.key + r.account) {
                 <tr>
                   <td class="nw-strong">{{ r.label }}</td>
-                  <td>{{ r.account === '—' ? '—' : acctLabel(r.account) }}</td>
+                  <td>{{ r.account ? acctLabel(r.account) : '—' }}</td>
                   <td class="nw-num">{{ r.qty }}</td>
                   <td>
                     <input type="text" class="nw-input" [ngModel]="symbolDraft[r.key] ?? r.symbol"
