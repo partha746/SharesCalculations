@@ -26,13 +26,15 @@ def list_overrides():
 
 @bp.route("/api/income/overrides/<key>", methods=["PUT"])
 def set_override(key):
+    """Partial update: only the keys present in the body are written."""
     body = request.get_json(silent=True) or {}
+    fields = {}
+    if "yahooSymbol" in body:
+        fields["yahoo_symbol"] = body["yahooSymbol"]
+    if "annualPayout" in body:
+        fields["annual_payout"] = body["annualPayout"]
     try:
-        return jsonify(svc.set_override(
-            key,
-            yahoo_symbol=body.get("yahooSymbol"),
-            annual_payout=body.get("annualPayout"),
-        ))
+        return jsonify(svc.set_override(key, **fields))
     except (ValueError, TypeError) as e:
         return jsonify({"error": str(e)}), 400
     except Exception as e:

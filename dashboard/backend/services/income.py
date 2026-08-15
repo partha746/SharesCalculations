@@ -84,6 +84,10 @@ def nse_lookup(code):
     return entry.get("nse"), entry.get("name")
 
 
+# Distinguishes "field not sent" from "field sent as null/empty" in a partial update.
+_UNSET = object()
+
+
 def _ensure_table(conn):
     conn.execute(
         """CREATE TABLE IF NOT EXISTS income_overrides (
@@ -117,29 +121,44 @@ def list_overrides():
     }
 
 
-def set_override(key, yahoo_symbol=None, annual_payout=None):
+def set_override(key, yahoo_symbol=_UNSET, annual_payout=_UNSET):
+    """Update an override, touching only the fields the caller actually sent.
+
+    Omitting a field leaves it as-is; sending it as null/"" clears it. Writing both unconditionally
+    would let a partial update silently wipe the other field.
+    """
     k = (key or "").strip()
     if not k:
         raise ValueError("key is required")
-    sym = (yahoo_symbol or "").strip()
+    if yahoo_symbol is _UNSET and annual_payout is _UNSET:
+        raise ValueError("provide yahooSymbol and/or annualPayout")
+
+    sym = "" if yahoo_symbol is _UNSET else (yahoo_symbol or "").strip()
     payout = None
-    if annual_payout not in (None, ""):
+    if annual_payout is not _UNSET and annual_payout not in (None, ""):
         try:
             payout = float(annual_payout)
         except (TypeError, ValueError):
             raise ValueError("annualPayout must be a number")
         if payout < 0:
             raise ValueError("annualPayout cannot be negative")
+
+    updates = ["updated_at = excluded.updated_at"]
+    if yahoo_symbol is not _UNSET:
+        updates.append("yahoo_symbol = excluded.yahoo_symbol")
+    if annual_payout is not _UNSET:
+        updates.append("annual_payout = excluded.annual_payout")
+
     with get_db() as conn:
         _ensure_table(conn)
         conn.execute(
             "INSERT INTO income_overrides (key, yahoo_symbol, annual_payout, updated_at) VALUES (?, ?, ?, ?) "
-            "ON CONFLICT(key) DO UPDATE SET yahoo_symbol = excluded.yahoo_symbol, "
-            "annual_payout = excluded.annual_payout, updated_at = excluded.updated_at",
+            "ON CONFLICT(key) DO UPDATE SET " + ", ".join(updates),
             (k, sym, payout, time.strftime("%Y-%m-%dT%H:%M:%S")),
         )
     # A changed symbol must not keep serving the previous symbol's cached payout.
-    _CACHE.pop(sym.upper(), None)
+    if sym:
+        _CACHE.pop(sym.upper(), None)
     return {"ok": True}
 
 
