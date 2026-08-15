@@ -78,13 +78,28 @@
 .nw-split { margin-bottom: 1.25rem; }
 .nw-split__bar {
   display: flex;
-  height: 10px;
+  height: 18px;
   border-radius: 999px;
   overflow: hidden;
   background: #21262d;
 }
+.nw-split__liquid,
+.nw-split__illiquid {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
 .nw-split__liquid { background: #3fb950; }
 .nw-split__illiquid { background: #d29922; }
+/* Dark text on the light fills keeps the inline figure readable. */
+.nw-split__pct {
+  font-size: 0.68rem;
+  font-weight: 700;
+  color: #0d1117;
+  white-space: nowrap;
+}
+.nw-split__legend strong { color: #e6edf3; }
 .nw-split__legend {
   display: flex;
   gap: 1.25rem;

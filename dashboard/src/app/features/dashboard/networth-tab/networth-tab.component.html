@@ -46,12 +46,24 @@
   @if (t.assets > 0) {
     <div class="nw-split">
       <div class="nw-split__bar" [title]="'Liquid ' + (t.liquidPct | number : '1.0-1') + '% · Illiquid ' + (t.illiquidPct | number : '1.0-1') + '%'">
-        <span class="nw-split__liquid" [style.width.%]="t.liquidPct"></span>
-        <span class="nw-split__illiquid" [style.width.%]="t.illiquidPct"></span>
+        <span class="nw-split__liquid" [style.width.%]="t.liquidPct">
+          @if (t.liquidPct >= 8) { <span class="nw-split__pct">{{ t.liquidPct | number : '1.0-1' }}%</span> }
+        </span>
+        <span class="nw-split__illiquid" [style.width.%]="t.illiquidPct">
+          @if (t.illiquidPct >= 8) { <span class="nw-split__pct">{{ t.illiquidPct | number : '1.0-1' }}%</span> }
+        </span>
       </div>
       <div class="nw-split__legend">
-        <span><i class="nw-dot nw-dot--liquid"></i> Liquid — can be converted to cash quickly</span>
-        <span><i class="nw-dot nw-dot--illiquid"></i> Illiquid — locked in or slow to sell</span>
+        <span>
+          <i class="nw-dot nw-dot--liquid"></i>
+          <strong>Liquid {{ t.liquidPct | number : '1.0-1' }}%</strong>
+          (₹ {{ formatInrShort(t.liquid) }}) — can be converted to cash quickly
+        </span>
+        <span>
+          <i class="nw-dot nw-dot--illiquid"></i>
+          <strong>Illiquid {{ t.illiquidPct | number : '1.0-1' }}%</strong>
+          (₹ {{ formatInrShort(t.illiquid) }}) — locked in or slow to sell
+        </span>
       </div>
     </div>
   }
