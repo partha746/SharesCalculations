@@ -232,7 +232,8 @@ def _build_sold_response():
         buy_at_r = qty * price_bought * buy_rate
         sell_at_r = qty * price_sell * sell_rate
         gain_before_tax = sell_at_r - buy_at_r
-        tax_slab = tax_obj.get_tax_slab(buy_date) if buy_date else tax_obj.fix_tax_slab
+        # Holding period ends at the sale, so the slab is measured buy -> sell, not buy -> today.
+        tax_slab = tax_obj.get_tax_slab(buy_date, as_of=sell_date) if buy_date else tax_obj.fix_tax_slab
         tax_paid = round(gain_before_tax * tax_slab, 2)
         profit_pct = round((gain_before_tax - tax_paid) / buy_at_r * 100, 1) if buy_at_r else 0
         rows.append({

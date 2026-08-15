@@ -280,15 +280,21 @@ class OwnStockData:
 
         dfSellOut['Buy@R'] = ((dfSellOut['Qty_Sold'].mul(dfSellOut['Price_Bought'])) * dfSellOut['BuyRupeeRate'])
         dfSellOut['Sold@R'] = ((dfSellOut['Qty_Sold'].mul(dfSellOut['Price_Sell'])) * dfSellOut['SellRupeeRate'])
-        # Tax per row: >= 2 years since buy -> 12.5%; else 30%
-        dfSellOut['TaxSlab'] = dfSellOut['Buy_Date'].map(lambda d: self.tax_obj.get_tax_slab(d) if pd.notna(d) else self.tax_obj.fix_tax_slab)
+        # Tax per row: holding period runs buy -> sell (not buy -> today), >= 2 years -> 12.5%; else 30%
+        dfSellOut['TaxSlab'] = [
+            self.tax_obj.get_tax_slab(b, as_of=s)
+            for b, s in zip(dfSellOut['Buy_Date'], dfSellOut['Sell_Date'])
+        ]
         gain_before_tax = dfSellOut['Sold@R'] - dfSellOut['Buy@R']
         dfSellOut['TaxNeedToBePaid'] = (round((gain_before_tax * dfSellOut['TaxSlab']), 2))
         dfSellOut['ProfitPercent'] = round(((gain_before_tax - dfSellOut['TaxNeedToBePaid']) / dfSellOut['Buy@R']) * 100, 1)
         dfSellOut['ProfitNSU'] = round((dfSellOut[dfSellOut['Type'] == 'NSU']['Sold@R']), 2)
         dfSellOut['ProfitESPP'] = round((dfSellOut[dfSellOut['Type'] == 'ESPP']['Sold@R'] - dfSellOut[dfSellOut['Type'] == 'ESPP']['Buy@R']), 2)
         dfSellOut = dfSellOut.fillna(0)
+        tax_slab_backup = dfSellOut['TaxSlab'].copy()
         dfSellOut = dfSellOut.round(1)
+        # Restore TaxSlab after round(1): 0.125 was rounded to 0.1; keep 12.5% / 30% correct
+        dfSellOut['TaxSlab'] = tax_slab_backup
 
         # Realised profit = (total sell value − total buy value) − total tax (same as your manual: sell − buy − tax)
         total_sell_inr = dfSellOut['Sold@R'].sum()

@@ -48,7 +48,11 @@ dashboard/.tmp/
 Thumbs.db
 
 # Local / temp
+# test* ignores ad-hoc scratch scripts; the tests/ suite is deliberately kept.
 test*
+!tests/
+!tests/**
+tests/**/__pycache__/
 main.py
 certs/
 
