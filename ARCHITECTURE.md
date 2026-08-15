@@ -1,6 +1,9 @@
 # Architecture
 
-NVDA shares tracking dashboard. Runs as two Docker containers (primary; see [`docker-compose.yml`](docker-compose.yml)):
+Internals of the NVDA shares tracking dashboard. For setup, configuration and usage, see
+[`README.md`](README.md).
+
+Runs as two Docker containers (primary; see [`docker-compose.yml`](docker-compose.yml)):
 
 - `backend` -> [`dashboard/backend/server.py`](dashboard/backend/server.py) (Flask API, port 8080)
 - `frontend` -> [`dashboard/serve-prod.js`](dashboard/serve-prod.js) serving the built Angular app on port 4201, proxying `/api` to the backend
@@ -30,6 +33,7 @@ helpers/                 # shared data layer (importable by backend + scripts)
   eks.py                 # EksHelper (legacy ELK push; needs `pip install elasticsearch pytz`)
   gather_data.py         # back-compat facade re-exporting the above (EksHelper resolved lazily)
 dashboard/
+  serve-prod.js          # static file server + /api reverse proxy (zero deps, optional TLS)
   backend/               # Flask API (entrypoint dir; on sys.path when server.py runs)
     server.py            # thin entrypoint: sys.path + create_app() + start_recorder()
     app.py               # application factory (registers blueprints) + recorder startup
@@ -59,7 +63,6 @@ dashboard/
       earmarks.py        #   earmarks CRUD
       finance_plan.py    #   finance_plan persistence
     breeze_icici.py      # Breeze SDK wrapper (optional)
-    serve-prod.js        # static file server + /api reverse proxy (zero deps)
   src/app/
     app.routes.ts        # '' -> /holdings, ':tab' -> DashboardComponent (lazy), '**' -> /holdings
     core/
