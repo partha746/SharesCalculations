@@ -4,7 +4,7 @@
 # Build context = dashboard/
 
 # --- Build stage ---
-FROM node:20-alpine AS build
+FROM node:22-alpine AS build
 # Build tools for any npm packages with native (node-gyp) components.
 RUN apk add --no-cache python3 make g++
 WORKDIR /app
@@ -17,7 +17,7 @@ COPY . .
 RUN --mount=type=cache,target=/app/.angular/cache npm run build
 
 # --- Runtime stage ---
-FROM node:20-alpine
+FROM node:22-alpine
 WORKDIR /app
 ENV PORT=4201 \
     API_TARGET=http://backend:8080

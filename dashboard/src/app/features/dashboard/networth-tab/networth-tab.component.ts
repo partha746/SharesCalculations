@@ -131,7 +131,7 @@ export class NetworthTabComponent implements OnInit, OnChanges {
   /** instrument key -> resolved payout. */
   payouts: Record<string, IncomePayout> = {};
   /** Draft edits for the override inputs, keyed by instrument. */
-  symbolDraft: Record<string, string> = {};
+  symbolDraft: Record<string, string | undefined> = {};
   payoutDraft: Record<string, number | null> = {};
   private resolvedSignature = '';
 
