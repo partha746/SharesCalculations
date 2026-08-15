@@ -230,6 +230,11 @@
 }
 .nw-input--wide { width: 12rem; }
 .nw-input--num { width: 8rem; text-align: right; }
+.nw-search {
+  width: 11rem;
+  border-radius: 999px;
+  padding-left: 0.7rem;
+}
 
 .nw-actions {
   display: flex;

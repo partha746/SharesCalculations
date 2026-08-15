@@ -81,6 +81,7 @@ export class NetworthTabComponent implements OnInit, OnChanges {
   sortedItems: NetworthItem[] = [];
   sortKey: 'label' | 'kind' | 'category' | 'liquidity' | 'valueInr' | 'note' | '' = '';
   sortDir: 1 | -1 = 1;
+  itemsSearch = '';
   loading = false;
   error: string | null = null;
   savingId: number | null = null;
@@ -215,19 +216,59 @@ export class NetworthTabComponent implements OnInit, OnChanges {
     return rows;
   }
 
-  /** Rows that actually pay, honouring the account filter. */
+  // --- Income table: search + sort ---
+  incomeSearch = '';
+  incomeSortKey: 'label' | 'account' | 'qty' | 'payout' | 'annual' | 'monthly' | 'yield' | 'source' | '' = '';
+  incomeSortDir: 1 | -1 = 1;
+
+  setIncomeSort(key: 'label' | 'account' | 'qty' | 'payout' | 'annual' | 'monthly' | 'yield' | 'source'): void {
+    if (this.incomeSortKey === key) this.incomeSortDir = this.incomeSortDir === 1 ? -1 : 1;
+    else {
+      this.incomeSortKey = key;
+      this.incomeSortDir = 1;
+    }
+  }
+
+  incomeSortIndicator(key: string): string {
+    if (this.incomeSortKey !== key) return '';
+    return this.incomeSortDir === 1 ? '↑' : '↓';
+  }
+
+  private matchesIncome(r: IncomeRow): boolean {
+    return this.matches([r.label, this.acctLabel(r.account), r.symbol, r.source], this.incomeSearch);
+  }
+
+  /** Rows that actually pay, honouring the account filter, search and sort. */
   get incomeRows(): IncomeRow[] {
-    return this.allIncomeRows()
+    const rows = this.allIncomeRows()
       .filter((r) => (r.payoutPerUnit ?? 0) > 0)
       .filter((r) => (this.incomeAccount === 'all' ? true : r.account === this.incomeAccount))
-      .sort((a, b) => b.monthlyInr - a.monthlyInr);
+      .filter((r) => this.matchesIncome(r));
+    const key = this.incomeSortKey;
+    const dir = this.incomeSortDir;
+    // Default view leads with the biggest contributors.
+    if (!key) return rows.sort((a, b) => b.monthlyInr - a.monthlyInr);
+    return rows.sort((a, b) => {
+      switch (key) {
+        case 'label': return this.byText(a.label, b.label, dir);
+        case 'account': return this.byText(this.acctLabel(a.account), this.acctLabel(b.account), dir);
+        case 'qty': return this.byNum(a.qty, b.qty, dir);
+        case 'payout': return this.byNum(a.payoutPerUnit, b.payoutPerUnit, dir);
+        case 'annual': return this.byNum(a.annualInr, b.annualInr, dir);
+        case 'monthly': return this.byNum(a.monthlyInr, b.monthlyInr, dir);
+        case 'yield': return this.byNum(a.yieldPct, b.yieldPct, dir);
+        case 'source': return this.byText(a.symbol || a.source, b.symbol || b.source, dir);
+        default: return 0;
+      }
+    });
   }
 
   /** Instruments with no payout data or a zero payout — shown separately so a symbol can be fixed. */
   get incomeGapRows(): IncomeRow[] {
     return this.allIncomeRows()
       .filter((r) => !((r.payoutPerUnit ?? 0) > 0))
-      .filter((r) => (this.incomeAccount === 'all' ? true : r.account === this.incomeAccount));
+      .filter((r) => (this.incomeAccount === 'all' ? true : r.account === this.incomeAccount))
+      .filter((r) => this.matchesIncome(r));
   }
 
   get incomeTotals(): { monthly: number; annual: number; value: number; yieldPct: number | null } {
@@ -293,6 +334,23 @@ export class NetworthTabComponent implements OnInit, OnChanges {
     return kind === 'liability' ? this.liabilityCategories : this.assetCategories;
   }
 
+  // --- Shared sort/search helpers ---
+
+  private byText(a: unknown, b: unknown, dir: 1 | -1): number {
+    return String(a ?? '').localeCompare(String(b ?? '')) * dir;
+  }
+
+  /** Nulls sort last regardless of direction is overkill here; treat them as the smallest value. */
+  private byNum(a: number | null | undefined, b: number | null | undefined, dir: 1 | -1): number {
+    return ((a ?? -Infinity) - (b ?? -Infinity)) * dir;
+  }
+
+  private matches(haystacks: Array<string | null | undefined>, query: string): boolean {
+    const q = query.trim().toLowerCase();
+    if (!q) return true;
+    return haystacks.some((h) => (h ?? '').toLowerCase().includes(q));
+  }
+
   // --- Sorting ---
 
   setSort(key: 'label' | 'kind' | 'category' | 'liquidity' | 'valueInr' | 'note'): void {
@@ -310,17 +368,23 @@ export class NetworthTabComponent implements OnInit, OnChanges {
     return this.sortDir === 1 ? '↑' : '↓';
   }
 
+  /** Recomputed on load/sort/search/save (not per keystroke in a row) so edits don't reshuffle. */
   private applySort(): void {
+    const rows = this.items.filter((i) => this.matches([i.label, i.category, i.kind, i.liquidity, i.note], this.itemsSearch));
     const key = this.sortKey;
     if (!key) {
-      this.sortedItems = [...this.items]; // server order: kind, category, id
+      this.sortedItems = rows; // server order: kind, category, id
       return;
     }
     const dir = this.sortDir;
-    this.sortedItems = [...this.items].sort((a, b) => {
-      if (key === 'valueInr') return ((Number(a.valueInr) || 0) - (Number(b.valueInr) || 0)) * dir;
-      return String(a[key] ?? '').localeCompare(String(b[key] ?? '')) * dir;
+    this.sortedItems = [...rows].sort((a, b) => {
+      if (key === 'valueInr') return this.byNum(Number(a.valueInr) || 0, Number(b.valueInr) || 0, dir);
+      return this.byText(a[key], b[key], dir);
     });
+  }
+
+  onItemsSearchChange(): void {
+    this.applySort();
   }
 
   // --- Tracked (auto-populated) assets ---
@@ -356,8 +420,41 @@ export class NetworthTabComponent implements OnInit, OnChanges {
     ];
   }
 
+  /** Unfiltered: this is the real tracked total, and the manual-assets figure is derived from it. */
   get trackedTotalInr(): number {
     return this.trackedRows.reduce((s, r) => s + (r.valueInr ?? 0), 0);
+  }
+
+  // --- Tracked table: search + sort ---
+  trackedSearch = '';
+  trackedSortKey: 'label' | 'category' | 'liquidity' | 'value' | 'source' | '' = '';
+  trackedSortDir: 1 | -1 = 1;
+
+  setTrackedSort(key: 'label' | 'category' | 'liquidity' | 'value' | 'source'): void {
+    if (this.trackedSortKey === key) this.trackedSortDir = this.trackedSortDir === 1 ? -1 : 1;
+    else {
+      this.trackedSortKey = key;
+      this.trackedSortDir = 1;
+    }
+  }
+
+  trackedSortIndicator(key: string): string {
+    if (this.trackedSortKey !== key) return '';
+    return this.trackedSortDir === 1 ? '↑' : '↓';
+  }
+
+  get trackedRowsView(): TrackedRow[] {
+    let rows = this.trackedRows.filter((r) => this.matches([r.label, r.category, r.liquidity, r.hint], this.trackedSearch));
+    const key = this.trackedSortKey;
+    if (key) {
+      const dir = this.trackedSortDir;
+      rows = [...rows].sort((a, b) => {
+        if (key === 'value') return this.byNum(a.valueInr, b.valueInr, dir);
+        if (key === 'source') return this.byText(a.hint, b.hint, dir);
+        return this.byText(a[key], b[key], dir);
+      });
+    }
+    return rows;
   }
 
   // --- Manual rows ---

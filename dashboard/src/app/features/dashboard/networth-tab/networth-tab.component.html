@@ -72,16 +72,25 @@
   <section class="nw-section">
     <div class="nw-section__head">
       <h3 class="nw-subtitle">Tracked automatically <span class="nw-badge">live</span></h3>
-      <span class="nw-section__total">₹ {{ formatInr(trackedTotalInr) }}</span>
+      <div class="nw-inc-controls">
+        <input type="text" class="nw-input nw-search" [(ngModel)]="trackedSearch" placeholder="Search…" />
+        <span class="nw-section__total">₹ {{ formatInr(trackedTotalInr) }}</span>
+      </div>
     </div>
     <p class="nw-hint">These come straight from the rest of the dashboard and update on their own — no need to enter them.</p>
     <div class="nw-table-wrap">
       <table class="nw-table">
         <thead>
-          <tr><th>Asset</th><th>Category</th><th>Liquidity</th><th class="nw-num">Value ₹</th><th>Source</th></tr>
+          <tr>
+            <th class="nw-th--sort" (click)="setTrackedSort('label')">Asset <span class="nw-th__sort">{{ trackedSortIndicator('label') }}</span></th>
+            <th class="nw-th--sort" (click)="setTrackedSort('category')">Category <span class="nw-th__sort">{{ trackedSortIndicator('category') }}</span></th>
+            <th class="nw-th--sort" (click)="setTrackedSort('liquidity')">Liquidity <span class="nw-th__sort">{{ trackedSortIndicator('liquidity') }}</span></th>
+            <th class="nw-th--sort nw-num" (click)="setTrackedSort('value')">Value ₹ <span class="nw-th__sort">{{ trackedSortIndicator('value') }}</span></th>
+            <th class="nw-th--sort" (click)="setTrackedSort('source')">Source <span class="nw-th__sort">{{ trackedSortIndicator('source') }}</span></th>
+          </tr>
         </thead>
         <tbody>
-          @for (r of trackedRows; track r.key) {
+          @for (r of trackedRowsView; track r.key) {
             <tr>
               <td class="nw-strong">{{ r.label }}</td>
               <td>{{ r.category }}</td>
@@ -91,6 +100,8 @@
               </td>
               <td class="nw-muted nw-src">{{ r.hint }}</td>
             </tr>
+          } @empty {
+            <tr><td colspan="5" class="nw-empty">Nothing matches “{{ trackedSearch }}”.</td></tr>
           }
         </tbody>
       </table>
@@ -112,6 +123,7 @@
             }
           </select>
         </label>
+        <input type="text" class="nw-input nw-search" [(ngModel)]="incomeSearch" placeholder="Search…" />
         <button type="button" class="nw-refresh" [disabled]="incomeLoading" (click)="resolvePayouts(true)">
           <span class="nw-refresh__icon" [class.nw-refresh__icon--spin]="incomeLoading">↻</span>
           {{ incomeLoading ? 'Fetching…' : 'Refresh payouts' }}
@@ -153,9 +165,14 @@
         <table class="nw-table">
           <thead>
             <tr>
-              <th>Instrument</th><th>Account</th><th class="nw-num">Units</th>
-              <th class="nw-num">Payout / unit (12m)</th><th class="nw-num">Per year ₹</th>
-              <th class="nw-num">Per month ₹</th><th class="nw-num">Yield</th><th>Source</th>
+              <th class="nw-th--sort" (click)="setIncomeSort('label')">Instrument <span class="nw-th__sort">{{ incomeSortIndicator('label') }}</span></th>
+              <th class="nw-th--sort" (click)="setIncomeSort('account')">Account <span class="nw-th__sort">{{ incomeSortIndicator('account') }}</span></th>
+              <th class="nw-th--sort nw-num" (click)="setIncomeSort('qty')">Units <span class="nw-th__sort">{{ incomeSortIndicator('qty') }}</span></th>
+              <th class="nw-th--sort nw-num" (click)="setIncomeSort('payout')">Payout / unit (12m) <span class="nw-th__sort">{{ incomeSortIndicator('payout') }}</span></th>
+              <th class="nw-th--sort nw-num" (click)="setIncomeSort('annual')">Per year ₹ <span class="nw-th__sort">{{ incomeSortIndicator('annual') }}</span></th>
+              <th class="nw-th--sort nw-num" (click)="setIncomeSort('monthly')">Per month ₹ <span class="nw-th__sort">{{ incomeSortIndicator('monthly') }}</span></th>
+              <th class="nw-th--sort nw-num" (click)="setIncomeSort('yield')">Yield <span class="nw-th__sort">{{ incomeSortIndicator('yield') }}</span></th>
+              <th class="nw-th--sort" (click)="setIncomeSort('source')">Source <span class="nw-th__sort">{{ incomeSortIndicator('source') }}</span></th>
             </tr>
           </thead>
           <tbody>
@@ -229,9 +246,12 @@
   <section class="nw-section">
     <div class="nw-section__head">
       <h3 class="nw-subtitle">Your entries</h3>
-      <span class="nw-section__total">
-        assets ₹ {{ formatInr(t.assets - trackedTotalInr) }} · liabilities ₹ {{ formatInr(t.liabilities) }}
-      </span>
+      <div class="nw-inc-controls">
+        <input type="text" class="nw-input nw-search" [(ngModel)]="itemsSearch" (ngModelChange)="onItemsSearchChange()" placeholder="Search…" />
+        <span class="nw-section__total">
+          assets ₹ {{ formatInr(t.assets - trackedTotalInr) }} · liabilities ₹ {{ formatInr(t.liabilities) }}
+        </span>
+      </div>
     </div>
     <p class="nw-hint">Add anything the dashboard can't see — bank balances, property, gold, EPF, and loans. Edits save as soon as you leave the field.</p>
 
@@ -285,7 +305,12 @@
               </td>
             </tr>
           } @empty {
-            <tr><td colspan="7" class="nw-empty">Nothing added yet — use the row below to add your first entry.</td></tr>
+            <tr>
+              <td colspan="7" class="nw-empty">
+                @if (itemsSearch.trim()) { No entries match “{{ itemsSearch }}”. }
+                @else { Nothing added yet — use the row below to add your first entry. }
+              </td>
+            </tr>
           }
         </tbody>
         <tfoot>
