@@ -7,12 +7,11 @@ import { formatCountdownWithSeconds } from './countdown-utils';
  * Owns a 1s tick so the main dashboard is not change-detected every second.
  */
 @Component({
-  selector: 'app-live-price-extended-hint',
-  standalone: true,
-  imports: [CommonModule],
-  templateUrl: './live-price-extended-hint.component.html',
-  styleUrl: './live-price-extended-hint.component.scss',
-  changeDetection: ChangeDetectionStrategy.OnPush,
+    selector: 'app-live-price-extended-hint',
+    imports: [CommonModule],
+    templateUrl: './live-price-extended-hint.component.html',
+    styleUrl: './live-price-extended-hint.component.scss',
+    changeDetection: ChangeDetectionStrategy.OnPush
 })
 export class LivePriceExtendedHintComponent implements OnInit, OnDestroy {
   @Input() marketOpen = false;

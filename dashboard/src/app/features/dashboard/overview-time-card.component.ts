@@ -3,12 +3,11 @@ import { CommonModule } from '@angular/common';
 import { formatCountdown, formatCountdownWithSeconds } from './countdown-utils';
 
 @Component({
-  selector: 'app-overview-time-card',
-  standalone: true,
-  imports: [CommonModule],
-  templateUrl: './overview-time-card.component.html',
-  styleUrl: './overview-time-card.component.scss',
-  changeDetection: ChangeDetectionStrategy.OnPush,
+    selector: 'app-overview-time-card',
+    imports: [CommonModule],
+    templateUrl: './overview-time-card.component.html',
+    styleUrl: './overview-time-card.component.scss',
+    changeDetection: ChangeDetectionStrategy.OnPush
 })
 export class OverviewTimeCardComponent implements OnInit, OnDestroy {
   @Input() marketOpen = false;

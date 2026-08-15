@@ -125,11 +125,10 @@ function estateCroresHeadline(inr: number): { croresRounded: number; words: stri
 }
 
 @Component({
-  selector: 'app-financial-planning',
-  standalone: true,
-  imports: [CommonModule, FormsModule, IndianNumberDirective],
-  templateUrl: './financial-planning.component.html',
-  styleUrl: './financial-planning.component.scss',
+    selector: 'app-financial-planning',
+    imports: [CommonModule, FormsModule, IndianNumberDirective],
+    templateUrl: './financial-planning.component.html',
+    styleUrl: './financial-planning.component.scss'
 })
 export class FinancialPlanningComponent implements OnChanges, OnInit {
   /** Dashboard Overview “In bank if you sell now”; optional one-click fill for NVIDIA net field */

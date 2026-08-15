@@ -45,12 +45,11 @@ interface TrackedRow {
  * split by liquidity.
  */
 @Component({
-  selector: 'app-networth-tab',
-  standalone: true,
-  imports: [CommonModule, FormsModule, IndianNumberDirective],
-  templateUrl: './networth-tab.component.html',
-  styleUrl: './networth-tab.component.scss',
-  changeDetection: ChangeDetectionStrategy.OnPush,
+    selector: 'app-networth-tab',
+    imports: [CommonModule, FormsModule, IndianNumberDirective],
+    templateUrl: './networth-tab.component.html',
+    styleUrl: './networth-tab.component.scss',
+    changeDetection: ChangeDetectionStrategy.OnPush
 })
 export class NetworthTabComponent implements OnInit, OnChanges {
   /** NVDA position value after tax if sold today (Overview "In bank if you sell now"). */

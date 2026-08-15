@@ -7,12 +7,11 @@ import { MfSearchResult } from '../../../core/models/dashboard.types';
 /** MF management panel: add a fund (AMFI search) or import an ICICI CSV. Emits `changed` after writes
  * so the parent can reload the combined holdings table. */
 @Component({
-  selector: 'app-mf-tab',
-  standalone: true,
-  imports: [CommonModule, FormsModule],
-  templateUrl: './mf-tab.component.html',
-  styleUrl: './mf-tab.component.scss',
-  changeDetection: ChangeDetectionStrategy.OnPush,
+    selector: 'app-mf-tab',
+    imports: [CommonModule, FormsModule],
+    templateUrl: './mf-tab.component.html',
+    styleUrl: './mf-tab.component.scss',
+    changeDetection: ChangeDetectionStrategy.OnPush
 })
 export class MfTabComponent {
   @Output() changed = new EventEmitter<void>();

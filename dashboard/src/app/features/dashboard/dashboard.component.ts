@@ -108,12 +108,11 @@ const HOLDING_COL_DEFS: { key: (typeof HOLDING_COLS)[number]; label: string }[] 
 const HOLDINGS_COLUMN_ORDER_STORAGE_KEY = 'dashboard.holdingsColumnOrder';
 
 @Component({
-  selector: 'app-dashboard',
-  standalone: true,
-  imports: [CommonModule, FormsModule, StatCardComponent, OverviewTimeCardComponent, LivePriceExtendedHintComponent, FinancialPlanningComponent, DataTabComponent, NewsTabComponent, MfTabComponent, NetworthTabComponent],
-  templateUrl: './dashboard.component.html',
-  styleUrl: './dashboard.component.scss',
-  changeDetection: ChangeDetectionStrategy.OnPush,
+    selector: 'app-dashboard',
+    imports: [CommonModule, FormsModule, StatCardComponent, OverviewTimeCardComponent, LivePriceExtendedHintComponent, FinancialPlanningComponent, DataTabComponent, NewsTabComponent, MfTabComponent, NetworthTabComponent],
+    templateUrl: './dashboard.component.html',
+    styleUrl: './dashboard.component.scss',
+    changeDetection: ChangeDetectionStrategy.OnPush
 })
 export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
   data: DashboardResponse | null = null;

@@ -6,12 +6,11 @@ import { NewsArticle, NewsSummary } from '../../../core/models/dashboard.types';
 
 /** News tab: latest NVIDIA headlines (Finnhub) with VADER sentiment. */
 @Component({
-  selector: 'app-news-tab',
-  standalone: true,
-  imports: [CommonModule, FormsModule],
-  templateUrl: './news-tab.component.html',
-  styleUrl: './news-tab.component.scss',
-  changeDetection: ChangeDetectionStrategy.OnPush,
+    selector: 'app-news-tab',
+    imports: [CommonModule, FormsModule],
+    templateUrl: './news-tab.component.html',
+    styleUrl: './news-tab.component.scss',
+    changeDetection: ChangeDetectionStrategy.OnPush
 })
 export class NewsTabComponent implements OnInit {
   articles: NewsArticle[] = [];
