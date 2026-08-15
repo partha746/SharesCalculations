@@ -9,6 +9,7 @@ import {
   Earmark,
   EarmarksResponse,
   HoldingRow,
+  IncomeResolveResponse,
   LivePriceHistoryPoint,
   LivePriceResponse,
   MarketStatusResponse,
@@ -149,6 +150,19 @@ export class DashboardService {
 
   postBreezeDisconnect(acct: string = '1'): Observable<{ success: boolean }> {
     return this.http.post<{ success: boolean }>(`${this.apiUrl}/breeze/disconnect/${acct}`, {});
+  }
+
+  // --- Expected income: dividend / REIT & InvIT payout resolution ---
+  resolveIncomePayouts(items: Array<{ key: string; symbolHint: string }>): Observable<IncomeResolveResponse> {
+    return this.http.post<IncomeResolveResponse>(`${this.apiUrl}/income/resolve`, { items });
+  }
+
+  setIncomeOverride(key: string, body: { yahooSymbol?: string; annualPayout?: number | null }): Observable<{ ok: boolean }> {
+    return this.http.put<{ ok: boolean }>(`${this.apiUrl}/income/overrides/${encodeURIComponent(key)}`, body);
+  }
+
+  deleteIncomeOverride(key: string): Observable<{ ok: boolean }> {
+    return this.http.delete<{ ok: boolean }>(`${this.apiUrl}/income/overrides/${encodeURIComponent(key)}`);
   }
 
   // --- Net worth: manually-entered assets & liabilities ---

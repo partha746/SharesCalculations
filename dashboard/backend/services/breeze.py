@@ -51,10 +51,15 @@ def _breeze_callback_url_for_acct(acct):
 
 
 def _breeze_dashboard_url():
+    """Where to send the browser once the callback has run.
+
+    This deliberately does not fall back to BREEZE_PUBLIC_BASE_URL: that value names the origin ICICI
+    must call back (the API), which on a split frontend/backend setup does not serve the Angular app —
+    landing there means the account connects but the dashboard never loads. Without an explicit
+    BREEZE_DASHBOARD_URL we return a relative URL so the browser stays on the origin it actually used.
+    """
     base = (os.environ.get("BREEZE_DASHBOARD_URL") or "").strip().rstrip("/")
-    if not base:
-        base = _breeze_public_base()
-    return base + "/?tab=icici"
+    return (base + "/?tab=icici") if base else "/?tab=icici"
 
 
 def _breeze_js_redirect(url):

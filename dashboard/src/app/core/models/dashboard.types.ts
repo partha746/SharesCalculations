@@ -287,6 +287,22 @@ export interface HoldingRow {
   taxPercent: number;
 }
 
+/** Resolved annual payout per unit for one instrument (dividend / REIT-InvIT distribution). */
+export interface IncomePayout {
+  key: string;
+  symbol: string;
+  /** Company name from ICICI's SecurityMaster (e.g. "Embassy Office Parks Reit"). */
+  name?: string;
+  /** Payout per unit over the trailing 12 months; null when it could not be resolved. */
+  annualPayout: number | null;
+  currency: string;
+  source: 'manual' | 'yahoo' | 'unresolved';
+}
+
+export interface IncomeResolveResponse {
+  payouts: IncomePayout[];
+}
+
 /** How quickly a net-worth holding can be converted to cash. */
 export type NetworthLiquidity = 'liquid' | 'illiquid';
 

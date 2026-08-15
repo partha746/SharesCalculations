@@ -948,6 +948,16 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
     return this.networthIciciEquityValueInr != null;
   }
 
+  /** ICICI holdings reshaped for the net-worth tab's expected-income calculation. */
+  get networthIciciIncomeRows(): Array<{ account: string; stockCode: string; qty: number; valueInr: number | null }> {
+    return this.breezePortfolioHoldingsView().rows.map((r) => ({
+      account: r.account,
+      stockCode: r.stockCode,
+      qty: parseFloat(String(r.quantity).replace(/,/g, '')) || 0,
+      valueInr: r.currentNum,
+    }));
+  }
+
   networthTrackedLoading = false;
 
   /** Re-fetch every source the net-worth tab tracks automatically. */

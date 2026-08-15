@@ -34,8 +34,11 @@ def get_live_price_history():
     with get_db() as conn:
         _ensure_live_price_history_table(conn)
         if bucket >= 86400000:
+            # 1d rows are keyed by ET calendar date and bucket_ms is that day's *first* tick, so
+            # filtering on bucket_ms would drop the oldest day whenever the window starts mid-session.
+            # A day belongs in range if any of its ticks do, i.e. its last tick is at/after the start.
             rows = conn.execute(
-                "SELECT bucket_ms, open, high, low, close, sum_price, n, rate_close FROM live_price_ohlc_1d WHERE bucket_ms >= ? ORDER BY bucket_ms ASC",
+                "SELECT bucket_ms, open, high, low, close, sum_price, n, rate_close FROM live_price_ohlc_1d WHERE last_ts_ms >= ? ORDER BY bucket_ms ASC",
                 (start_ms,),
             ).fetchall()
             src = [(r[0], r[1], r[2], r[3], r[4], r[5], r[6], r[7]) for r in rows]

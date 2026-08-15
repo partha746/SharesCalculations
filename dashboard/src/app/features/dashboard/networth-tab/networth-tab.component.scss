@@ -253,6 +253,47 @@
   &:disabled { opacity: 0.6; cursor: default; }
 }
 
+/* --- Expected income --- */
+.nw-inc-controls {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+}
+.nw-inc-pick {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: #8b949e;
+}
+.nw-summary--income { grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); }
+.nw-row-total {
+  th, td { border-top: 2px solid #30363d; background: #12171f; }
+}
+.nw-gaps {
+  margin-top: 0.9rem;
+  border: 1px solid #30363d;
+  border-radius: 8px;
+  padding: 0.6rem 0.8rem;
+  background: #12171f;
+}
+.nw-gaps__summary {
+  cursor: pointer;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: #d29922;
+}
+.nw-gaps code {
+  background: #0d1117;
+  border: 1px solid #30363d;
+  border-radius: 4px;
+  padding: 0 0.25rem;
+  font-size: 0.78rem;
+}
+
 /* --- Asset mix bars --- */
 .nw-mix { display: flex; flex-direction: column; gap: 0.4rem; }
 .nw-mix__row {

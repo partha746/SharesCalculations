@@ -1,9 +1,33 @@
-import { ChangeDetectionStrategy, ChangeDetectorRef, Component, EventEmitter, Input, OnInit, Output } from '@angular/core';
+import { ChangeDetectionStrategy, ChangeDetectorRef, Component, EventEmitter, Input, OnChanges, OnInit, Output, SimpleChanges } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { DashboardService } from '../../../core/services/dashboard.service';
 import { IndianNumberDirective } from '../../../core/directives/indian-number.directive';
-import { NetworthItem, NetworthKind, NetworthLiquidity } from '../../../core/models/dashboard.types';
+import { IncomePayout, NetworthItem, NetworthKind, NetworthLiquidity } from '../../../core/models/dashboard.types';
+
+/** One ICICI equity/REIT/InvIT holding, as passed in from the dashboard shell. */
+export interface IncomeHoldingInput {
+  account: string;
+  stockCode: string;
+  qty: number;
+  valueInr: number | null;
+}
+
+/** A holding with its expected payout worked out. */
+interface IncomeRow {
+  key: string;
+  label: string;
+  account: string;
+  qty: number;
+  symbol: string;
+  payoutPerUnit: number | null;
+  currency: string;
+  source: string;
+  annualInr: number;
+  monthlyInr: number;
+  valueInr: number | null;
+  yieldPct: number | null;
+}
 
 /** An asset the dashboard already knows about; value comes from live data, so it is read-only here. */
 interface TrackedRow {
@@ -28,7 +52,7 @@ interface TrackedRow {
   styleUrl: './networth-tab.component.scss',
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
-export class NetworthTabComponent implements OnInit {
+export class NetworthTabComponent implements OnInit, OnChanges {
   /** NVDA position value after tax if sold today (Overview "In bank if you sell now"). */
   @Input() nvdaNetInr: number | null = null;
   /** Live mutual-fund value (sum of AMFI NAV × units). */
@@ -39,6 +63,13 @@ export class NetworthTabComponent implements OnInit {
   @Input() iciciEquityLoaded = false;
   /** True while the parent is refreshing tracked sources. */
   @Input() trackedLoading = false;
+  /** ICICI equity/REIT/InvIT holdings, for expected-income calculation. */
+  @Input() iciciEquityRows: IncomeHoldingInput[] = [];
+  /** Account id -> display name (holder name). */
+  @Input() accountNames: Record<string, string> = {};
+  /** NVDA share count and the USD→INR rate, for the NVIDIA dividend row. */
+  @Input() nvdaShares = 0;
+  @Input() usdToInr = 0;
 
   /** Ask the parent to re-fetch the tracked sources (live price, MF NAV, ICICI holdings). */
   @Output() refreshTracked = new EventEmitter<void>();
@@ -80,6 +111,162 @@ export class NetworthTabComponent implements OnInit {
 
   ngOnInit(): void {
     this.loadItems();
+    this.resolvePayouts();
+  }
+
+  ngOnChanges(changes: SimpleChanges): void {
+    // Holdings arrive asynchronously (after the ICICI fetch), so resolve once the instrument set changes.
+    if (changes['iciciEquityRows'] || changes['nvdaShares']) this.resolvePayouts();
+  }
+
+  // ===== Expected income (dividends / REIT & InvIT distributions) =====
+
+  /** 'all' or an ICICI account id. */
+  incomeAccount = 'all';
+  incomeLoading = false;
+  incomeError: string | null = null;
+  showIncomeGaps = false;
+  /** instrument key -> resolved payout. */
+  payouts: Record<string, IncomePayout> = {};
+  /** Draft edits for the override inputs, keyed by instrument. */
+  symbolDraft: Record<string, string> = {};
+  payoutDraft: Record<string, number | null> = {};
+  private resolvedSignature = '';
+
+  /** Unique instruments to price: every held stock code, plus NVDA when shares are held. */
+  private instrumentItems(): Array<{ key: string; symbolHint: string }> {
+    const map = new Map<string, string>();
+    for (const r of this.iciciEquityRows || []) {
+      const code = (r.stockCode || '').trim();
+      if (code) map.set(code, `${code.toUpperCase()}.NS`);
+    }
+    if (this.nvdaShares > 0) map.set('NVDA', 'NVDA');
+    return [...map.entries()].map(([key, symbolHint]) => ({ key, symbolHint }));
+  }
+
+  resolvePayouts(force = false): void {
+    const items = this.instrumentItems();
+    if (items.length === 0) return;
+    const signature = items.map((i) => i.key).sort().join('|');
+    if (!force && signature === this.resolvedSignature) return;
+    this.resolvedSignature = signature;
+    this.incomeLoading = true;
+    this.incomeError = null;
+    this.cdr.markForCheck();
+    this.dashboardService.resolveIncomePayouts(items).subscribe({
+      next: (res) => {
+        const next: Record<string, IncomePayout> = {};
+        for (const p of res.payouts || []) next[p.key] = p;
+        this.payouts = next;
+        this.incomeLoading = false;
+        this.cdr.markForCheck();
+      },
+      error: (err) => {
+        this.incomeError = err?.error?.error || 'Could not fetch payout data.';
+        this.incomeLoading = false;
+        this.cdr.markForCheck();
+      },
+    });
+  }
+
+  /** Account ids present in the holdings (for the selector). */
+  get incomeAccountIds(): string[] {
+    return [...new Set((this.iciciEquityRows || []).map((r) => r.account))].sort((a, b) => Number(a) - Number(b));
+  }
+
+  acctLabel(id: string): string {
+    return this.accountNames[id] || `Account ${id}`;
+  }
+
+  /** Every holding with its payout worked out (unfiltered). */
+  private allIncomeRows(): IncomeRow[] {
+    const rows: IncomeRow[] = [];
+    const build = (key: string, label: string, account: string, qty: number, valueInr: number | null): IncomeRow => {
+      const p = this.payouts[key];
+      const perUnit = p?.annualPayout ?? null;
+      const fx = p?.currency === 'USD' ? this.usdToInr || 0 : 1;
+      const annual = perUnit != null ? qty * perUnit * fx : 0;
+      return {
+        key, label, account, qty,
+        symbol: p?.symbol || '',
+        payoutPerUnit: perUnit,
+        currency: p?.currency || 'INR',
+        source: p?.source || 'unresolved',
+        annualInr: annual,
+        monthlyInr: annual / 12,
+        valueInr,
+        yieldPct: valueInr && valueInr > 0 ? (annual / valueInr) * 100 : null,
+      };
+    };
+    for (const r of this.iciciEquityRows || []) {
+      const code = (r.stockCode || '').trim();
+      if (!code) continue;
+      rows.push(build(code, this.payouts[code]?.name || code, r.account, r.qty, r.valueInr));
+    }
+    if (this.nvdaShares > 0) {
+      const p = this.payouts['NVDA'];
+      const valueInr = null;
+      const row = build('NVDA', 'NVIDIA (NVDA)', '—', this.nvdaShares, valueInr);
+      if (p) rows.push(row);
+    }
+    return rows;
+  }
+
+  /** Rows that actually pay, honouring the account filter. NVDA only shows under "All sources". */
+  get incomeRows(): IncomeRow[] {
+    return this.allIncomeRows()
+      .filter((r) => (r.payoutPerUnit ?? 0) > 0)
+      .filter((r) => (this.incomeAccount === 'all' ? true : r.account === this.incomeAccount))
+      .sort((a, b) => b.monthlyInr - a.monthlyInr);
+  }
+
+  /** Instruments with no payout data or a zero payout — shown separately so a symbol can be fixed. */
+  get incomeGapRows(): IncomeRow[] {
+    return this.allIncomeRows()
+      .filter((r) => !((r.payoutPerUnit ?? 0) > 0))
+      .filter((r) => (this.incomeAccount === 'all' ? true : r.account === this.incomeAccount));
+  }
+
+  get incomeTotals(): { monthly: number; annual: number; value: number; yieldPct: number | null } {
+    let annual = 0;
+    let value = 0;
+    for (const r of this.incomeRows) {
+      annual += r.annualInr;
+      if (r.valueInr != null) value += r.valueInr;
+    }
+    return {
+      monthly: annual / 12,
+      annual,
+      value,
+      yieldPct: value > 0 ? (annual / value) * 100 : null,
+    };
+  }
+
+  /** Persist a symbol / payout override for one instrument, then re-resolve. */
+  saveIncomeOverride(key: string): void {
+    const symbol = (this.symbolDraft[key] ?? '').trim();
+    const payout = this.payoutDraft[key];
+    this.dashboardService
+      .setIncomeOverride(key, { yahooSymbol: symbol, annualPayout: payout ?? null })
+      .subscribe({
+        next: () => this.resolvePayouts(true),
+        error: (err) => {
+          this.incomeError = err?.error?.error || 'Could not save the override.';
+          this.cdr.markForCheck();
+        },
+      });
+  }
+
+  /** Drop an override so the payout goes back to the auto-fetched value. */
+  clearIncomeOverride(key: string): void {
+    this.dashboardService.deleteIncomeOverride(key).subscribe({
+      next: () => {
+        delete this.symbolDraft[key];
+        delete this.payoutDraft[key];
+        this.resolvePayouts(true);
+      },
+      error: () => this.resolvePayouts(true),
+    });
   }
 
   loadItems(): void {

@@ -85,6 +85,134 @@
     </div>
   </section>
 
+  <!-- Expected income -->
+  @let inc = incomeTotals;
+  <section class="nw-section">
+    <div class="nw-section__head">
+      <h3 class="nw-subtitle">Expected monthly income <span class="nw-badge">live</span></h3>
+      <div class="nw-inc-controls">
+        <label class="nw-inc-pick">
+          <span>Source</span>
+          <select class="nw-input" [(ngModel)]="incomeAccount">
+            <option value="all">All sources</option>
+            @for (id of incomeAccountIds; track id) {
+              <option [value]="id">{{ acctLabel(id) }}</option>
+            }
+          </select>
+        </label>
+        <button type="button" class="nw-refresh" [disabled]="incomeLoading" (click)="resolvePayouts(true)">
+          <span class="nw-refresh__icon" [class.nw-refresh__icon--spin]="incomeLoading">↻</span>
+          {{ incomeLoading ? 'Fetching…' : 'Refresh payouts' }}
+        </button>
+      </div>
+    </div>
+    <p class="nw-hint">
+      Dividends and REIT / InvIT distributions, from each instrument's actual payouts over the last 12 months (÷ 12 for a monthly figure).
+      Past payouts, not a guarantee — a special dividend inflates the run rate, so override any row that looks off.
+    </p>
+
+    @if (incomeError) { <p class="nw-error">{{ incomeError }}</p> }
+
+    <div class="nw-summary nw-summary--income">
+      <div class="nw-card nw-card--net">
+        <span class="nw-card__label">Expected per month</span>
+        <span class="nw-card__value">₹ {{ formatInrShort(inc.monthly) }}</span>
+        <span class="nw-card__sub">₹ {{ formatInr(inc.monthly) }}</span>
+      </div>
+      <div class="nw-card nw-card--assets">
+        <span class="nw-card__label">Per year</span>
+        <span class="nw-card__value">₹ {{ formatInrShort(inc.annual) }}</span>
+        <span class="nw-card__sub">₹ {{ formatInr(inc.annual) }}</span>
+      </div>
+      <div class="nw-card">
+        <span class="nw-card__label">Yield on these holdings</span>
+        <span class="nw-card__value">{{ inc.yieldPct != null ? (inc.yieldPct | number : '1.1-2') + '%' : '—' }}</span>
+        <span class="nw-card__sub">on ₹ {{ formatInr(inc.value) }}</span>
+      </div>
+    </div>
+
+    @if (incomeRows.length === 0) {
+      <p class="nw-hint">
+        @if (incomeLoading) { Looking up payout history… }
+        @else { No income-paying holdings found yet. Load your ICICI holdings (ICICI Direct tab), then refresh. }
+      </p>
+    } @else {
+      <div class="nw-table-wrap">
+        <table class="nw-table">
+          <thead>
+            <tr>
+              <th>Instrument</th><th>Account</th><th class="nw-num">Units</th>
+              <th class="nw-num">Payout / unit (12m)</th><th class="nw-num">Per year ₹</th>
+              <th class="nw-num">Per month ₹</th><th class="nw-num">Yield</th><th>Source</th>
+            </tr>
+          </thead>
+          <tbody>
+            @for (r of incomeRows; track r.key + r.account) {
+              <tr>
+                <td class="nw-strong">{{ r.label }}</td>
+                <td>{{ r.account === '—' ? '—' : acctLabel(r.account) }}</td>
+                <td class="nw-num">{{ r.qty }}</td>
+                <td class="nw-num">{{ r.currency === 'USD' ? '$' : '₹' }} {{ r.payoutPerUnit }}</td>
+                <td class="nw-num">₹ {{ formatInr(r.annualInr) }}</td>
+                <td class="nw-num nw-strong">₹ {{ formatInr(r.monthlyInr) }}</td>
+                <td class="nw-num">{{ r.yieldPct != null ? (r.yieldPct | number : '1.1-2') + '%' : '—' }}</td>
+                <td>
+                  <span class="nw-pill" [class.nw-pill--liquid]="r.source === 'yahoo'">{{ r.source === 'manual' ? 'manual' : r.symbol }}</span>
+                </td>
+              </tr>
+            }
+          </tbody>
+          <tfoot>
+            <tr class="nw-row-total">
+              <th colspan="4" scope="row">Total</th>
+              <td class="nw-num">₹ {{ formatInr(inc.annual) }}</td>
+              <td class="nw-num nw-strong">₹ {{ formatInr(inc.monthly) }}</td>
+              <td colspan="2"></td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+    }
+
+    @if (incomeGapRows.length > 0) {
+      <details class="nw-gaps" [open]="showIncomeGaps">
+        <summary class="nw-gaps__summary">Not paying, or needs a symbol ({{ incomeGapRows.length }})</summary>
+        <p class="nw-hint">
+          ICICI uses its own codes, so some instruments can't be matched to a market symbol automatically.
+          Enter the Yahoo symbol (e.g. <code>EMBASSY.NS</code>) or type the annual payout per unit directly.
+        </p>
+        <div class="nw-table-wrap">
+          <table class="nw-table">
+            <thead>
+              <tr><th>Code</th><th>Account</th><th class="nw-num">Units</th><th>Yahoo symbol</th><th class="nw-num">Annual payout / unit</th><th></th></tr>
+            </thead>
+            <tbody>
+              @for (r of incomeGapRows; track r.key + r.account) {
+                <tr>
+                  <td class="nw-strong">{{ r.label }}</td>
+                  <td>{{ r.account === '—' ? '—' : acctLabel(r.account) }}</td>
+                  <td class="nw-num">{{ r.qty }}</td>
+                  <td>
+                    <input type="text" class="nw-input" [ngModel]="symbolDraft[r.key] ?? r.symbol"
+                      (ngModelChange)="symbolDraft[r.key] = $event" placeholder="e.g. EMBASSY.NS" />
+                  </td>
+                  <td class="nw-num">
+                    <input type="number" min="0" step="0.01" class="nw-input nw-input--num"
+                      [ngModel]="payoutDraft[r.key]" (ngModelChange)="payoutDraft[r.key] = $event" placeholder="optional" />
+                  </td>
+                  <td class="nw-actions">
+                    <button type="button" class="nw-add" (click)="saveIncomeOverride(r.key)">Save</button>
+                    <button type="button" class="nw-del" title="Reset to auto" (click)="clearIncomeOverride(r.key)">↺</button>
+                  </td>
+                </tr>
+              }
+            </tbody>
+          </table>
+        </div>
+      </details>
+    }
+  </section>
+
   <!-- Manual entries -->
   <section class="nw-section">
     <div class="nw-section__head">
