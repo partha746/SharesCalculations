@@ -21,8 +21,13 @@ class OwnStockData:
         
         self.livePrice, self.todaysRP, *_ = self.rupeeconv_obj.get_live_price()
         self.max_closing_json = {}
+        # Windows the price provider could not supply. A zero here would silently drop the
+        # lot from the Schedule FA export, so callers must check this before exporting.
+        self.price_fetch_failures = []
 
-    @retry(wait_fixed=30000)
+    # Bounded: this used to retry forever, and requests.get() below can raise, so a provider
+    # outage would hang the request that triggered it rather than surfacing an error.
+    @retry(wait_fixed=30000, stop_max_attempt_number=2)
     def fetch_max_high_and_closing(self, symbol, start_date, end_date, api_key=None):
         api_key = api_key or config.FMV_API_KEY
         json_file = "configs/historic_data.json"
@@ -73,8 +78,12 @@ class OwnStockData:
             "apikey": api_key
         }
 
-        response = requests.get(url, params=params)
-        data = response.json()
+        try:
+            response = requests.get(url, params=params, timeout=20)
+            data = response.json()
+        except Exception as e:
+            self._record_price_failure(start_date, end_date, f"request failed: {e}")
+            return 0, 0
 
         try:
             df = pd.DataFrame(data["values"])
@@ -97,9 +106,19 @@ class OwnStockData:
 
             return round(max_high, 0), round(latest_close, 0)
 
-        except Exception as e:
-            print("Data error for", start_date, "to", end_date, ":", data)
+        except Exception:
+            # The provider returns 200 with an error body (e.g. {"code":401,...}), so surface
+            # its message rather than the parse error it caused.
+            detail = data.get("message") if isinstance(data, dict) else str(data)[:200]
+            self._record_price_failure(start_date, end_date, detail)
             return 0, 0
+
+    def _record_price_failure(self, start_date, end_date, detail):
+        """Log loudly and remember the gap: 0 would look like a fully-sold lot downstream."""
+        window = f"{start_date}..{end_date}"
+        print(f"[price-history] NO DATA for {window}: {detail}", flush=True)
+        if window not in [f["window"] for f in self.price_fetch_failures]:
+            self.price_fetch_failures.append({"window": window, "detail": str(detail)[:200]})
 
     def generate_display_data(self, type):
         """_summary_
@@ -145,6 +164,7 @@ class OwnStockData:
 
         Max_Price = []
         FY_Closing_Price = []
+        Price_Missing = []
         
         for cnt in range(len(df['Buy_Year'])):
             try:
@@ -177,9 +197,16 @@ class OwnStockData:
 
             Max_Price.append(max_price)
             FY_Closing_Price.append(closing_price)
+            # Flag this lot when either window came back empty: a resulting zero is
+            # indistinguishable from a fully-sold lot once it reaches the FA export.
+            failed = {f["window"] for f in self.price_fetch_failures}
+            Price_Missing.append(
+                f"{start}..{end}" in failed or f"{closing_month}..{closing_end}" in failed
+            )
 
         df['Max_Price'] = Max_Price
         df['FY_Closing_Price'] = FY_Closing_Price
+        df['Price_Data_Missing'] = Price_Missing
         df['Max_Value_FY_raw'] = (df['Available_Sell'].mul(df['RupeeRate'])).mul(df['Max_Price'])
         df['FY_Closing_Value_raw'] = (df['Available_Sell'].mul(df['RupeeRate'])).mul(df['FY_Closing_Price'])
         df['Buy_Date'] = buy_dates_parsed.dt.date

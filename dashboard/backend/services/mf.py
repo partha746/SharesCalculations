@@ -290,6 +290,18 @@ def delete_holding(holding_id):
         return cur.rowcount
 
 
+def overlap(refresh=False):
+    """Look-through overlap across every account's funds.
+
+    Recomputed from the current mf_holdings rows on each call, so adding or removing a
+    fund is reflected straight away; only the third-party portfolios are cached. NAV
+    comes from the same cached AMFI lookup the holdings table uses, so fund values agree.
+    """
+    from helpers import mf_overlap
+
+    return mf_overlap.compute(nav_lookup=live_nav, refresh=refresh)
+
+
 def list_holdings(account=None):
     acct = str(account).strip() if account not in (None, "", "all") else None
     with get_db() as conn:

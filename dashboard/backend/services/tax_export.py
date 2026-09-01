@@ -79,10 +79,12 @@ def _build_foreign_asset_rows(fy_year, selected_keys=None):
     datacleaner_obj = gather_data.DataCleaner()
     shares_list = []
 
+    unpriced = []
     for stock_type in ("NSU", "ESPP"):
         if not db_status.get(stock_type):
             continue
-        df, *_ = gather_data.OwnStockData().generate_display_data(type=stock_type)
+        stock_data = gather_data.OwnStockData()
+        df, *_ = stock_data.generate_display_data(type=stock_type)
         for _, row in df.iterrows():
             invest_date = datetime.strptime(row["Buy_Date_formatted"], "%d/%m/%Y")
             if invest_date > fy_end:
@@ -90,6 +92,9 @@ def _build_foreign_asset_rows(fy_year, selected_keys=None):
             if selected_keys is not None:
                 if _lot_export_key(row, stock_type, invest_date) not in selected_keys:
                     continue
+            if bool(row.get("Price_Data_Missing")):
+                unpriced.append(f"{stock_type} {invest_date.strftime('%Y-%m-%d')}")
+                continue
             entry = dict(template)
             entry["InterestAcquiringDate"] = invest_date.strftime("%Y-%m-%d")
             entry["InitialValOfInvstmnt"] = int(round(float(datacleaner_obj.convert_from_symbol(row["InitialValue"])), 0))
@@ -99,6 +104,17 @@ def _build_foreign_asset_rows(fy_year, selected_keys=None):
             if entry["ClosingBalance"] == 0:
                 continue
             shares_list.append(entry)
+
+    # A lot is dropped above when its closing balance is zero, which normally means it was
+    # fully sold. An unpriced lot looks identical, so rather than hand back a quietly short
+    # filing we fail when a lot that belongs in this year could not be priced.
+    if unpriced:
+        return None, None, (
+            "No historical price data for {}. Peak and closing balances would be zero and "
+            "those lots would be silently dropped, so the export was blocked. The provider "
+            "rejected the request — check FMV_API_KEY in dashboard/.env.".format(", ".join(unpriced)),
+            503,
+        )
 
     # Order rows by acquisition date ascending (oldest first).
     shares_list.sort(key=lambda e: e.get("InterestAcquiringDate", ""))

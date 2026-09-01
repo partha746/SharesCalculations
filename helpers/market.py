@@ -1,4 +1,4 @@
-"""USD->INR FX rates + NVDA stock/live/pre-post prices (Finnhub, Frankfurter, yfinance)."""
+"""USD->INR FX rates + NVDA stock/live/pre-post prices (Finnhub, Frankfurter, Nasdaq, yfinance)."""
 import datetime as dt
 import locale
 import sqlite3
@@ -12,9 +12,37 @@ from retrying import retry
 from helpers import config
 from helpers.db import DB
 
-# Cache for yfinance pre/post-market price to avoid rate limits (key -> (timestamp, price))
+# Cache for pre/post-market price to avoid rate limits (key -> (timestamp, price))
 _yf_extended_price_cache = {}
 _YF_CACHE_TTL_SEC = 90  # reuse result for 90s
+
+# Nasdaq's own quote feed, which powers nasdaq.com. Undocumented but keyless and real-time
+# during extended hours; Yahoo (yfinance) now rate-limits this host on every request, so
+# Nasdaq is tried first and yfinance is kept only as a fallback for when it recovers.
+_NASDAQ_QUOTE_URL = "https://api.nasdaq.com/api/quote/{symbol}/info"
+_NASDAQ_HEADERS = {
+    # The endpoint returns 403 to non-browser agents.
+    "User-Agent": (
+        "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) Chrome/125.0 Safari/537.36"
+    ),
+    "Accept": "application/json, text/plain, */*",
+    "Accept-Language": "en-US,en;q=0.9",
+}
+_NASDAQ_TIMEOUT_SEC = 12
+
+
+def _parse_money(value):
+    """'$217.9105' / '1,234.50' -> float. None when blank or unparseable."""
+    if value is None:
+        return None
+    text = str(value).replace("$", "").replace(",", "").strip()
+    if not text or text.upper() in ("N/A", "NA", "--"):
+        return None
+    try:
+        return float(text)
+    except ValueError:
+        return None
 
 
 class RupeeConv:
@@ -165,12 +193,63 @@ class RupeeConv:
         s.verify = False
         return s
 
-    def get_premarket_price(self, symbol="NVDA"):
-        """Get current pre-market price (USD) via yfinance. Returns float or None. Use when in pre-market (4–9:30 AM ET)."""
+    def nasdaq_quote(self, symbol="NVDA"):
+        """Nasdaq's live quote: {status, price, prevClose, timestamp, realTime} or None.
+
+        During extended hours `primaryData` carries the pre/post-market print and
+        `secondaryData` the last regular close; `marketStatus` says which session we are in
+        ('Pre-Market', 'After Hours', 'Market Open', 'Closed'), so callers do not have to
+        infer the window from the clock.
+        """
         try:
-            import yfinance as yf
-        except ImportError:
+            session = self._yf_session()  # shares the relaxed-TLS session used elsewhere
+            resp = session.get(
+                _NASDAQ_QUOTE_URL.format(symbol=symbol.upper()),
+                params={"assetclass": "stocks"},
+                headers=_NASDAQ_HEADERS,
+                timeout=_NASDAQ_TIMEOUT_SEC,
+            )
+            if resp.status_code != 200:
+                print(f"[nasdaq] {symbol}: HTTP {resp.status_code}")
+                return None
+            data = (resp.json() or {}).get("data") or {}
+        except Exception as e:
+            print(f"[nasdaq] {symbol}: {e}")
             return None
+
+        primary = data.get("primaryData") or {}
+        secondary = data.get("secondaryData") or {}
+        price = _parse_money(primary.get("lastSalePrice"))
+        if price is None or price <= 0:
+            return None
+        return {
+            "status": (data.get("marketStatus") or "").strip(),
+            "price": round(price, 2),
+            "prevClose": _parse_money(secondary.get("lastSalePrice")),
+            "timestamp": (primary.get("lastTradeTimestamp") or "").strip(),
+            "realTime": bool(primary.get("isRealTime")),
+        }
+
+    def _nasdaq_session_price(self, symbol, wanted):
+        """(answered, price) for the requested session. `wanted` is 'pre' or 'post'.
+
+        `answered` is False only when Nasdaq itself was unreachable, so the caller knows to
+        try yfinance. When Nasdaq answers but reports a different session we return
+        (True, None): it is authoritative about the session, and falling through to a
+        rate-limited Yahoo would just stall the caller for several seconds every poll.
+        """
+        quote = self.nasdaq_quote(symbol)
+        if not quote:
+            return False, None
+        status = quote["status"].lower()
+        in_session = ("pre" in status) if wanted == "pre" else ("after" in status or "post" in status)
+        return True, (quote["price"] if in_session else None)
+
+    def get_premarket_price(self, symbol="NVDA"):
+        """Current pre-market price (USD), or None. Use during pre-market (4–9:30 AM ET).
+
+        Nasdaq first, yfinance as a fallback.
+        """
         sym = symbol.upper()
         cache_key = f"pre_{sym}"
         now_utc = time.time()
@@ -179,6 +258,23 @@ class RupeeConv:
             ts, price = cached
             if (now_utc - ts) < _YF_CACHE_TTL_SEC and price is not None:
                 return price
+        answered, price = self._nasdaq_session_price(sym, "pre")
+        if price is not None:
+            _yf_extended_price_cache[cache_key] = (now_utc, price)
+            return price
+        if answered:
+            return None
+        return self._get_premarket_price_yf(sym)
+
+    def _get_premarket_price_yf(self, symbol="NVDA"):
+        """Fallback pre-market lookup via yfinance. The caller owns the cache read."""
+        try:
+            import yfinance as yf
+        except ImportError:
+            return None
+        sym = symbol.upper()
+        cache_key = f"pre_{sym}"
+        now_utc = time.time()
         session = self._yf_session()
         try:
             # 1) Try ticker.info preMarketPrice first (one request; works in newer yfinance)
@@ -223,11 +319,10 @@ class RupeeConv:
             return None
 
     def get_postmarket_price(self, symbol="NVDA"):
-        """Get current post-market price (USD) via yfinance. Returns float or None. Use when in post-market (4–8 PM ET)."""
-        try:
-            import yfinance as yf
-        except ImportError:
-            return None
+        """Current post-market price (USD), or None. Use during post-market (4–8 PM ET).
+
+        Nasdaq first, yfinance as a fallback.
+        """
         sym = symbol.upper()
         cache_key = f"post_{sym}"
         now_utc = time.time()
@@ -236,6 +331,23 @@ class RupeeConv:
             ts, price = cached
             if (now_utc - ts) < _YF_CACHE_TTL_SEC and price is not None:
                 return price
+        answered, price = self._nasdaq_session_price(sym, "post")
+        if price is not None:
+            _yf_extended_price_cache[cache_key] = (now_utc, price)
+            return price
+        if answered:
+            return None
+        return self._get_postmarket_price_yf(sym)
+
+    def _get_postmarket_price_yf(self, symbol="NVDA"):
+        """Fallback post-market lookup via yfinance. The caller owns the cache read."""
+        try:
+            import yfinance as yf
+        except ImportError:
+            return None
+        sym = symbol.upper()
+        cache_key = f"post_{sym}"
+        now_utc = time.time()
         session = self._yf_session()
         try:
             df = yf.download(

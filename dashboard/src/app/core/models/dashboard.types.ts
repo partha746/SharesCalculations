@@ -173,6 +173,68 @@ export interface MfHoldingsResponse {
   };
 }
 
+/** One fund inside an account, as reported by the overlap analysis. */
+export interface MfOverlapFund {
+  schemeCode: string;
+  name: string;
+  category: string;
+  valueInr: number;
+  investedInr: number;
+  equityAllocPct: number;
+  /** False for debt/liquid funds, which hold no stocks and are left out of overlap. */
+  isEquity: boolean;
+  stockCount: number;
+}
+
+/** Shared weight between two funds: Σ min(weight in A, weight in B) over common stocks. */
+export interface MfOverlapPair {
+  a: string;
+  b: string;
+  accountA: string;
+  accountB: string;
+  overlapPct: number;
+  sharedStocks: number;
+  topShared: string[];
+}
+
+/** A single company's combined exposure after looking through every fund that holds it. */
+export interface MfOverlapStock {
+  name: string;
+  inr: number;
+  pct: number;
+  fundCount: number;
+  accounts?: string[];
+}
+
+export interface MfOverlapAccount {
+  account: string;
+  totalInr: number;
+  equityInr: number;
+  fundCount: number;
+  equityFundCount: number;
+  distinctStocks: number;
+  effectiveStocks: number;
+  funds: MfOverlapFund[];
+  pairs: MfOverlapPair[];
+  topStocks: MfOverlapStock[];
+}
+
+export interface MfOverlapResponse {
+  generatedAt: string;
+  equityTotalInr: number;
+  grandTotalInr: number;
+  debtTotalInr: number;
+  distinctStocks: number;
+  /** 1 / Σ share² on look-through weights: concentration expressed as equally weighted names. */
+  effectiveStocks: number;
+  accounts: MfOverlapAccount[];
+  household: MfOverlapStock[];
+  crossAccount: MfOverlapPair[];
+  sectors: { sector: string; inr: number; pct: number }[];
+  duplicateSchemes: { schemeCode: string; name: string; accounts: string[]; totalInr: number }[];
+  unavailable: { schemeCode: string; schemeName: string; account: string }[];
+}
+
 /** One NVIDIA news article with computed sentiment. */
 export interface NewsArticle {
   headline: string;

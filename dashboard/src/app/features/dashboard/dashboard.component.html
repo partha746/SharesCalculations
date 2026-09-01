@@ -1032,6 +1032,326 @@
         }
       }
     </section>
+
+    <section class="dashboard-section playground-card">
+      <h2 class="section-title">Mutual fund overlap</h2>
+      <p class="playground-desc">
+        Looks through every fund in <strong>Mutual funds</strong> to its disclosed stock holdings, so you can see where
+        two funds are buying the same companies. Recomputed automatically whenever you add, edit or remove a fund.
+      </p>
+
+      @if (mfOverlapLoading && !mfOverlap) {
+        <p class="holdings-table__hint">Working out fund overlap…</p>
+      } @else if (mfOverlapError) {
+        <p class="playground-desc playground-desc--warning">{{ mfOverlapError }}</p>
+        <button type="button" class="mfo-btn" (click)="loadMfOverlap()">Try again</button>
+      } @else if (mfOverlap && mfOverlap.accounts.length === 0) {
+        <p class="holdings-table__hint">Add mutual funds in the ICICI Direct tab to see overlap.</p>
+      } @else if (mfOverlap) {
+        <div class="mfo-stats">
+          <div class="mfo-stat">
+            <span class="mfo-stat__value">₹ {{ formatInr(mfOverlap.equityTotalInr) }}</span>
+            <span class="mfo-stat__label">Equity across all accounts</span>
+          </div>
+          <div class="mfo-stat">
+            <span class="mfo-stat__value">{{ mfOverlap.distinctStocks }}</span>
+            <span class="mfo-stat__label">Distinct underlying stocks</span>
+          </div>
+          <div class="mfo-stat">
+            <span class="mfo-stat__value mfo-stat__value--warn">{{ mfOverlap.effectiveStocks }}</span>
+            <span class="mfo-stat__label">Effective stocks (concentration)</span>
+          </div>
+          <div class="mfo-stat">
+            <span class="mfo-stat__value">₹ {{ formatInr(mfOverlap.debtTotalInr) }}</span>
+            <span class="mfo-stat__label">Debt / liquid, no equity</span>
+          </div>
+        </div>
+
+        @if (mfOverlapWorstPair) {
+          <p class="mfo-callout">
+            Highest overlap is <strong>{{ mfOverlapWorstPair.overlapPct | number:'1.1-1' }}%</strong>, between
+            <strong>{{ mfOverlapWorstPair.a }}</strong> and <strong>{{ mfOverlapWorstPair.b }}</strong>
+            in {{ mfAcctLabel(mfOverlapWorstPair.account) }} — {{ mfOverlapWorstPair.sharedStocks }} shared stocks, led by
+            {{ mfOverlapWorstPair.topShared.slice(0, 3).join(', ') }}.
+          </p>
+        }
+        @if (mfOverlapConcentrationPct != null) {
+          <p class="playground-desc">
+            Those {{ mfOverlap.distinctStocks }} names carry the concentration of about
+            <strong>{{ mfOverlap.effectiveStocks }}</strong> equally weighted positions
+            (1 / Σ share², on look-through weights). Part of that gap is ordinary cap-weighting rather than overlap, so
+            track it over time rather than reading it as a duplication percentage.
+          </p>
+        }
+
+        <div class="mfo-chart-head">
+          <h3 class="playground-multi-subtitle mfo-chart-head__title">Largest look-through stock exposure</h3>
+          <div class="mfo-scope">
+            <button type="button" class="chart-mode-btn" [class.chart-mode-btn--active]="mfOverlapChartScope === 'household'"
+                    (click)="setMfOverlapChartScope('household')">All accounts</button>
+            <button type="button" class="chart-mode-btn" [class.chart-mode-btn--active]="mfOverlapChartScope === 'account'"
+                    (click)="setMfOverlapChartScope('account')">
+              {{ mfOverlapAccount ? mfAcctLabel(mfOverlapAccount.account) : 'Selected account' }}
+            </button>
+          </div>
+        </div>
+        <p class="playground-desc">
+          Each fund's current value split across its disclosed holdings and summed, so a company held by several funds
+          shows its true combined weight. Top 12 of
+          {{ mfOverlapChartScope === 'household' ? mfOverlap.distinctStocks : (mfOverlapAccount?.distinctStocks ?? 0) }}
+          stocks. Hover a bar for the number of funds behind it.
+        </p>
+        <div class="mfo-chart mfo-chart--stocks">
+          <canvas #mfOverlapStocksCanvas></canvas>
+        </div>
+
+        <div class="mfo-acct-bar">
+          @for (a of mfOverlap.accounts; track a.account) {
+            <button type="button" class="mfo-acct" [class.mfo-acct--active]="a.account === (mfOverlapAccount?.account ?? '')"
+                    (click)="selectMfOverlapAccount(a.account)">
+              {{ mfAcctLabel(a.account) }}
+              <span class="mfo-acct__meta">{{ a.equityFundCount }} equity</span>
+            </button>
+          }
+        </div>
+
+        @if (mfOverlapAccount) {
+          <h3 class="playground-multi-subtitle">
+            {{ mfAcctLabel(mfOverlapAccount.account) }} — {{ mfOverlapAccount.fundCount }} funds,
+            ₹ {{ formatInr(mfOverlapAccount.equityInr) }} equity of ₹ {{ formatInr(mfOverlapAccount.totalInr) }},
+            {{ mfOverlapAccount.distinctStocks }} distinct stocks
+          </h3>
+          <div class="playground-table-wrap">
+            <table class="holdings-table playground-table">
+              <thead>
+                <tr class="holdings-table__header">
+                  <th>Fund</th>
+                  <th>Category</th>
+                  <th>Value ₹</th>
+                  <th>Equity %</th>
+                  <th>Stocks</th>
+                </tr>
+              </thead>
+              <tbody>
+                @for (f of mfOverlapAccount.funds; track f.schemeCode) {
+                  <tr [class.mfo-row--muted]="!f.isEquity">
+                    <td>{{ f.name }}</td>
+                    <td>{{ f.category }}{{ f.isEquity ? '' : ' (no equity)' }}</td>
+                    <td class="mfo-num">{{ formatInr(f.valueInr) }}</td>
+                    <td class="mfo-num">{{ f.isEquity ? (f.equityAllocPct | number:'1.1-1') + '%' : '—' }}</td>
+                    <td class="mfo-num">{{ f.isEquity ? f.stockCount : '—' }}</td>
+                  </tr>
+                }
+              </tbody>
+            </table>
+          </div>
+
+          @if (mfOverlapAccount.pairs.length > 0) {
+            <h3 class="playground-multi-subtitle">Overlap between funds in this account</h3>
+            <p class="playground-desc">
+              Shared weight = Σ min(weight in A, weight in B) across common stocks, as a percentage of fund NAV.
+              Green below 15%, amber to 30%, red above. Hover a bar for the number of common stocks.
+            </p>
+            <div class="mfo-chart mfo-chart--pairs">
+              <canvas #mfOverlapPairsCanvas></canvas>
+            </div>
+            <div class="playground-table-wrap playground-table-scroll">
+              <table class="holdings-table playground-table">
+                <thead>
+                  <tr class="holdings-table__header">
+                    <th>Fund A</th>
+                    <th>Fund B</th>
+                    <th>Overlap</th>
+                    <th>Shared</th>
+                    <th>Largest shared names</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  @for (p of mfOverlapAccount.pairs; track p.a + '|' + p.b) {
+                    <tr>
+                      <td>{{ p.a }}</td>
+                      <td>{{ p.b }}</td>
+                      <td class="mfo-num">
+                        <span class="mfo-meter">
+                          <span class="mfo-meter__fill" [class]="'mfo-meter__fill--' + overlapSeverity(p.overlapPct)"
+                                [style.width.%]="overlapBarPct(p.overlapPct)"></span>
+                        </span>
+                        <span class="mfo-meter__label">{{ p.overlapPct | number:'1.1-1' }}%</span>
+                      </td>
+                      <td class="mfo-num">{{ p.sharedStocks }}</td>
+                      <td class="mfo-shared">{{ p.topShared.slice(0, 3).join(', ') }}</td>
+                    </tr>
+                  }
+                </tbody>
+              </table>
+            </div>
+          }
+
+          @if (mfOverlapAccount.topStocks.length > 0) {
+            <h3 class="playground-multi-subtitle">Largest look-through positions in this account</h3>
+            <div class="playground-table-wrap playground-table-scroll">
+              <table class="holdings-table playground-table">
+                <thead>
+                  <tr class="holdings-table__header">
+                    <th>Company</th>
+                    <th>Exposure ₹</th>
+                    <th>% of equity</th>
+                    <th>Via funds</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  @for (s of mfOverlapAccount.topStocks; track s.name) {
+                    <tr>
+                      <td>{{ s.name }}</td>
+                      <td class="mfo-num">{{ formatInr(s.inr) }}</td>
+                      <td class="mfo-num">{{ s.pct | number:'1.2-2' }}%</td>
+                      <td class="mfo-num">{{ s.fundCount }}</td>
+                    </tr>
+                  }
+                </tbody>
+              </table>
+            </div>
+          }
+        }
+
+        <h3 class="playground-multi-subtitle">Household — every account combined</h3>
+        <div class="mfo-split">
+          <div class="mfo-split__col">
+            <p class="playground-desc">Biggest single-name exposures, and how many funds deliver each one.</p>
+            <div class="playground-table-wrap playground-table-scroll">
+              <table class="holdings-table playground-table">
+                <thead>
+                  <tr class="holdings-table__header">
+                    <th>Company</th>
+                    <th>Exposure ₹</th>
+                    <th>%</th>
+                    <th>Funds</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  @for (s of mfOverlap.household; track s.name) {
+                    <tr>
+                      <td>{{ s.name }}</td>
+                      <td class="mfo-num">{{ formatInr(s.inr) }}</td>
+                      <td class="mfo-num">{{ s.pct | number:'1.2-2' }}%</td>
+                      <td class="mfo-num">{{ s.fundCount }}</td>
+                    </tr>
+                  }
+                </tbody>
+              </table>
+            </div>
+          </div>
+          <div class="mfo-split__col">
+            <p class="playground-desc">Sector mix of household equity — share of ₹ {{ formatInr(mfOverlap.equityTotalInr) }}.</p>
+            <div class="mfo-chart mfo-chart--sectors">
+              <canvas #mfOverlapSectorsCanvas></canvas>
+            </div>
+            <div class="playground-table-wrap playground-table-scroll">
+              <table class="holdings-table playground-table">
+                <thead>
+                  <tr class="holdings-table__header">
+                    <th>Sector</th>
+                    <th>Exposure ₹</th>
+                    <th>%</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  @for (s of mfOverlap.sectors; track s.sector) {
+                    <tr>
+                      <td>{{ s.sector }}</td>
+                      <td class="mfo-num">{{ formatInr(s.inr) }}</td>
+                      <td class="mfo-num">{{ s.pct | number:'1.2-2' }}%</td>
+                    </tr>
+                  }
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        @if (mfOverlap.duplicateSchemes.length > 0) {
+          <h3 class="playground-multi-subtitle">Same scheme held in more than one account</h3>
+          <p class="playground-desc">
+            Not a diversification problem by itself — it just means those accounts are not diversifying each other.
+          </p>
+          <div class="playground-table-wrap">
+            <table class="holdings-table playground-table">
+              <thead>
+                <tr class="holdings-table__header">
+                  <th>Fund</th>
+                  <th>Accounts</th>
+                  <th>Combined value ₹</th>
+                </tr>
+              </thead>
+              <tbody>
+                @for (d of mfOverlap.duplicateSchemes; track d.schemeCode) {
+                  <tr>
+                    <td>{{ d.name }}</td>
+                    <td>{{ d.accounts.length }} — @for (a of d.accounts; track a) {<span>{{ mfAcctLabel(a) }}@if (!$last) {, }</span>}</td>
+                    <td class="mfo-num">{{ formatInr(d.totalInr) }}</td>
+                  </tr>
+                }
+              </tbody>
+            </table>
+          </div>
+        }
+
+        @if (mfOverlap.crossAccount.length > 0) {
+          <h3 class="playground-multi-subtitle">Highest overlap across different accounts</h3>
+          <div class="playground-table-wrap playground-table-scroll">
+            <table class="holdings-table playground-table">
+              <thead>
+                <tr class="holdings-table__header">
+                  <th>Fund A</th>
+                  <th>Held by</th>
+                  <th>Fund B</th>
+                  <th>Held by</th>
+                  <th>Overlap</th>
+                  <th>Shared</th>
+                </tr>
+              </thead>
+              <tbody>
+                @for (p of mfOverlap.crossAccount; track p.a + '|' + p.b) {
+                  <tr>
+                    <td>{{ p.a }}</td>
+                    <td>{{ mfAcctLabel(p.accountA) }}</td>
+                    <td>{{ p.b }}</td>
+                    <td>{{ mfAcctLabel(p.accountB) }}</td>
+                    <td class="mfo-num">
+                      <span class="mfo-meter">
+                        <span class="mfo-meter__fill" [class]="'mfo-meter__fill--' + overlapSeverity(p.overlapPct)"
+                              [style.width.%]="overlapBarPct(p.overlapPct)"></span>
+                      </span>
+                      <span class="mfo-meter__label">{{ p.overlapPct | number:'1.1-1' }}%</span>
+                    </td>
+                    <td class="mfo-num">{{ p.sharedStocks }}</td>
+                  </tr>
+                }
+              </tbody>
+            </table>
+          </div>
+        }
+
+        @if (mfOverlap.unavailable.length > 0) {
+          <p class="playground-desc playground-desc--warning">
+            No published portfolio for
+            @for (u of mfOverlap.unavailable; track u.schemeCode) {<span>{{ u.schemeName }}@if (!$last) {, }</span>}
+            — excluded from the figures above.
+          </p>
+        }
+
+        <div class="mfo-footer">
+          <button type="button" class="mfo-btn" [disabled]="mfOverlapLoading" (click)="loadMfOverlap(true)">
+            {{ mfOverlapRefreshing ? 'Re-fetching…' : 'Re-fetch fund portfolios' }}
+          </button>
+          <span class="playground-desc">
+            Debt and liquid funds disclose bond issuers rather than stocks, so they are excluded from every overlap and
+            look-through figure. Percentages are of the equity portion. Portfolios are cached for a week; AMCs publish
+            them monthly.
+          </span>
+        </div>
+      }
+    </section>
   </div>
     }
 

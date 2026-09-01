@@ -29,6 +29,7 @@ helpers/                 # shared data layer (importable by backend + scripts)
   market.py              # RupeeConv: USD->INR FX + NVDA stock/live/pre-post prices
   stock_data.py          # OwnStockData: builds holdings/sold display dataframes
   tax.py                 # Tax: slabs + ITR foreign-asset JSON
+  mf_overlap.py          # look-through fund overlap (FinAPI portfolios, cached in configs/)
   cleaning.py            # DataCleaner
   eks.py                 # EksHelper (legacy ELK push; needs `pip install elasticsearch pytz`)
   gather_data.py         # back-compat facade re-exporting the above (EksHelper resolved lazily)
@@ -46,7 +47,7 @@ dashboard/
       tax.py             #   /api/tax-config, /api/generate-tax-doc, /api/export-fa-a3
       breeze.py          #   /api/breeze/* (accounts, OAuth callback, holdings, positions)
       news.py            #   /api/news (NVIDIA news + sentiment)
-      mf.py              #   /api/mf/* (AMFI scheme search, holdings CRUD, CSV import)
+      mf.py              #   /api/mf/* (AMFI scheme search, holdings CRUD, CSV import, overlap)
       networth.py        #   /api/networth/items (CRUD)
       income.py          #   /api/income/resolve, /api/income/overrides/<key>
       earmarks.py        #   /api/earmarks (lots reserved at a target sell price)
@@ -57,7 +58,7 @@ dashboard/
       tax_export.py      #   foreign-asset (Schedule FA) row builder + paths
       breeze.py          #   ICICI Breeze helpers
       news.py            #   Finnhub company-news fetch + VADER sentiment (cached)
-      mf.py              #   AMFI/mfapi.in NAV lookup + scheme-name resolution
+      mf.py              #   AMFI/mfapi.in NAV lookup + scheme-name resolution + overlap analysis
       networth.py        #   networth_items CRUD
       income.py          #   dividend/REIT payout resolution (yfinance) + ICICI->NSE symbol map
       earmarks.py        #   earmarks CRUD

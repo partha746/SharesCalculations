@@ -14,6 +14,7 @@ import {
   LivePriceResponse,
   MarketStatusResponse,
   MfHoldingsResponse,
+  MfOverlapResponse,
   MfSearchResult,
   NetworthItem,
   NetworthItemsResponse,
@@ -68,6 +69,12 @@ export class DashboardService {
   }
   importMfCsv(account: string, csv: string): Observable<{ imported: any[]; skipped: any[] }> {
     return this.http.post<{ imported: any[]; skipped: any[] }>(`${this.apiUrl}/mf/import`, { account, csv });
+  }
+  /** Look-through fund overlap. Recomputed server-side from current holdings; `refresh`
+   * also re-fetches the underlying fund portfolios from the provider. */
+  getMfOverlap(refresh = false): Observable<MfOverlapResponse> {
+    const r = refresh ? '&refresh=1' : '';
+    return this.http.get<MfOverlapResponse>(`${this.apiUrl}/mf/overlap?t=${Date.now()}${r}`);
   }
 
   /** Server-aggregated OHLC live price history for the chart (bucketed to <= maxPoints). */

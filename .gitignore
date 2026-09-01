@@ -61,3 +61,4 @@ certs/
 
 # Generated caches (re-downloaded on demand)
 configs/icici_nse_scrip_map.json
+configs/mf_portfolio_cache.json

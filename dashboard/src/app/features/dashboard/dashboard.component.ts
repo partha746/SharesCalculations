@@ -56,6 +56,9 @@ import {
   LivePriceDayTickerItem,
   LivePriceHistoryPoint,
   MfHolding,
+  MfOverlapAccount,
+  MfOverlapPair,
+  MfOverlapResponse,
   SoldRow,
 } from '../../core/models/dashboard.types';
 
@@ -91,6 +94,12 @@ import { DataTabComponent } from './data-tab/data-tab.component';
 import { NewsTabComponent } from './news-tab/news-tab.component';
 import { MfTabComponent } from './mf-tab/mf-tab.component';
 import { NetworthTabComponent } from './networth-tab/networth-tab.component';
+
+/** Categorical palette for the fund-overlap sector doughnut (ordered, largest slice first). */
+const MF_SECTOR_COLORS = [
+  '#388bfd', '#3fb950', '#d4a72c', '#db6d28', '#a371f7',
+  '#39c5cf', '#f85149', '#8b949e', '#6e7681', '#484f58',
+];
 
 const HOLDING_COLS = ['buyPriceUsd', 'type', 'totalPurchaseInr', 'netIfSellTodayInr', 'buyDate', 'qty', 'profitPercent', 'taxToPayInr', 'taxPercent'] as const;
 const DATE_COLS = ['buyDate'];
@@ -243,9 +252,15 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
   @ViewChild('holdingsChartCanvas') holdingsChartCanvas?: ElementRef<HTMLCanvasElement>;
   @ViewChild('soldChartCanvas') soldChartCanvas?: ElementRef<HTMLCanvasElement>;
   @ViewChild('livePriceChartCanvas') livePriceChartCanvas?: ElementRef<HTMLCanvasElement>;
+  @ViewChild('mfOverlapStocksCanvas') mfOverlapStocksCanvas?: ElementRef<HTMLCanvasElement>;
+  @ViewChild('mfOverlapSectorsCanvas') mfOverlapSectorsCanvas?: ElementRef<HTMLCanvasElement>;
+  @ViewChild('mfOverlapPairsCanvas') mfOverlapPairsCanvas?: ElementRef<HTMLCanvasElement>;
   private holdingsChart: InstanceType<typeof Chart> | null = null;
   private soldChart: InstanceType<typeof Chart> | null = null;
   private livePriceChart: InstanceType<typeof Chart> | null = null;
+  private mfOverlapStocksChart: InstanceType<typeof Chart> | null = null;
+  private mfOverlapSectorsChart: InstanceType<typeof Chart> | null = null;
+  private mfOverlapPairsChart: InstanceType<typeof Chart> | null = null;
 
   /** Chart consolidation: by date, or by month/quarter/year. */
   holdingsChartGroupBy: 'date' | 'monthly' | 'quarterly' | 'yearly' = 'date';
@@ -903,6 +918,7 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
       next: (res) => {
         this.mfHoldings = res.holdings ?? [];
         this.mfHoldingsLoading = false;
+        this.onMfHoldingsSettled();
         this.cdr.markForCheck();
       },
       error: () => {
@@ -918,6 +934,337 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
       next: () => this.loadMfHoldings(),
       error: () => {},
     });
+  }
+
+  // ===== Playground: mutual-fund overlap =====
+
+  mfOverlap: MfOverlapResponse | null = null;
+  mfOverlapLoading = false;
+  mfOverlapRefreshing = false;
+  mfOverlapError: string | null = null;
+  /** Account whose breakdown is shown; empty means the first account in the response. */
+  mfOverlapAccountId = '';
+  /** Identifies the current set of funds, so the analysis is only redone when they change. */
+  private mfHoldingsFingerprint: string | null = null;
+
+  private fingerprintMfHoldings(): string {
+    return this.mfHoldings
+      .map((m) => `${m.id}:${m.account}:${m.schemeCode}:${m.units}`)
+      .sort()
+      .join('|');
+  }
+
+  /** Adding, editing or removing a fund makes the overlap analysis stale. */
+  private onMfHoldingsSettled(): void {
+    const fingerprint = this.fingerprintMfHoldings();
+    if (fingerprint === this.mfHoldingsFingerprint) return;
+    const hadAnalysis = this.mfHoldingsFingerprint !== null;
+    this.mfHoldingsFingerprint = fingerprint;
+    this.mfOverlap = null;
+    // Recompute right away when the user is looking at it; otherwise on next visit.
+    if (hadAnalysis || this.activeTab === 'playground') this.loadMfOverlap();
+  }
+
+  loadMfOverlap(refresh = false): void {
+    if (this.mfOverlapLoading) return;
+    this.mfOverlapLoading = true;
+    this.mfOverlapRefreshing = refresh;
+    this.mfOverlapError = null;
+    this.cdr.markForCheck();
+    this.dashboardService.getMfOverlap(refresh).subscribe({
+      next: (res) => {
+        this.mfOverlap = res;
+        if (!res.accounts.some((a) => a.account === this.mfOverlapAccountId)) {
+          this.mfOverlapAccountId = res.accounts[0]?.account ?? '';
+        }
+        this.mfOverlapLoading = false;
+        this.mfOverlapRefreshing = false;
+        this.cdr.markForCheck();
+        this.scheduleMfOverlapCharts();
+      },
+      error: (err) => {
+        this.mfOverlapError = err?.error?.error || err?.message || 'Could not load fund overlap';
+        this.mfOverlapLoading = false;
+        this.mfOverlapRefreshing = false;
+        this.cdr.markForCheck();
+      },
+    });
+  }
+
+  get mfOverlapAccount(): MfOverlapAccount | null {
+    if (!this.mfOverlap) return null;
+    return (
+      this.mfOverlap.accounts.find((a) => a.account === this.mfOverlapAccountId) ??
+      this.mfOverlap.accounts[0] ??
+      null
+    );
+  }
+
+  /** Worst overlapping pair anywhere, used for the summary line. */
+  get mfOverlapWorstPair(): (MfOverlapPair & { account: string }) | null {
+    if (!this.mfOverlap) return null;
+    let worst: (MfOverlapPair & { account: string }) | null = null;
+    for (const acct of this.mfOverlap.accounts) {
+      for (const p of acct.pairs) {
+        if (!worst || p.overlapPct > worst.overlapPct) worst = { ...p, account: acct.account };
+      }
+    }
+    return worst;
+  }
+
+  /** Share of apparent breadth lost to concentration, as a whole percentage. */
+  get mfOverlapConcentrationPct(): number | null {
+    const o = this.mfOverlap;
+    if (!o || !o.distinctStocks) return null;
+    return Math.round((1 - o.effectiveStocks / o.distinctStocks) * 100);
+  }
+
+  /** Amber above 15% shared weight, red above 30%. */
+  overlapSeverity(pct: number): 'high' | 'medium' | 'low' {
+    if (pct >= 30) return 'high';
+    if (pct >= 15) return 'medium';
+    return 'low';
+  }
+
+  /** Bar width for the inline overlap meter, scaled so 50% shared weight fills the cell. */
+  overlapBarPct(pct: number): number {
+    return Math.max(2, Math.min(100, (pct / 50) * 100));
+  }
+
+  mfAcctLabel(id: string): string {
+    return this.breezeAccountNames[id] || `Account ${id}`;
+  }
+
+  /** Whether the exposure chart shows the selected account or every account combined. */
+  mfOverlapChartScope: 'account' | 'household' = 'household';
+
+  setMfOverlapChartScope(scope: 'account' | 'household'): void {
+    this.mfOverlapChartScope = scope;
+    this.scheduleMfOverlapCharts();
+  }
+
+  selectMfOverlapAccount(account: string): void {
+    this.mfOverlapAccountId = account;
+    this.scheduleMfOverlapCharts();
+  }
+
+  /** Redraw after Angular has rendered the canvases the charts attach to. */
+  private scheduleMfOverlapCharts(): void {
+    setTimeout(() => this.initOrUpdateMfOverlapCharts(), 0);
+  }
+
+  private destroyMfOverlapCharts(): void {
+    this.mfOverlapStocksChart?.destroy();
+    this.mfOverlapStocksChart = null;
+    this.mfOverlapSectorsChart?.destroy();
+    this.mfOverlapSectorsChart = null;
+    this.mfOverlapPairsChart?.destroy();
+    this.mfOverlapPairsChart = null;
+  }
+
+  private overlapBarColor(pct: number): string {
+    const severity = this.overlapSeverity(pct);
+    return severity === 'high' ? '#f85149' : severity === 'medium' ? '#d4a72c' : '#3fb950';
+  }
+
+  /** Stocks feeding the exposure chart, honouring the account/household toggle. */
+  private mfOverlapChartStocks(): { name: string; inr: number; fundCount: number }[] {
+    if (!this.mfOverlap) return [];
+    const rows =
+      this.mfOverlapChartScope === 'household'
+        ? this.mfOverlap.household
+        : (this.mfOverlapAccount?.topStocks ?? []);
+    return rows.slice(0, 12);
+  }
+
+  private initOrUpdateMfOverlapCharts(): void {
+    if (!this.mfOverlap) return;
+
+    const stocks = this.mfOverlapChartStocks();
+    const stocksCanvas = this.mfOverlapStocksCanvas?.nativeElement;
+    if (stocksCanvas && stocks.length > 0) {
+      // "HDFC Bank Ltd" -> "HDFC Bank": the suffix costs axis width and says nothing.
+      const labels = stocks.map((s) => s.name.replace(/\s+(Ltd|Limited)\.?$/i, ''));
+      const data = stocks.map((s) => Math.round(s.inr));
+      const fundCounts = stocks.map((s) => s.fundCount);
+      if (this.mfOverlapStocksChart) {
+        this.mfOverlapStocksChart.data.labels = labels;
+        (this.mfOverlapStocksChart.data.datasets[0] as { data: number[] }).data = data;
+        (this.mfOverlapStocksChart.data.datasets[0] as { fundCounts?: number[] }).fundCounts = fundCounts;
+        this.mfOverlapStocksChart.update();
+      } else {
+        this.mfOverlapStocksChart = new Chart(stocksCanvas, {
+          type: 'bar',
+          data: {
+            labels,
+            datasets: [
+              {
+                label: 'Look-through exposure (INR)',
+                data,
+                fundCounts,
+                backgroundColor: '#388bfd',
+                hoverBackgroundColor: '#58a6ff',
+                borderWidth: 0,
+                barThickness: 'flex',
+                maxBarThickness: 18,
+              } as any,
+            ],
+          },
+          options: {
+            indexAxis: 'y',
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+              legend: { display: false },
+              datalabels: { display: false },
+              tooltip: {
+                callbacks: {
+                  label: (ctx: any) => {
+                    const n = ctx.dataset?.fundCounts?.[ctx.dataIndex];
+                    const inr = '₹ ' + this.formatInr(Number(ctx.parsed.x));
+                    return n ? `${inr} · via ${n} fund${n === 1 ? '' : 's'}` : inr;
+                  },
+                },
+              },
+            },
+            scales: {
+              x: {
+                beginAtZero: true,
+                title: { display: true, text: 'Look-through exposure (₹)', color: '#8b949e' },
+                ticks: { color: '#8b949e', callback: (v: any) => this.formatInrCompact(Number(v)) },
+                grid: { color: '#21262d' },
+              },
+              y: {
+                title: { display: true, text: 'Company', color: '#8b949e' },
+                ticks: { color: '#8b949e' },
+                grid: { display: false },
+              },
+            },
+          },
+        });
+      }
+    }
+
+    const pairs = (this.mfOverlapAccount?.pairs ?? []).slice(0, 10);
+    const pairsCanvas = this.mfOverlapPairsCanvas?.nativeElement;
+    if (pairsCanvas && pairs.length > 0) {
+      const short = (n: string) => n.replace(/\s+Fund$/i, '').replace(/\s+-\s+.*$/, '');
+      // Two-line labels: Chart.js renders a string[] label as stacked lines.
+      const labels = pairs.map((p) => [short(p.a), 'vs ' + short(p.b)]);
+      const data = pairs.map((p) => p.overlapPct);
+      const colors = pairs.map((p) => this.overlapBarColor(p.overlapPct));
+      const shared = pairs.map((p) => p.sharedStocks);
+      if (this.mfOverlapPairsChart) {
+        this.mfOverlapPairsChart.data.labels = labels;
+        const ds = this.mfOverlapPairsChart.data.datasets[0] as {
+          data: number[]; backgroundColor: string[]; shared?: number[];
+        };
+        ds.data = data;
+        ds.backgroundColor = colors;
+        ds.shared = shared;
+        this.mfOverlapPairsChart.update();
+      } else {
+        this.mfOverlapPairsChart = new Chart(pairsCanvas, {
+          type: 'bar',
+          data: {
+            labels,
+            datasets: [
+              {
+                label: 'Shared weight (%)',
+                data,
+                backgroundColor: colors,
+                shared,
+                borderWidth: 0,
+                maxBarThickness: 16,
+              } as any,
+            ],
+          },
+          options: {
+            indexAxis: 'y',
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+              legend: { display: false },
+              datalabels: { display: false },
+              tooltip: {
+                callbacks: {
+                  label: (ctx: any) => {
+                    const n = ctx.dataset?.shared?.[ctx.dataIndex];
+                    return `${Number(ctx.parsed.x).toFixed(1)}% shared weight · ${n} common stocks`;
+                  },
+                },
+              },
+            },
+            scales: {
+              x: {
+                beginAtZero: true,
+                title: { display: true, text: 'Shared weight (% of fund NAV)', color: '#8b949e' },
+                ticks: { color: '#8b949e', callback: (v: any) => v + '%' },
+                grid: { color: '#21262d' },
+              },
+              y: {
+                ticks: { color: '#8b949e', font: { size: 10 } },
+                grid: { display: false },
+              },
+            },
+          },
+        });
+      }
+    }
+
+    const sectors = this.mfOverlap.sectors.slice(0, 10);
+    const sectorsCanvas = this.mfOverlapSectorsCanvas?.nativeElement;
+    if (sectorsCanvas && sectors.length > 0) {
+      const labels = sectors.map((s) => s.sector);
+      const data = sectors.map((s) => Math.round(s.inr));
+      if (this.mfOverlapSectorsChart) {
+        this.mfOverlapSectorsChart.data.labels = labels;
+        (this.mfOverlapSectorsChart.data.datasets[0] as { data: number[] }).data = data;
+        this.mfOverlapSectorsChart.update();
+      } else {
+        this.mfOverlapSectorsChart = new Chart(sectorsCanvas, {
+          type: 'doughnut',
+          data: {
+            labels,
+            datasets: [
+              {
+                data,
+                backgroundColor: MF_SECTOR_COLORS,
+                borderColor: '#161b22',
+                borderWidth: 2,
+              },
+            ],
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            cutout: '55%',
+            plugins: {
+              legend: { position: 'right', labels: { color: '#8b949e', boxWidth: 12, font: { size: 11 } } },
+              datalabels: { display: false },
+              tooltip: {
+                callbacks: {
+                  label: (ctx: any) => {
+                    const total = (ctx.dataset.data as number[]).reduce((a, b) => a + b, 0);
+                    const pct = total > 0 ? (Number(ctx.parsed) / total) * 100 : 0;
+                    return `${ctx.label}: ₹ ${this.formatInr(Number(ctx.parsed))} (${pct.toFixed(1)}%)`;
+                  },
+                },
+              },
+            },
+          },
+        });
+      }
+    }
+  }
+
+  /** Short axis labels: 1.2Cr / 3.4L / 5000. */
+  formatInrCompact(v: number): string {
+    const n = Math.abs(v);
+    if (n >= 10000000) return (v / 10000000).toFixed(1) + 'Cr';
+    if (n >= 100000) return (v / 100000).toFixed(1) + 'L';
+    if (n >= 1000) return Math.round(v / 1000) + 'k';
+    return String(Math.round(v));
   }
 
   // ===== Net worth tab: values this app already tracks =====
@@ -1474,6 +1821,7 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
       this.livePriceChart.destroy();
       this.livePriceChart = null;
     }
+    this.destroyMfOverlapCharts();
   }
 
   private initOrUpdateLivePriceChart(): void {
@@ -2754,6 +3102,8 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
   /** Apply a tab: set active state and run its data-load / chart lifecycle side-effects. Called from the route param subscription. */
   private applyTab(tab: DashboardTab): void {
     this.activeTab = tab;
+    // The overlap canvases are removed from the DOM when the Playground unmounts.
+    if (tab !== 'playground') this.destroyMfOverlapCharts();
     if (tab === 'icici') {
       this.loadBreezeStatus();
       this.loadMfHoldings();
@@ -2779,7 +3129,12 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
         this.soldChart = null;
       }
       // Reflect the Holdings tab selection into the playground (only when nothing picked yet there).
-      if (tab === 'playground') this.seedPlayMultiFromHoldings(false);
+      if (tab === 'playground') {
+        this.seedPlayMultiFromHoldings(false);
+        // Fund overlap needs the holdings list to spot changes; both are cheap when warm.
+        if (this.mfHoldings.length === 0 && !this.mfHoldingsLoading) this.loadMfHoldings();
+        if (!this.mfOverlap && !this.mfOverlapLoading) this.loadMfOverlap();
+      }
       // Net worth needs the tracked sources (MF NAV + ICICI equity) loaded to show live values.
       if (tab === 'networth') this.refreshNetworthTracked();
     } else {

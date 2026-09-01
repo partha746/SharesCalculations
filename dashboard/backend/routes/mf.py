@@ -58,6 +58,16 @@ def mf_import():
         return jsonify({"error": str(e)}), 500
 
 
+@bp.route("/api/mf/overlap", methods=["GET"])
+def mf_overlap():
+    """Portfolio overlap + look-through stock exposure. `refresh=1` re-fetches portfolios."""
+    refresh = request.args.get("refresh", default="", type=str).lower() in ("1", "true", "yes")
+    try:
+        return jsonify(mf_service.overlap(refresh=refresh))
+    except Exception as e:
+        return jsonify({"error": str(e)}), 502
+
+
 @bp.route("/api/mf/holdings/<int:holding_id>", methods=["DELETE"])
 def mf_delete_holding(holding_id):
     try:

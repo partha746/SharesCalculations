@@ -1909,6 +1909,197 @@ details[open] > .icici-setup__summary::before { content: '⌄ '; }
   color: #f85149;
 }
 
+// ===== Mutual fund overlap (Playground) =====
+
+.mfo-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1.75rem;
+  margin: 0 0 1rem;
+}
+.mfo-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+.mfo-stat__value {
+  font-size: 1.35rem;
+  font-weight: 600;
+  color: #c9d1d9;
+  font-variant-numeric: tabular-nums;
+}
+.mfo-stat__value--warn {
+  color: #d4a72c;
+}
+.mfo-stat__label {
+  font-size: 0.8rem;
+  color: #8b949e;
+}
+
+.mfo-callout {
+  border-left: 2px solid #d4a72c;
+  background: #1c1a12;
+  padding: 0.6rem 0.85rem;
+  margin: 0 0 1rem;
+  font-size: 0.9rem;
+  color: #c9d1d9;
+  border-radius: 0 4px 4px 0;
+}
+
+.mfo-chart-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-top: 1.25rem;
+}
+.mfo-chart-head__title {
+  margin: 0;
+}
+.mfo-scope {
+  display: inline-flex;
+  border-radius: 6px;
+  overflow: hidden;
+  border: 1px solid #30363d;
+}
+
+.mfo-chart {
+  position: relative;
+  width: 100%;
+  margin-bottom: 1rem;
+}
+// 12 bars at ~26px each plus axis room.
+.mfo-chart--stocks {
+  height: 360px;
+}
+.mfo-chart--sectors {
+  height: 230px;
+  margin-bottom: 0.75rem;
+}
+// Two-line category labels need more room per bar than the stocks chart.
+.mfo-chart--pairs {
+  height: 340px;
+}
+
+.mfo-acct-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin: 1rem 0 0.25rem;
+}
+.mfo-acct {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.4rem;
+  background: #0d1117;
+  border: 1px solid #30363d;
+  border-radius: 999px;
+  color: #8b949e;
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.85rem;
+  padding: 0.3rem 0.8rem;
+
+  &:hover {
+    border-color: #484f58;
+    color: #c9d1d9;
+  }
+}
+.mfo-acct--active {
+  background: #1f6feb;
+  border-color: #1f6feb;
+  color: #fff;
+}
+.mfo-acct__meta {
+  font-size: 0.75rem;
+  opacity: 0.75;
+}
+
+.mfo-num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.mfo-shared {
+  color: #8b949e;
+  font-size: 0.85rem;
+}
+.mfo-row--muted td {
+  color: #6e7681;
+}
+
+// Inline bar behind the overlap figure; full width == 50% shared weight.
+.mfo-meter {
+  display: inline-block;
+  width: 54px;
+  height: 5px;
+  background: #21262d;
+  border-radius: 3px;
+  overflow: hidden;
+  margin-right: 0.5rem;
+  vertical-align: middle;
+}
+.mfo-meter__fill {
+  display: block;
+  height: 100%;
+  border-radius: 3px;
+}
+.mfo-meter__fill--high {
+  background: #f85149;
+}
+.mfo-meter__fill--medium {
+  background: #d4a72c;
+}
+.mfo-meter__fill--low {
+  background: #3fb950;
+}
+.mfo-meter__label {
+  font-variant-numeric: tabular-nums;
+}
+
+.mfo-split {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1.25rem;
+}
+.mfo-split__col {
+  flex: 1 1 320px;
+  min-width: 0;
+}
+
+.mfo-footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem;
+  margin-top: 1rem;
+
+  .playground-desc {
+    margin: 0;
+    flex: 1 1 320px;
+    font-size: 0.8rem;
+  }
+}
+.mfo-btn {
+  background: #21262d;
+  border: 1px solid #30363d;
+  border-radius: 6px;
+  color: #c9d1d9;
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.85rem;
+  padding: 0.35rem 0.8rem;
+
+  &:hover:not(:disabled) {
+    border-color: #484f58;
+  }
+  &:disabled {
+    cursor: default;
+    opacity: 0.6;
+  }
+}
+
 .holdings-summary {
   display: flex;
   flex-wrap: wrap;
