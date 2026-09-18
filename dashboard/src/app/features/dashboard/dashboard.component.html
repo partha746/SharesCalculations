@@ -62,19 +62,15 @@
           <span class="live-price-block__value" title="Live FX feed (not ECB daily only); refreshes with the live price poll.">{{ formatUsdInrRate(data.usdToInrRate) }}</span>
         </div>
         <div class="live-price-block__premarket">
-          @if (data.preMarketPriceUsd != null) {
-            <div class="live-price-block__premarket-title">Pre-market</div>
-            <div class="live-price-block__premarket-value">$ {{ formatUsd(data.preMarketPriceUsd) }}</div>
-          } @else if (data.postMarketPriceUsd != null) {
-            <div class="live-price-block__premarket-title">Post-market</div>
-            <div class="live-price-block__premarket-value">$ {{ formatUsd(data.postMarketPriceUsd) }}</div>
-          } @else {
-            <app-live-price-extended-hint
-              [marketOpen]="marketOpen"
-              [isPreMarketSession]="isPreMarketSession"
-              [isPostMarketSession]="isPostMarketSession"
-              [marketNextPreMarketStartMs]="marketNextPreMarketStartMs" />
-          }
+          <app-live-price-extended-hint
+            [marketOpen]="marketOpen"
+            [isPreMarketSession]="isPreMarketSession"
+            [isPostMarketSession]="isPostMarketSession"
+            [marketNextPreMarketStartMs]="marketNextPreMarketStartMs"
+            [preSession]="preSessionStats"
+            [postSession]="postSessionStats"
+            [fallbackPreUsd]="data.preMarketPriceUsd ?? null"
+            [fallbackPostUsd]="data.postMarketPriceUsd ?? null" />
         </div>
       </div>
       <div class="total-holdings-block">
@@ -1767,6 +1763,307 @@
         </table>
       </div>
     }
+
+    <section class="dashboard-section adv-tax">
+      <div class="section-title-row">
+        <h2 class="section-title">Advance tax</h2>
+        <label class="fa-export-fy-label">
+          FY
+          <select class="fa-export-fy-select" [(ngModel)]="advanceTaxFy" (ngModelChange)="onAdvanceTaxFyChange()">
+            @for (fy of advanceTaxFyOptions; track fy) {
+              <option [ngValue]="fy">{{ soldFyLabel(fy) }}</option>
+            }
+          </select>
+        </label>
+      </div>
+      <p class="playground-desc">
+        Capital-gains tax is required in full by the first instalment falling <strong>on or after</strong> the sale —
+        not spread across 15/45/75/100% — because the first proviso to s.234C excuses a shortfall you could not have
+        estimated, provided the whole tax is paid in the remaining instalments. Tax on other income follows the
+        ordinary cumulative schedule. Figures are a bookkeeping aid, not filing advice.
+      </p>
+
+      <div class="adv-tax__inputs">
+        <label class="playground-label">
+          Tax on other income (₹, before cess)
+          <input type="number" min="0" step="1000" class="playground-input" [(ngModel)]="advanceTaxOtherTaxInr"
+                 (ngModelChange)="saveAdvanceTaxSettings()" placeholder="0"
+                 title="Your estimated Indian income tax for the year excluding these capital gains. Follows the 15/45/75/100% schedule." />
+        </label>
+        <label class="playground-label">
+          TDS / TCS credit (₹)
+          <input type="number" min="0" step="1000" class="playground-input" [(ngModel)]="advanceTaxTdsCreditInr"
+                 (ngModelChange)="saveAdvanceTaxSettings()" placeholder="0"
+                 title="Tax already withheld. Reduces the advance tax payable." />
+        </label>
+        <label class="playground-label">
+          Cess %
+          <input type="number" min="0" max="20" step="0.5" class="playground-input playground-input--short"
+                 [(ngModel)]="advanceTaxCessPct" (ngModelChange)="saveAdvanceTaxSettings()"
+                 title="Health & education cess applied on top of the tax (4% at present)." />
+        </label>
+      </div>
+
+      <div class="adv-tax__stats">
+        <div class="adv-tax__stat">
+          <span class="adv-tax__stat-value">₹ {{ formatInr(advanceTaxCgTotalInr) }}</span>
+          <span class="adv-tax__stat-label">Capital-gains tax this FY</span>
+        </div>
+        <div class="adv-tax__stat">
+          <span class="adv-tax__stat-value">₹ {{ formatInr(advanceTaxTotalLiabilityInr) }}</span>
+          <span class="adv-tax__stat-label">Total liability (incl. cess, less credits)</span>
+        </div>
+        <div class="adv-tax__stat">
+          <span class="adv-tax__stat-value">₹ {{ formatInr(advanceTaxPaidTotalInr) }}</span>
+          <span class="adv-tax__stat-label">Recorded as paid</span>
+        </div>
+        <div class="adv-tax__stat">
+          <span class="adv-tax__stat-value"
+                [class.adv-tax__stat-value--short]="advanceTaxBalanceInr > 0"
+                [class.adv-tax__stat-value--ahead]="advanceTaxBalanceInr < 0">
+            ₹ {{ formatInr(advanceTaxBalanceInr < 0 ? -advanceTaxBalanceInr : advanceTaxBalanceInr) }}
+          </span>
+          <span class="adv-tax__stat-label">{{ advanceTaxBalanceInr < 0 ? 'Paid ahead (full year)' : 'Still to pay (full year)' }}</span>
+        </div>
+        @if (advanceTaxInterestTotalInr > 0) {
+          <div class="adv-tax__stat">
+            <span class="adv-tax__stat-value adv-tax__stat-value--short">₹ {{ formatInr(advanceTaxInterestTotalInr) }}</span>
+            <span class="adv-tax__stat-label">Est. s.234C interest</span>
+          </div>
+        }
+      </div>
+
+      @if (!advanceTaxIsPayable) {
+        <p class="playground-desc playground-desc--warning">
+          Liability is under ₹10,000, so no advance tax is payable this FY under s.208. The schedule below is shown for reference.
+        </p>
+      } @else if (advanceTaxCurrentInstalment) {
+        <div class="adv-tax__next"
+             [class.adv-tax__next--short]="advanceTaxDueNowInr > 0"
+             [class.adv-tax__next--ok]="advanceTaxDueNowInr === 0">
+          <div class="adv-tax__next-head">
+            @if (advanceTaxAllDuePassed) {
+              <span class="adv-tax__next-kicker">All instalment dates have passed</span>
+            } @else {
+              <span class="adv-tax__next-kicker">
+                Next instalment · {{ advanceTaxCurrentInstalment.label }} · due {{ formatDate(advanceTaxCurrentInstalment.dueOn) }}
+                @if (advanceTaxDaysToDue != null && advanceTaxDaysToDue >= 0) {
+                  <span class="adv-tax__next-days">{{ advanceTaxDaysToDue }} day(s) left</span>
+                }
+              </span>
+            }
+          </div>
+          @if (advanceTaxDueNowInr > 0) {
+            <div class="adv-tax__next-amount">₹ {{ formatInr(advanceTaxDueNowInr) }}</div>
+            <div class="adv-tax__next-break">
+              @if (advanceTaxNewThisInstalmentInr > 0) {
+                <span>₹ {{ formatInr(advanceTaxNewThisInstalmentInr) }} for this instalment</span>
+              } @else {
+                <span>Nothing new falls due at this instalment</span>
+              }
+              @if (advanceTaxCarriedOverInr > 0) {
+                <span class="adv-tax__next-sep">+</span>
+                <span>₹ {{ formatInr(advanceTaxCarriedOverInr) }} arrears from instalments already past</span>
+              }
+            </div>
+            @if (advanceTaxAllDuePassed) {
+              <div class="adv-tax__next-note">
+                Pay as self-assessment tax with the return; s.234B interest will also apply, which this panel does not model.
+              </div>
+            }
+          } @else {
+            <div class="adv-tax__next-amount">Nothing to pay</div>
+            <div class="adv-tax__next-break">
+              @if (advanceTaxAheadNowInr > 0) {
+                <span>You are ₹ {{ formatInr(advanceTaxAheadNowInr) }} ahead of this instalment.</span>
+              } @else {
+                <span>Recorded payments cover this instalment in full.</span>
+              }
+            </div>
+          }
+        </div>
+      }
+
+      <div class="adv-tax__basis">
+        <span class="playground-label">Schedule basis</span>
+        <button type="button" class="chart-mode-btn" [class.chart-mode-btn--active]="advanceTaxBasis === 'statutory'"
+                (click)="setAdvanceTaxBasis('statutory')"
+                title="s.211 instalment table: 15/45/75/100% of the year's liability.">
+          Statutory 15/45/75/100%
+        </button>
+        <button type="button" class="chart-mode-btn" [class.chart-mode-btn--active]="advanceTaxBasis === 'proviso'"
+                (click)="setAdvanceTaxBasis('proviso')"
+                title="First proviso to s.234C: capital-gains tax falls due in full at the instalment on or after each sale, rather than being spread across the year.">
+          Capital-gains proviso
+        </button>
+      </div>
+
+      <div class="playground-table-wrap">
+        <table class="holdings-table playground-table adv-tax__table">
+          <thead>
+            <tr class="holdings-table__header">
+              <th>Due date</th>
+              <th>Gains realised by then</th>
+              <th>Required cumulative payment</th>
+              <th title="Actual payments for instalments already due; for later ones, what you will have paid if you keep to this schedule">Already paid</th>
+              <th title="Top-up to hand over at this instalment">Additional amount to pay</th>
+              <th>Est. 234C</th>
+            </tr>
+          </thead>
+          <tbody>
+            @for (r of advanceTaxSchedule; track r.quarter) {
+              <tr [class]="'adv-tax__row ' + advanceTaxRowClass(r)" [class.adv-tax__row--future]="!r.isDue"
+                  [class.adv-tax__row--current]="r.quarter === advanceTaxCurrentInstalment?.quarter">
+                <td>
+                  @if (r.isDue && r.shortfallInr <= 1) {
+                    <span class="adv-tax__mark adv-tax__mark--done" title="Due date passed and covered on time">&#10003;</span>
+                  } @else if (r.isDue) {
+                    <span class="adv-tax__mark adv-tax__mark--late"
+                           title="Due date passed with an amount outstanding. Nothing to pay against this row now — the cost shows up as 234C interest and the balance rolls into the next instalment.">!</span>
+                  }
+                  {{ formatDate(r.dueOn) }}
+                  <span class="adv-tax__pct">{{ r.label }} · {{ r.statutoryPct }}%</span>
+                  @if (r.quarter === advanceTaxCurrentInstalment?.quarter) {
+                    <span class="adv-tax__badge">next</span>
+                  }
+                </td>
+                <td class="mfo-num">₹ {{ formatInr(r.gainsRealisedInr) }}<span class="adv-tax__sales">{{ r.sales }} sale(s)</span></td>
+                <td class="mfo-num adv-tax__req">₹ {{ formatInr(r.requiredCumulativeInr) }}</td>
+                <td class="mfo-num">
+                  ₹ {{ formatInr(r.alreadyPaidInr) }}@if (r.paidIsProjected) {<span class="adv-tax__mark-proj" title="Assumes you pay each earlier instalment in full">*</span>}
+                </td>
+                <td class="mfo-num">
+                  @if (r.additionalToPayInr > 0) {
+                    @if (r.state === 'past') {
+                      <span class="adv-tax__lapsed"
+                            title="This was outstanding when the due date passed. It is what the 234C interest is charged on — it is not payable again, it simply carries forward into the next instalment.">
+                        ₹ {{ formatInr(r.additionalToPayInr) }}
+                      </span>
+                      <span class="adv-tax__cell-note">was short at deadline</span>
+                    } @else if (r.state === 'next') {
+                      <span class="adv-tax__short">₹ {{ formatInr(r.additionalToPayInr) }}</span>
+                      <span class="adv-tax__cell-note adv-tax__cell-note--pay">pay by this date</span>
+                    } @else {
+                      <span class="adv-tax__short">₹ {{ formatInr(r.additionalToPayInr) }}</span>
+                      <span class="adv-tax__cell-note">if on schedule</span>
+                    }
+                  } @else {
+                    <span class="adv-tax__ok">₹ 0</span>
+                    @if (r.excessInr > 1) {
+                      <span class="adv-tax__ahead adv-tax__excess">excess ₹ {{ formatInr(r.excessInr) }}</span>
+                    } @else if (r.state === 'past') {
+                      <span class="adv-tax__cell-note">met on time</span>
+                    }
+                  }
+                </td>
+                <td class="mfo-num">
+                  @if (r.isDue && r.interestInr > 0) {
+                    <span class="adv-tax__short" [title]="'1% per month on the shortfall below ₹ ' + formatInr(r.interestThresholdInr)">₹ {{ formatInr(r.interestInr) }}</span>
+                  } @else if (!r.isDue) {
+                    <span class="adv-tax__future">not due yet</span>
+                  } @else {
+                    —
+                  }
+                </td>
+              </tr>
+            }
+          </tbody>
+        </table>
+      </div>
+      <p class="playground-desc adv-tax__legend">
+        Read the last column by row: for a <strong>passed</strong> date it is what was outstanding at the deadline,
+        which is what the 234C interest is charged on — you do not pay it again, it rolls forward. For the
+        <strong>next</strong> instalment it is what to pay, measured against your real payments. Later rows show only
+        their own slice and assume you keep to the schedule, marked <span class="adv-tax__mark-proj">*</span>.
+      </p>
+
+      <p class="playground-desc adv-tax__footnote">
+        Interest is 1% per month on the shortfall — three months for Q1–Q3, one for Q4 — with the s.234C
+        safe harbours of 12% and 36% applied to the other-income portion at Q1 and Q2. Each instalment is
+        capped at the year's final liability, so a loss later in the year reduces the earlier requirement.
+        Not modelled: surcharge, s.234B interest, separate short- and long-term loss set-off rules, and
+        carried-forward losses. Gains and losses are simply netted.
+      </p>
+
+      <h3 class="playground-multi-subtitle">Record a payment</h3>
+      <div class="adv-tax__form">
+        <label class="playground-label">
+          Paid on
+          <input type="date" class="playground-input" [(ngModel)]="newAdvanceTaxPaidOn" />
+        </label>
+        <label class="playground-label">
+          Amount (₹)
+          <input type="number" min="0" step="1000" class="playground-input" [ngModel]="newAdvanceTaxAmount"
+                 (ngModelChange)="newAdvanceTaxAmount = $event === '' || $event == null ? null : $event"
+                 placeholder="e.g. 150000" />
+        </label>
+        <label class="playground-label adv-tax__form-note">
+          Note (challan no., bank)
+          <input type="text" class="playground-input" [(ngModel)]="newAdvanceTaxNote" placeholder="optional" />
+        </label>
+        <button type="button" class="mfo-btn" [disabled]="advanceTaxSaving" (click)="addAdvanceTaxPayment()">
+          {{ advanceTaxSaving ? 'Saving…' : 'Add payment' }}
+        </button>
+      </div>
+      @if (advanceTaxError) {
+        <p class="playground-desc playground-desc--warning">{{ advanceTaxError }}</p>
+      }
+
+      @if (advanceTaxLoading) {
+        <p class="holdings-table__hint">Loading payments…</p>
+      } @else if (advanceTaxPayments.length > 0) {
+        <div class="playground-table-wrap">
+          <table class="holdings-table playground-table">
+            <thead>
+              <tr class="holdings-table__header">
+                <th>Paid on</th>
+                <th>Amount ₹</th>
+                <th>Note</th>
+                <th>Counts towards</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              @for (p of advanceTaxPayments; track p.id) {
+                @if (advanceTaxEditId === p.id) {
+                  <tr class="adv-tax__row--editing">
+                    <td><input type="date" class="adv-tax__edit-input" [(ngModel)]="advanceTaxEditPaidOn" /></td>
+                    <td>
+                      <input type="number" min="0" step="1000" class="adv-tax__edit-input adv-tax__edit-input--num"
+                             [ngModel]="advanceTaxEditAmount"
+                             (ngModelChange)="advanceTaxEditAmount = $event === '' || $event == null ? null : $event" />
+                    </td>
+                    <td><input type="text" class="adv-tax__edit-input" [(ngModel)]="advanceTaxEditNote" placeholder="note" /></td>
+                    <td>{{ advanceTaxInstalmentForDate(advanceTaxEditPaidOn) }}</td>
+                    <td class="adv-tax__row-actions">
+                      <button type="button" class="mfo-btn" [disabled]="advanceTaxSaving" (click)="saveEditAdvanceTaxPayment()">
+                        {{ advanceTaxSaving ? 'Saving…' : 'Save' }}
+                      </button>
+                      <button type="button" class="adv-tax__del" (click)="cancelEditAdvanceTaxPayment()">Cancel</button>
+                    </td>
+                  </tr>
+                } @else {
+                  <tr>
+                    <td>{{ formatDate(p.paidOn) }}</td>
+                    <td class="mfo-num">{{ formatInr(p.amountInr) }}</td>
+                    <td>{{ p.note || '—' }}</td>
+                    <td>{{ advanceTaxInstalmentForDate(p.paidOn) }}</td>
+                    <td class="adv-tax__row-actions">
+                      <button type="button" class="adv-tax__del" title="Change the date, amount or note"
+                              (click)="startEditAdvanceTaxPayment(p)">Edit</button>
+                      <button type="button" class="adv-tax__del" title="Delete this payment"
+                              (click)="deleteAdvanceTaxPayment(p.id)">Remove</button>
+                    </td>
+                  </tr>
+                }
+              }
+            </tbody>
+          </table>
+        </div>
+      } @else {
+        <p class="holdings-table__hint">No payments recorded for {{ soldFyLabel(advanceTaxFy) }} yet.</p>
+      }
+    </section>
   </div>
     }
   </section>

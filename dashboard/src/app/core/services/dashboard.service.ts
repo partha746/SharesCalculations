@@ -2,12 +2,14 @@ import { Injectable } from '@angular/core';
 import { HttpClient, HttpHeaders, HttpParams, HttpResponse } from '@angular/common/http';
 import { Observable } from 'rxjs';
 import {
+  AdvanceTaxPayment,
   BreezeAccountStatus,
   BreezeStatusAllResponse,
   BreezeStatusResponse,
   DashboardResponse,
   Earmark,
   EarmarksResponse,
+  ExtendedSessionResponse,
   HoldingRow,
   IncomeResolveResponse,
   LivePriceHistoryPoint,
@@ -46,6 +48,28 @@ export class DashboardService {
 
   getMarketStatus(): Observable<MarketStatusResponse> {
     return this.http.get<MarketStatusResponse>(`${this.apiUrl}/market-status`);
+  }
+
+  /** Pre/post-market open, high, low, last and volume for NVDA. */
+  getExtendedSession(): Observable<ExtendedSessionResponse> {
+    return this.http.get<ExtendedSessionResponse>(`${this.apiUrl}/extended-session?t=${Date.now()}`);
+  }
+
+  /** Advance-tax payments recorded for a financial year (FY start year, e.g. 2026). */
+  getAdvanceTaxPayments(fyStartYear?: number): Observable<{ payments: AdvanceTaxPayment[] }> {
+    const fy = fyStartYear != null ? `&fy=${fyStartYear}` : '';
+    return this.http.get<{ payments: AdvanceTaxPayment[] }>(
+      `${this.apiUrl}/advance-tax/payments?t=${Date.now()}${fy}`,
+    );
+  }
+  addAdvanceTaxPayment(body: { paidOn: string; amountInr: number; fyStartYear?: number; note?: string }): Observable<{ id: number }> {
+    return this.http.post<{ id: number }>(`${this.apiUrl}/advance-tax/payments`, body);
+  }
+  updateAdvanceTaxPayment(id: number, body: { paidOn?: string; amountInr?: number; note?: string }): Observable<{ ok: boolean }> {
+    return this.http.put<{ ok: boolean }>(`${this.apiUrl}/advance-tax/payments/${id}`, body);
+  }
+  deleteAdvanceTaxPayment(id: number): Observable<{ ok: boolean }> {
+    return this.http.delete<{ ok: boolean }>(`${this.apiUrl}/advance-tax/payments/${id}`);
   }
 
   /** Latest NVIDIA news + sentiment. */

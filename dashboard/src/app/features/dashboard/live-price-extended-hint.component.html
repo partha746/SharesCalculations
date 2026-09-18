@@ -1,10 +1,50 @@
-<div class="live-price-block__premarket-title">{{ liveCardExtendedHoursClosedTitle }}</div>
-@if (liveCardExtendedHoursClosedText === 'Open') {
-  <div class="live-price-block__premarket-value">
-    {{ liveCardExtendedHoursClosedText }} <span class="live-price-block__premarket-hint">(price unavailable)</span>
+@if (hasSessionData && session) {
+  <div class="live-price-block__premarket-title">{{ sessionTitle }}</div>
+  <div class="ext-headline">
+    <span class="live-price-block__premarket-value">{{ usd(session.last) }}</span>
+    @if (session.change != null) {
+      <span class="ext-change" [class.is-up]="changeClass === 'is-up'" [class.is-down]="changeClass === 'is-down'"
+            [title]="changeTitle">
+        {{ signed(session.change) }}
+        @if (session.changePct != null) { ({{ signed(session.changePct) }}%) }
+      </span>
+    }
   </div>
-} @else if (liveCardExtendedHoursClosedText.startsWith('Opens in')) {
-  <div class="live-price-block__premarket-value">{{ liveCardExtendedHoursClosedText }}</div>
+  <dl class="ext-stats">
+    <div class="ext-stats__item" [title]="openTitle">
+      <dt>Open</dt>
+      <dd [class.ext-stats__unrecorded]="session.open == null">
+        {{ usd(session.open) }}@if (session.open != null) {<span class="ext-stats__mark">*</span>}
+      </dd>
+    </div>
+    <div class="ext-stats__item" [title]="session.highAt ? 'High at ' + session.highAt + ' ET' : ''">
+      <dt>High</dt>
+      <dd>{{ usd(session.high) }}</dd>
+    </div>
+    <div class="ext-stats__item" [title]="session.lowAt ? 'Low at ' + session.lowAt + ' ET' : ''">
+      <dt>Low</dt>
+      <dd>{{ usd(session.low) }}</dd>
+    </div>
+    <div class="ext-stats__item" [title]="volumeTitle">
+      <dt>Volume</dt>
+      <dd>{{ compactVolume(session.volume) }}</dd>
+    </div>
+  </dl>
+  @if (session.open != null) {
+    <div class="ext-stats__note" [title]="openTitle">* open recorded locally, not an exchange figure</div>
+  }
+  @if (!isHistoric && liveCardExtendedHoursClosedText !== 'Open') {
+    <div class="ext-stats__note">{{ liveCardExtendedHoursClosedText }}</div>
+  }
 } @else {
-  <div class="live-price-block__premarket-placeholder">{{ liveCardExtendedHoursClosedText }}</div>
+  <div class="live-price-block__premarket-title">{{ liveCardExtendedHoursClosedTitle }}</div>
+  @if (liveCardExtendedHoursClosedText === 'Open') {
+    <div class="live-price-block__premarket-value">
+      {{ liveCardExtendedHoursClosedText }} <span class="live-price-block__premarket-hint">(price unavailable)</span>
+    </div>
+  } @else if (liveCardExtendedHoursClosedText.startsWith('Opens in')) {
+    <div class="live-price-block__premarket-value">{{ liveCardExtendedHoursClosedText }}</div>
+  } @else {
+    <div class="live-price-block__premarket-placeholder">{{ liveCardExtendedHoursClosedText }}</div>
+  }
 }

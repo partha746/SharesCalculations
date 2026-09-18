@@ -223,6 +223,89 @@ def _ensure_live_price_history_table(conn):
     )
 
 
+def _ensure_extended_price_history_table(conn):
+    """Pre/post-market ticks, kept out of live_price_history so the regular-hours chart
+    and its OHLC rollups are unaffected. Nasdaq publishes a session's high/low/volume but
+    not its open, so the first row per (et_date, session) is what gives us the open."""
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS extended_price_history (
+           timestamp_ms INTEGER NOT NULL,
+           et_date TEXT NOT NULL,
+           session TEXT NOT NULL,
+           price_usd REAL NOT NULL,
+           usd_to_inr_rate REAL
+        )"""
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_extended_price_session "
+        "ON extended_price_history(et_date, session, timestamp_ms)"
+    )
+
+
+def _record_extended_price(session):
+    """Append one pre/post-market tick. Called every 14s while that session is running."""
+    from helpers import gather_data
+
+    try:
+        rupee_conv_obj = gather_data.RupeeConv()
+        quote = rupee_conv_obj.nasdaq_quote("NVDA")
+        if not quote or not quote.get("price"):
+            return
+        status = (quote.get("status") or "").lower()
+        # Only store a tick the feed itself attributes to this session, so a stale regular
+        # close never becomes the session's first (and therefore "open") row.
+        expected = "pre" if session == "pre" else "after"
+        if expected not in status and session not in status:
+            return
+        ts_ms = int(time.time() * 1000)
+        with get_db() as conn:
+            _ensure_live_price_history_table(conn)
+            _ensure_extended_price_history_table(conn)
+            # Reuse the most recent recorded FX rate rather than spending a request on it;
+            # USD/INR barely moves across a single extended session.
+            rate_row = conn.execute(
+                "SELECT usd_to_inr_rate FROM live_price_history ORDER BY timestamp_ms DESC LIMIT 1"
+            ).fetchone()
+            rate = float(rate_row[0]) if rate_row else None
+            conn.execute(
+                "INSERT INTO extended_price_history "
+                "(timestamp_ms, et_date, session, price_usd, usd_to_inr_rate) VALUES (?, ?, ?, ?, ?)",
+                (ts_ms, _et_date_str(ts_ms), session, float(quote["price"]), rate),
+            )
+    except Exception as e:
+        print(f"[extended-recorder] {session}: {e}", flush=True)
+
+
+def recorded_session_open(session, et_date=None):
+    """{open, openAtMs, ticks} from our own ticks for a session, or None.
+
+    The open is the first tick we captured, so it trails the exchange's first print by up
+    to one poll interval; Nasdaq does not publish the official session open.
+    """
+    if session not in ("pre", "post"):
+        return None
+    try:
+        with get_db() as conn:
+            _ensure_extended_price_history_table(conn)
+            day = et_date or _et_date_str(int(time.time() * 1000))
+            row = conn.execute(
+                "SELECT price_usd, timestamp_ms FROM extended_price_history "
+                "WHERE et_date = ? AND session = ? ORDER BY timestamp_ms ASC LIMIT 1",
+                (day, session),
+            ).fetchone()
+            if not row:
+                return None
+            n = conn.execute(
+                "SELECT COUNT(*) FROM extended_price_history WHERE et_date = ? AND session = ?",
+                (day, session),
+            ).fetchone()
+            return {"open": round(float(row[0]), 2), "openAtMs": int(row[1]),
+                    "ticks": int(n[0]) if n else 0, "etDate": day}
+    except Exception as e:
+        print(f"[extended-recorder] read {session}: {e}", flush=True)
+        return None
+
+
 def _et_date_str(ts_ms):
     """ET calendar date (YYYY-MM-DD) for a UTC ms timestamp."""
     from datetime import timezone, timedelta
@@ -382,11 +465,18 @@ def _prune_raw_if_over_cap():
 
 
 def _live_price_recorder_loop():
-    """Background loop: only when market is open (ET), record live price every 14s. When closed, sleep until next open."""
+    """Background loop recording a tick every 14s.
+
+    Regular hours go to live_price_history (and the OHLC rollups); the pre- and
+    post-market sessions go to extended_price_history, whose first row per session is the
+    only source we have for that session's open. Outside all three sessions it sleeps
+    until the next one starts.
+    """
     RECORDER_INTERVAL_SEC = 14
     try:
         with get_db() as conn:
             _ensure_live_price_history_table(conn)
+            _ensure_extended_price_history_table(conn)
             _backfill_rollups_if_needed(conn)
     except Exception as e:
         print(f"[live-price-recorder] rollup init error: {e}", flush=True)
@@ -399,13 +489,24 @@ def _live_price_recorder_loop():
                 if iters % 200 == 0:  # ~ every 47 min of trading
                     _prune_raw_if_over_cap()
                 time.sleep(RECORDER_INTERVAL_SEC)
+            elif _is_premarket_et():
+                _record_extended_price("pre")
+                time.sleep(RECORDER_INTERVAL_SEC)
+            elif _is_postmarket_et():
+                _record_extended_price("post")
+                time.sleep(RECORDER_INTERVAL_SEC)
             else:
                 _prune_raw_if_over_cap()
+                # Sleep to whichever comes first: the regular open or the pre-market open,
+                # otherwise an overnight sleep would run straight past 4:00 AM ET.
                 sec = _seconds_until_next_market_open_et()
-                if sec > 0:
-                    time.sleep(sec)
-                else:
-                    time.sleep(60)
+                _, _, next_pre_ts = _next_market_open_close_et()
+                pre_sec = int(next_pre_ts - time.time())
+                if 0 < pre_sec < sec:
+                    sec = pre_sec
+                # Cap the nap at an hour so a clock or DST shift cannot overshoot the
+                # session start; inside the last hour we land on it to within a poll.
+                time.sleep(min(sec, 3600) if sec > 0 else 60)
         except Exception as e:
             print(f"[live-price-recorder] loop error: {e}", flush=True)
             time.sleep(60)

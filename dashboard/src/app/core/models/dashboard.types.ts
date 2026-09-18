@@ -294,6 +294,103 @@ export interface MarketStatusResponse {
   nextPreMarketStart?: number;
 }
 
+/** An advance-tax amount actually paid, as recorded by the user. */
+export interface AdvanceTaxPayment {
+  id: number;
+  /** FY the payment is for: 2026 = FY 2026–27. */
+  fyStartYear: number;
+  /** YYYY-MM-DD. Determines which instalment it counts towards. */
+  paidOn: string;
+  amountInr: number;
+  note: string;
+  createdAt: string;
+}
+
+/** One advance-tax instalment for a financial year. */
+export interface AdvanceTaxInstalment {
+  /** 1–4 for the statutory instalments, 5 for the 31 March catch-up. */
+  quarter: number;
+  label: string;
+  dueOn: string;
+  /** Statutory cumulative share of non-capital-gains tax due by this date (15/45/75/100%). */
+  statutoryPct: number;
+  /** Tax on gains realised on or before this due date. Payable in full by now under the
+   * first proviso to s.234C, which is why it is not spread across earlier instalments. */
+  cgTaxCumulativeInr: number;
+  /** Cumulative share of other-income tax due by this date. */
+  otherTaxCumulativeInr: number;
+  /** Cumulative amount that must be paid by this due date. */
+  requiredCumulativeInr: number;
+  /** New obligation arising in this instalment: required now less required at the previous
+   * one. Zero when no sale happened in between, even while a shortfall is still outstanding. */
+  incrementInr: number;
+  /** Cumulative payments actually recorded on or before the due date. */
+  paidCumulativeInr: number;
+  /** What this row credits as paid: actual for instalments already due, and for future ones
+   * the previous instalment's requirement — i.e. assuming you keep to the schedule. */
+  alreadyPaidInr: number;
+  /** True when `alreadyPaidInr` is that forward projection rather than recorded payments. */
+  paidIsProjected: boolean;
+  /** Top-up to hand over at this instalment: required less already paid, floored at zero. */
+  additionalToPayInr: number;
+  /** Amount paid beyond this instalment's requirement, when ahead. */
+  excessInr: number;
+  /** Positive = short, negative = paid ahead. Measured against recorded payments. */
+  shortfallInr: number;
+  /** s.234C safe-harbour threshold as a fraction (0.12 for Q1, 0.36 for Q2, else the full amount). */
+  interestThresholdInr: number;
+  /** Estimated s.234C interest on this instalment's shortfall. */
+  interestInr: number;
+  /** Number of sales that became payable in this instalment. */
+  sales: number;
+  gainsRealisedInr: number;
+  isDue: boolean;
+  /**
+   * What the row means, which changes how `additionalToPayInr` should be read:
+   * `past` — the date has gone; the figure is what was outstanding at the deadline and
+   *   drives the s.234C interest. It is not payable again, it carries forward.
+   * `next` — the instalment to act on; the figure is what to pay, against real payments.
+   * `future` — a later instalment; the figure is its own slice assuming you stay on schedule.
+   */
+  state: 'past' | 'next' | 'future';
+}
+
+/** One extended-hours session's numbers. High/low/last/volume come from Nasdaq's
+ * extended-trading feed; `open` is the first tick this app recorded, since Nasdaq does
+ * not publish a session open. */
+export interface ExtendedSessionStats {
+  session: 'pre' | 'post';
+  /** First locally recorded price of the session; null until the recorder has seen it. */
+  open: number | null;
+  openAtMs: number | null;
+  /** False when `open` is absent — keeps a recorded open distinguishable from an official one. */
+  openIsRecorded: boolean;
+  recordedTicks: number;
+  last: number | null;
+  /** Change vs the regular close the session opened from — the same day's close for
+   * post-market, the previous day's for pre-market. Not vs the session open. */
+  change: number | null;
+  changePct: number | null;
+  high: number | null;
+  /** Wall-clock ET of the high, e.g. "05:11:31 PM". */
+  highAt: string | null;
+  low: number | null;
+  lowAt: string | null;
+  volume: number | null;
+  /** The regular-session close `change` is measured against. */
+  prevClose: number | null;
+  /** Provider's own freshness line, e.g. "Data last updated Sep 17, 2026 08:00 PM ET." */
+  asOf: string | null;
+}
+
+export interface ExtendedSessionResponse {
+  isPreMarketSession: boolean;
+  isPostMarketSession: boolean;
+  marketOpen: boolean;
+  pre: ExtendedSessionStats | null;
+  post: ExtendedSessionStats | null;
+}
+
 export interface DashboardResponse {
   livePriceUsd: number;
   usdToInrRate: number;

@@ -38,18 +38,26 @@ export function currentAssessmentYear(now: Date = new Date()): number {
   return now.getMonth() >= 3 ? now.getFullYear() + 1 : now.getFullYear();
 }
 
+/** Start year of the current Indian financial year: Sep 2026 -> 2026 (FY 2026–27). */
+export function currentFyStartYear(now: Date = new Date()): number {
+  return now.getMonth() >= 3 ? now.getFullYear() : now.getFullYear() - 1;
+}
+
 /** Dashboard tabs, each mapped to a URL path segment (e.g. /holdings). */
 export type DashboardTab = 'holdings' | 'sold' | 'playground' | 'data' | 'financial' | 'networth' | 'tax' | 'icici' | 'news';
 export const DASHBOARD_TABS: readonly DashboardTab[] = ['holdings', 'sold', 'playground', 'networth', 'financial', 'news', 'icici', 'tax', 'data'];
 
 Chart.register(ChartDataLabels, CandlestickController, CandlestickElement, OhlcController, OhlcElement);
 import {
+  AdvanceTaxInstalment,
+  AdvanceTaxPayment,
   BreezeAccountStatus,
   BreezePortfolioHoldingsDisplayRow,
   BreezePortfolioHoldingsTotals,
   BreezePortfolioSortCol,
   DashboardResponse,
   Earmark,
+  ExtendedSessionStats,
   HoldingRow,
   IciciCombinedRow,
   IciciSortCol,
@@ -555,6 +563,22 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
     });
   }
 
+  /** Pre/post-market open, high, low, last and volume for the live price card. */
+  preSessionStats: ExtendedSessionStats | null = null;
+  postSessionStats: ExtendedSessionStats | null = null;
+
+  private fetchExtendedSession(): void {
+    this.dashboardService.getExtendedSession().subscribe({
+      next: (res) => {
+        this.preSessionStats = res.pre;
+        this.postSessionStats = res.post;
+        this.cdr.markForCheck();
+      },
+      // Leave the last known values in place; the card falls back to the countdown on its own.
+      error: () => {},
+    });
+  }
+
   private startLivePricePolling(): void {
     this.stopLivePricePolling();
     const poll = (): void => {
@@ -569,6 +593,7 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
           this.cdr.markForCheck();
           // Always fetch live price so we get pre-market/post-market price when in those sessions
           this.fetchAndPushLivePrice();
+          this.fetchExtendedSession();
         },
         error: () => {
           this.marketOpen = false;
@@ -3119,6 +3144,8 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
       }
       if (!this.soldLoading) this.loadSold();
       else if (this.soldRows.length > 0) setTimeout(() => this.initOrUpdateSoldChart(), 0);
+      this.loadAdvanceTaxSettings();
+      this.loadAdvanceTaxPayments();
     } else if (tab === 'playground' || tab === 'financial' || tab === 'icici' || tab === 'news' || tab === 'networth') {
       if (this.holdingsChart) {
         this.holdingsChart.destroy();
@@ -3789,6 +3816,424 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
   setSoldSort(key: keyof SoldRow): void {
     if (this.soldSortKey === key) this.soldSortDir *= -1;
     else { this.soldSortKey = key; this.soldSortDir = 1; }
+  }
+
+  // ===== Sold tab: advance tax (Indian FY, ss. 208–211 + 234C) =====
+
+  /** FY the advance-tax panel is showing (FY start year; 2026 = FY 2026–27). */
+  advanceTaxFy: number = currentFyStartYear();
+  advanceTaxPayments: AdvanceTaxPayment[] = [];
+  advanceTaxLoading = false;
+  advanceTaxSaving = false;
+  advanceTaxError: string | null = null;
+  /** Indian tax on non-capital-gains income for the FY, before cess. Follows the ordinary
+   * 15/45/75/100 schedule, unlike capital gains. */
+  advanceTaxOtherTaxInr = 0;
+  /** TDS/TCS and other credits, which reduce the advance tax payable. */
+  advanceTaxTdsCreditInr = 0;
+  /** Health & education cess, applied on top of the tax. 4% at present. */
+  advanceTaxCessPct = 4;
+  newAdvanceTaxPaidOn = '';
+  newAdvanceTaxAmount: number | null = null;
+  newAdvanceTaxNote = '';
+
+  private static readonly ADVANCE_TAX_SETTINGS_KEY = 'dashboard.advanceTaxSettings';
+  /** s.208: advance tax is only payable once the liability reaches this. */
+  private static readonly ADVANCE_TAX_MIN_LIABILITY = 10000;
+
+  get advanceTaxFyOptions(): number[] {
+    const years = new Set<number>(this.soldFyOptions);
+    years.add(currentFyStartYear());
+    return Array.from(years).sort((a, b) => b - a);
+  }
+
+  private advanceTaxSettingsStore(): Record<string, { other: number; tds: number; cess: number }> {
+    try {
+      const raw = localStorage.getItem(DashboardComponent.ADVANCE_TAX_SETTINGS_KEY);
+      return raw ? JSON.parse(raw) : {};
+    } catch {
+      return {};
+    }
+  }
+
+  private loadAdvanceTaxSettings(): void {
+    const s = this.advanceTaxSettingsStore()[String(this.advanceTaxFy)];
+    this.advanceTaxOtherTaxInr = s?.other ?? 0;
+    this.advanceTaxTdsCreditInr = s?.tds ?? 0;
+    this.advanceTaxCessPct = s?.cess ?? 4;
+  }
+
+  /** Persist the per-FY inputs so they survive a reload. */
+  saveAdvanceTaxSettings(): void {
+    try {
+      const store = this.advanceTaxSettingsStore();
+      store[String(this.advanceTaxFy)] = {
+        other: Number(this.advanceTaxOtherTaxInr) || 0,
+        tds: Number(this.advanceTaxTdsCreditInr) || 0,
+        cess: Number(this.advanceTaxCessPct) || 0,
+      };
+      localStorage.setItem(DashboardComponent.ADVANCE_TAX_SETTINGS_KEY, JSON.stringify(store));
+    } catch {
+      /* private browsing / quota — the numbers still work for this session */
+    }
+    this.cdr.markForCheck();
+  }
+
+  onAdvanceTaxFyChange(): void {
+    this.loadAdvanceTaxSettings();
+    this.loadAdvanceTaxPayments();
+  }
+
+  loadAdvanceTaxPayments(): void {
+    this.advanceTaxLoading = true;
+    this.advanceTaxError = null;
+    this.cdr.markForCheck();
+    this.dashboardService.getAdvanceTaxPayments(this.advanceTaxFy).subscribe({
+      next: (res) => {
+        this.advanceTaxPayments = res.payments ?? [];
+        this.advanceTaxLoading = false;
+        this.cdr.markForCheck();
+      },
+      error: (err) => {
+        this.advanceTaxPayments = [];
+        this.advanceTaxError = err?.error?.error || err?.message || 'Could not load payments';
+        this.advanceTaxLoading = false;
+        this.cdr.markForCheck();
+      },
+    });
+  }
+
+  addAdvanceTaxPayment(): void {
+    this.advanceTaxError = null;
+    const paidOn = (this.newAdvanceTaxPaidOn || '').trim();
+    const amount = Number(this.newAdvanceTaxAmount);
+    if (!paidOn) { this.advanceTaxError = 'Pick the date you paid on.'; this.cdr.markForCheck(); return; }
+    if (!Number.isFinite(amount) || amount <= 0) { this.advanceTaxError = 'Enter the amount paid.'; this.cdr.markForCheck(); return; }
+    this.advanceTaxSaving = true;
+    this.cdr.markForCheck();
+    this.dashboardService.addAdvanceTaxPayment({
+      paidOn, amountInr: amount, fyStartYear: this.advanceTaxFy, note: this.newAdvanceTaxNote || '',
+    }).subscribe({
+      next: () => {
+        this.newAdvanceTaxPaidOn = '';
+        this.newAdvanceTaxAmount = null;
+        this.newAdvanceTaxNote = '';
+        this.advanceTaxSaving = false;
+        this.loadAdvanceTaxPayments();
+      },
+      error: (err) => {
+        this.advanceTaxError = err?.error?.error || err?.message || 'Could not save payment';
+        this.advanceTaxSaving = false;
+        this.cdr.markForCheck();
+      },
+    });
+  }
+
+  deleteAdvanceTaxPayment(id: number): void {
+    this.dashboardService.deleteAdvanceTaxPayment(id).subscribe({
+      next: () => this.loadAdvanceTaxPayments(),
+      error: (err) => {
+        this.advanceTaxError = err?.error?.error || err?.message || 'Could not delete payment';
+        this.cdr.markForCheck();
+      },
+    });
+  }
+
+  /** Payment currently open for editing, with its draft values. */
+  advanceTaxEditId: number | null = null;
+  advanceTaxEditPaidOn = '';
+  advanceTaxEditAmount: number | null = null;
+  advanceTaxEditNote = '';
+
+  startEditAdvanceTaxPayment(p: AdvanceTaxPayment): void {
+    this.advanceTaxEditId = p.id;
+    this.advanceTaxEditPaidOn = (p.paidOn || '').slice(0, 10);
+    this.advanceTaxEditAmount = p.amountInr;
+    this.advanceTaxEditNote = p.note || '';
+    this.advanceTaxError = null;
+    this.cdr.markForCheck();
+  }
+
+  cancelEditAdvanceTaxPayment(): void {
+    this.advanceTaxEditId = null;
+    this.advanceTaxError = null;
+    this.cdr.markForCheck();
+  }
+
+  saveEditAdvanceTaxPayment(): void {
+    const id = this.advanceTaxEditId;
+    if (id == null) return;
+    const paidOn = (this.advanceTaxEditPaidOn || '').trim();
+    const amount = Number(this.advanceTaxEditAmount);
+    if (!paidOn) { this.advanceTaxError = 'Pick the date you paid on.'; this.cdr.markForCheck(); return; }
+    if (!Number.isFinite(amount) || amount <= 0) { this.advanceTaxError = 'Enter the amount paid.'; this.cdr.markForCheck(); return; }
+    this.advanceTaxSaving = true;
+    this.cdr.markForCheck();
+    this.dashboardService.updateAdvanceTaxPayment(id, {
+      paidOn, amountInr: amount, note: this.advanceTaxEditNote || '',
+    }).subscribe({
+      next: () => {
+        this.advanceTaxSaving = false;
+        this.advanceTaxEditId = null;
+        this.loadAdvanceTaxPayments();
+      },
+      error: (err) => {
+        this.advanceTaxError = err?.error?.error || err?.message || 'Could not update payment';
+        this.advanceTaxSaving = false;
+        this.cdr.markForCheck();
+      },
+    });
+  }
+
+  /** Sales in the selected FY, as (sellDate ms, tax) pairs. Tax is signed so a loss offsets. */
+  private advanceTaxSales(): { ms: number; taxInr: number; gainInr: number }[] {
+    const out: { ms: number; taxInr: number; gainInr: number }[] = [];
+    for (const r of this.soldRows) {
+      if (this.fyStartYear(String(r.sellDate ?? '')) !== this.advanceTaxFy) continue;
+      const ms = this.parseDate(String(r.sellDate ?? ''));
+      if (!ms) continue;
+      out.push({ ms, taxInr: Number(r.taxPaidInr) || 0, gainInr: Number(r.gainBeforeTaxInr) || 0 });
+    }
+    return out.sort((a, b) => a.ms - b.ms);
+  }
+
+  /** Instalment due dates for the FY, plus the 31 March catch-up the s.234C proviso allows
+   * for gains arising after the last instalment. */
+  private advanceTaxDueDates(): { quarter: number; label: string; date: Date; pct: number; dueOn: string }[] {
+    const y = this.advanceTaxFy;
+    const at = (year: number, monthIdx: number, day: number) => {
+      const d = new Date(year, monthIdx, day);
+      // End of day: a payment made on the due date still counts towards it.
+      d.setHours(23, 59, 59, 999);
+      return d;
+    };
+    return [
+      { quarter: 1, label: 'Q1', date: at(y, 5, 15), pct: 15, dueOn: `${y}-06-15` },
+      { quarter: 2, label: 'Q2', date: at(y, 8, 15), pct: 45, dueOn: `${y}-09-15` },
+      { quarter: 3, label: 'Q3', date: at(y, 11, 15), pct: 75, dueOn: `${y}-12-15` },
+      { quarter: 4, label: 'Q4', date: at(y + 1, 2, 15), pct: 100, dueOn: `${y + 1}-03-15` },
+      { quarter: 5, label: 'By 31 Mar', date: at(y + 1, 2, 31), pct: 100, dueOn: `${y + 1}-03-31` },
+    ];
+  }
+
+  /** Total capital-gains tax for the FY, netted across gains and losses and floored at zero. */
+  get advanceTaxCgTotalInr(): number {
+    return Math.max(0, this.advanceTaxSales().reduce((s, x) => s + x.taxInr, 0));
+  }
+
+  /** Full-year liability: capital gains + other income, plus cess, less credits. */
+  get advanceTaxTotalLiabilityInr(): number {
+    const base = this.advanceTaxCgTotalInr + (Number(this.advanceTaxOtherTaxInr) || 0);
+    const withCess = base * (1 + (Number(this.advanceTaxCessPct) || 0) / 100);
+    return Math.max(0, withCess - (Number(this.advanceTaxTdsCreditInr) || 0));
+  }
+
+  /** True when s.208 makes advance tax payable at all. */
+  get advanceTaxIsPayable(): boolean {
+    return this.advanceTaxTotalLiabilityInr >= DashboardComponent.ADVANCE_TAX_MIN_LIABILITY;
+  }
+
+  /**
+   * How the cumulative requirement is worked out.
+   *
+   * `statutory` applies the s.211 table (15/45/75/100%) to the whole year's liability, which
+   * is what a general advance-tax calculator shows.
+   *
+   * `proviso` instead requires capital-gains tax in full from the instalment falling on or
+   * after each sale, per the first proviso to s.234C — which excuses a shortfall you could
+   * not have estimated provided the whole tax is paid in the remaining instalments. That is
+   * closer to what you actually owe when gains arrive late in the year, but it does not
+   * match the familiar 15/45/75/100 split.
+   */
+  advanceTaxBasis: 'statutory' | 'proviso' = 'statutory';
+
+  setAdvanceTaxBasis(basis: 'statutory' | 'proviso'): void {
+    this.advanceTaxBasis = basis;
+    this.cdr.markForCheck();
+  }
+
+  /**
+   * The quarterly schedule.
+   *
+   * `additionalToPayInr` is the per-instalment top-up. For instalments already due it is
+   * measured against what you have actually paid; for future ones it assumes you keep to
+   * the schedule, so each row asks only for its own slice rather than repeating the whole
+   * outstanding balance.
+   */
+  get advanceTaxSchedule(): AdvanceTaxInstalment[] {
+    const sales = this.advanceTaxSales();
+    const otherTax = Number(this.advanceTaxOtherTaxInr) || 0;
+    const cess = 1 + (Number(this.advanceTaxCessPct) || 0) / 100;
+    const credit = Number(this.advanceTaxTdsCreditInr) || 0;
+    const now = Date.now();
+    const rows: AdvanceTaxInstalment[] = [];
+    // s.234C measures a shortfall against the tax due on the *returned* income, so a later
+    // loss in the same year pulls the final liability down. Cap each instalment at the
+    // year's liability so a gain followed by a loss cannot demand more than is ever owed.
+    const yearLiability = this.advanceTaxTotalLiabilityInr;
+    let seenNext = false;
+
+    for (const due of this.advanceTaxDueDates()) {
+      const cutoff = due.date.getTime();
+      const upto = sales.filter((s) => s.ms <= cutoff);
+      // Net losses against gains, but never let the cumulative requirement go negative.
+      const cgTax = Math.max(0, upto.reduce((s, x) => s + x.taxInr, 0));
+      const gains = upto.reduce((s, x) => s + x.gainInr, 0);
+      const otherCumulative = otherTax * (due.pct / 100);
+      // Credits are applied against the year's liability, so release them proportionally.
+      const provisoRequired = Math.min(
+        yearLiability,
+        Math.max(0, (cgTax + otherCumulative) * cess - credit * (due.pct / 100)),
+      );
+      const required = this.advanceTaxBasis === 'statutory'
+        ? yearLiability * (due.pct / 100)
+        : provisoRequired;
+      const paid = this.advanceTaxPayments
+        .filter((p) => {
+          const t = this.parseDate(p.paidOn); // 0 when unparseable
+          return t > 0 && t <= cutoff;
+        })
+        .reduce((s, p) => s + (Number(p.amountInr) || 0), 0);
+
+      // s.234C charges nothing at Q1/Q2 once 12%/36% is covered. The threshold has to follow
+      // the selected basis, otherwise the interest contradicts the requirement beside it.
+      const relief = due.quarter === 1 ? 0.12 : due.quarter === 2 ? 0.36 : due.pct / 100;
+      const threshold = this.advanceTaxBasis === 'statutory'
+        ? yearLiability * relief
+        // On the proviso basis the capital-gains portion is governed by the proviso, so only
+        // the other-income part gets the safe harbour.
+        : Math.min(yearLiability, Math.max(0, (cgTax + otherTax * relief) * cess - credit * relief));
+      const shortfall = required - paid;
+      const months = due.quarter === 4 || due.quarter === 5 ? 1 : 3;
+      const interestBase = Math.max(0, threshold - paid);
+      const interest = this.advanceTaxIsPayable ? interestBase * 0.01 * months : 0;
+
+      // Past instalments and the next one are judged on real payments, so the actionable
+      // figure is honest. Only instalments beyond the next assume the schedule is kept, so
+      // they ask for their own slice rather than restating the whole outstanding balance.
+      const isDue = cutoff <= now;
+      const isNext = !isDue && !seenNext;
+      if (isNext) seenNext = true;
+      const state: 'past' | 'next' | 'future' = isDue ? 'past' : isNext ? 'next' : 'future';
+      const prevRequired = rows.length ? rows[rows.length - 1].requiredCumulativeInr : 0;
+      const alreadyPaid = state === 'future' ? Math.max(prevRequired, paid) : paid;
+      const additional = Math.max(0, required - alreadyPaid);
+      const excess = Math.max(0, alreadyPaid - required);
+
+      rows.push({
+        quarter: due.quarter,
+        label: due.label,
+        dueOn: due.dueOn,
+        statutoryPct: due.pct,
+        cgTaxCumulativeInr: Math.round(cgTax),
+        otherTaxCumulativeInr: Math.round(otherCumulative),
+        requiredCumulativeInr: Math.round(required),
+        incrementInr: Math.round(required - prevRequired),
+        paidCumulativeInr: Math.round(paid),
+        alreadyPaidInr: Math.round(alreadyPaid),
+        paidIsProjected: !isDue && alreadyPaid > paid,
+        additionalToPayInr: Math.round(additional),
+        excessInr: Math.round(excess),
+        shortfallInr: Math.round(shortfall),
+        interestThresholdInr: Math.round(threshold),
+        interestInr: Math.round(interest),
+        sales: upto.length,
+        gainsRealisedInr: Math.round(gains),
+        isDue,
+        state,
+      });
+    }
+    // The 31 March row only adds information when a sale landed after 15 March.
+    const q4 = rows[3];
+    const q5 = rows[4];
+    if (q5 && q4 && q5.sales === q4.sales) rows.pop();
+    // Once the whole FY has run out nothing is "next", so the final instalment becomes the
+    // one to act on — the balance is then self-assessment tax payable with the return.
+    if (rows.length && !rows.some((r) => r.state === 'next')) {
+      rows[rows.length - 1].state = 'next';
+    }
+    return rows;
+  }
+
+  /** The instalment to act on: the next one still open, or the last if the FY has run out. */
+  get advanceTaxCurrentInstalment(): AdvanceTaxInstalment | null {
+    const rows = this.advanceTaxSchedule;
+    if (rows.length === 0) return null;
+    return rows.find((r) => r.state === 'next') ?? rows[rows.length - 1];
+  }
+
+  /** True once every instalment date for the FY has passed. */
+  get advanceTaxAllDuePassed(): boolean {
+    const rows = this.advanceTaxSchedule;
+    return rows.length > 0 && rows.every((r) => r.isDue);
+  }
+
+  /** Whole days until the current instalment is due; negative once it has passed. */
+  get advanceTaxDaysToDue(): number | null {
+    const cur = this.advanceTaxCurrentInstalment;
+    if (!cur) return null;
+    const due = this.parseDate(cur.dueOn);
+    if (!due) return null;
+    const startOfToday = new Date();
+    startOfToday.setHours(0, 0, 0, 0);
+    return Math.round((due - startOfToday.getTime()) / 86400000);
+  }
+
+  /** What to pay by the current instalment's due date to be square. */
+  get advanceTaxDueNowInr(): number {
+    return Math.max(0, this.advanceTaxCurrentInstalment?.shortfallInr ?? 0);
+  }
+
+  /** Overpaid against the current instalment, when there is no shortfall. */
+  get advanceTaxAheadNowInr(): number {
+    const s = this.advanceTaxCurrentInstalment?.shortfallInr ?? 0;
+    return s < 0 ? -s : 0;
+  }
+
+  /** The part of `advanceTaxDueNowInr` that newly arose in this instalment. */
+  get advanceTaxNewThisInstalmentInr(): number {
+    const inc = this.advanceTaxCurrentInstalment?.incrementInr ?? 0;
+    return Math.max(0, Math.min(inc, this.advanceTaxDueNowInr));
+  }
+
+  /** The rest, which is shortfall rolled over from instalments already past. */
+  get advanceTaxCarriedOverInr(): number {
+    return Math.max(0, this.advanceTaxDueNowInr - this.advanceTaxNewThisInstalmentInr);
+  }
+
+  /** Total estimated s.234C interest across instalments that have already fallen due. */
+  get advanceTaxInterestTotalInr(): number {
+    return this.advanceTaxSchedule
+      .filter((r) => r.isDue)
+      .reduce((s, r) => s + r.interestInr, 0);
+  }
+
+  get advanceTaxPaidTotalInr(): number {
+    return this.advanceTaxPayments.reduce((s, p) => s + (Number(p.amountInr) || 0), 0);
+  }
+
+  /** Still owed for the year (positive) or overpaid (negative). */
+  get advanceTaxBalanceInr(): number {
+    return Math.round(this.advanceTaxTotalLiabilityInr - this.advanceTaxPaidTotalInr);
+  }
+
+  /** Which instalment a payment date lands in: the first one still open on that date. */
+  advanceTaxInstalmentForDate(paidOn: string): string {
+    const t = this.parseDate(paidOn);
+    if (!t) return '—';
+    for (const due of this.advanceTaxDueDates()) {
+      if (t <= due.date.getTime()) {
+        return due.quarter === 5 ? 'By 31 Mar' : `${due.label} — due ${this.formatDate(due.dueOn)}`;
+      }
+    }
+    return 'After 31 Mar (self-assessment)';
+  }
+
+  advanceTaxRowClass(row: AdvanceTaxInstalment): string {
+    if (!row.isDue) return '';
+    if (row.shortfallInr > 1) return 'is-short';
+    if (row.shortfallInr < -1) return 'is-ahead';
+    return 'is-ok';
   }
 
   getSoldRowKey(row: SoldRow): string {

@@ -10,5 +10,18 @@
   width: 100%;
   min-height: 560px;
   height: 70vh;
+  // vh on mobile Safari means the toolbar-hidden height, so the frame overshoots while the
+  // toolbar is showing. dvh tracks the visible height instead.
+  height: 70dvh;
   border: none;
+}
+
+@media (max-width: 560px) {
+  .data-tab-wrap {
+    min-height: 0;
+  }
+  .data-tab-iframe {
+    min-height: 0;
+    height: 65dvh;
+  }
 }

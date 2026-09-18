@@ -1,10 +1,10 @@
-"""/api/market-status blueprint."""
+"""/api/market-status + /api/extended-session blueprint."""
 import requests
 from flask import Blueprint, jsonify
 
 from services.market import (
     _FINNHUB_TOKEN, _is_nasdaq_open_et, _is_premarket_et,
-    _is_postmarket_et, _next_market_open_close_et,
+    _is_postmarket_et, _next_market_open_close_et, recorded_session_open,
 )
 
 bp = Blueprint("market", __name__)
@@ -47,5 +47,50 @@ def get_market_status():
         "nextOpen": next_open_ts * 1000,
         "nextClose": next_close_ts * 1000,
         "nextPreMarketStart": next_pre_ts * 1000,
+    })
+
+
+@bp.route("/api/extended-session", methods=["GET"])
+def get_extended_session():
+    """Pre- and post-market open/high/low/last/volume for NVDA.
+
+    High, low, last and volume come from Nasdaq's extended-trading feed. The open is the
+    first tick this app recorded for the session, because Nasdaq does not publish it — so
+    it is absent until the session has started with the recorder running, and is flagged
+    `openIsRecorded` to keep it distinguishable from an official figure.
+    """
+    from helpers import gather_data
+
+    rupee_conv_obj = gather_data.RupeeConv()
+    sessions = {}
+    for session in ("pre", "post"):
+        stats = rupee_conv_obj.extended_session_stats(session) or {}
+        recorded = recorded_session_open(session) or {}
+        if not stats and not recorded:
+            sessions[session] = None
+            continue
+        sessions[session] = {
+            "session": session,
+            "open": recorded.get("open"),
+            "openAtMs": recorded.get("openAtMs"),
+            "openIsRecorded": recorded.get("open") is not None,
+            "recordedTicks": recorded.get("ticks", 0),
+            "last": stats.get("last"),
+            "change": stats.get("change"),
+            "changePct": stats.get("changePct"),
+            "high": stats.get("high"),
+            "highAt": stats.get("highAt"),
+            "low": stats.get("low"),
+            "lowAt": stats.get("lowAt"),
+            "volume": stats.get("volume"),
+            "prevClose": stats.get("prevClose"),
+            "asOf": stats.get("asOf"),
+        }
+    return jsonify({
+        "isPreMarketSession": _is_premarket_et(),
+        "isPostMarketSession": _is_postmarket_et(),
+        "marketOpen": _is_nasdaq_open_et(),
+        "pre": sessions.get("pre"),
+        "post": sessions.get("post"),
     })
 

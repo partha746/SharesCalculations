@@ -1,10 +1,37 @@
 * {
   box-sizing: border-box;
 }
+
+html {
+  // Stop iOS inflating text in landscape.
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
 body {
   margin: 0;
   font-family: system-ui, -apple-system, sans-serif;
   background: #0f1116;
   color: #e6edf3;
   min-height: 100vh;
+  // dvh tracks Safari's collapsing toolbar, so the page does not jump as it hides.
+  min-height: 100dvh;
+  // No sideways rubber-banding: a table that scrolls should scroll inside its own container.
+  overflow-x: hidden;
+}
+
+// Safari zooms the whole page when a focused field is under 16px, which on a phone means
+// every tap into an input shifts the layout. Hold inputs at 16px on small screens; the
+// desktop styles keep their denser sizing above this width.
+@media (max-width: 768px) {
+  input,
+  select,
+  textarea {
+    font-size: 16px;
+    max-width: 100%;
+  }
+  // Date fields also need the native picker to stay reachable at 16px.
+  input[type='date'] {
+    min-height: 2.25rem;
+  }
 }

@@ -51,6 +51,7 @@ dashboard/
       networth.py        #   /api/networth/items (CRUD)
       income.py          #   /api/income/resolve, /api/income/overrides/<key>
       earmarks.py        #   /api/earmarks (lots reserved at a target sell price)
+      advance_tax.py     #   /api/advance-tax/payments (amounts paid per FY; schedule is derived client-side)
       finance_plan.py    #   /api/finance-plan (GET/POST; plan stored as a JSON blob)
     services/            # business logic (no Flask request handling)
       market.py          #   market hours, USD/INR helpers, OHLC rollups, recorder loop
@@ -92,13 +93,16 @@ so every reader and writer shares one path.
 Price history:
 
 - Raw live ticks (every 14s when market open) -> `live_price_history` (capped at 5 GB; oldest pruned).
+- Pre/post-market ticks (every 14s during those sessions) -> `extended_price_history`, kept separate so
+  the regular-hours chart and rollups are untouched. Its first row per session is the only source for
+  that session's open, which Nasdaq does not publish.
   The backend recorder is the only writer; the frontend does not POST ticks.
 - Continuous OHLC rollups -> `live_price_ohlc_1m` / `_1h` / `_1d`, maintained incrementally and backfilled from raw on first run.
 - The chart endpoint (`/api/live-price-history`) aggregates the smallest suitable rollup into <= `maxPoints` buckets so any range stays fast.
 
 Other tables: `NSU` / `ESPP` / `SellOut` / `Split` (lots and sales), `mf_holdings`,
-`networth_items`, `earmarks`, `finance_plan`, `income_overrides`, `breeze_accounts` and
-`breeze_account_names` (so holder names survive restarts and disconnects).
+`networth_items`, `earmarks`, `finance_plan`, `income_overrides`, `advance_tax_payments`,
+`breeze_accounts` and `breeze_account_names` (so holder names survive restarts and disconnects).
 
 ## Frontend build
 

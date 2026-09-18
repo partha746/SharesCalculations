@@ -76,8 +76,21 @@
 .tab-fab__menu-dot { font-size: 0.55rem; color: #58a6ff; }
 
 @media (max-width: 480px) {
-  .tab-fab { right: 0.9rem; bottom: 0.9rem; width: 3rem; height: 3rem; }
-  .tab-fab__menu { right: 0.9rem; bottom: 4.4rem; }
+  // Lift clear of the home indicator, which sits over the bottom of the viewport.
+  .tab-fab {
+    right: max(0.9rem, env(safe-area-inset-right));
+    bottom: calc(0.9rem + env(safe-area-inset-bottom));
+    width: 3rem;
+    height: 3rem;
+  }
+  .tab-fab__menu {
+    right: max(0.9rem, env(safe-area-inset-right));
+    bottom: calc(4.4rem + env(safe-area-inset-bottom));
+    // Never wider than the screen, and scrollable if the tab list outgrows the height.
+    max-width: calc(100vw - 1.8rem);
+    max-height: 60dvh;
+    overflow-y: auto;
+  }
 }
 .dashboard-error {
   padding: 2rem;
@@ -1688,6 +1701,16 @@ details[open] > .icici-setup__summary::before { content: '⌄ '; }
 .playground-input--short {
   max-width: 8rem;
 }
+
+// Without this the browser draws the native calendar icon and picker panel for light mode,
+// leaving a dark glyph on our dark field — effectively invisible.
+input[type='date'],
+input[type='datetime-local'],
+input[type='month'] {
+  color-scheme: dark;
+  // The picker indicator needs room, otherwise it is clipped at narrow widths.
+  min-width: 9.5rem;
+}
 .playground-table-wrap {
   overflow-x: auto;
 }
@@ -1907,6 +1930,259 @@ details[open] > .icici-setup__summary::before { content: '⌄ '; }
 }
 .playground-multi-diff--down {
   color: #f85149;
+}
+
+// ===== Advance tax (Sold tab) =====
+
+.adv-tax {
+  margin-top: 1.5rem;
+}
+.adv-tax__inputs,
+.adv-tax__form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 0.75rem 1.25rem;
+  margin-bottom: 1rem;
+}
+.adv-tax__form-note {
+  flex: 1 1 220px;
+}
+
+.adv-tax__stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1.5rem;
+  margin: 0 0 1rem;
+}
+.adv-tax__stat {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+.adv-tax__stat-value {
+  font-size: 1.2rem;
+  font-weight: 600;
+  color: #c9d1d9;
+  font-variant-numeric: tabular-nums;
+}
+.adv-tax__stat-value--short {
+  color: #f85149;
+}
+.adv-tax__stat-value--ahead {
+  color: #3fb950;
+}
+.adv-tax__stat-label {
+  font-size: 0.78rem;
+  color: #8b949e;
+}
+
+// The one number to act on, pulled out of the cumulative table.
+.adv-tax__next {
+  border: 1px solid #30363d;
+  border-left-width: 3px;
+  border-radius: 0 6px 6px 0;
+  background: #0d1117;
+  padding: 0.7rem 1rem;
+  margin: 0 0 1rem;
+}
+.adv-tax__next--short {
+  border-left-color: #f85149;
+}
+.adv-tax__next--ok {
+  border-left-color: #3fb950;
+}
+.adv-tax__next-head {
+  margin-bottom: 0.1rem;
+}
+.adv-tax__next-kicker {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #8b949e;
+}
+.adv-tax__next-days {
+  margin-left: 0.5rem;
+  color: #6e7681;
+  text-transform: none;
+  letter-spacing: 0;
+}
+.adv-tax__next-amount {
+  font-size: 1.6rem;
+  font-weight: 600;
+  color: #e6edf3;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.2;
+}
+.adv-tax__next-break {
+  font-size: 0.8rem;
+  color: #8b949e;
+  margin-top: 0.15rem;
+}
+.adv-tax__next-sep {
+  margin: 0 0.4rem;
+  color: #484f58;
+}
+.adv-tax__next-note {
+  font-size: 0.78rem;
+  color: #d4a72c;
+  margin-top: 0.35rem;
+}
+
+.adv-tax__badge {
+  margin-left: 0.4rem;
+  padding: 0.05rem 0.35rem;
+  border-radius: 999px;
+  background: #1f6feb;
+  color: #fff;
+  font-size: 0.65rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  vertical-align: middle;
+}
+// Keep the acted-on row legible even though future rows are dimmed.
+.adv-tax__row--current td {
+  background: #10161f;
+  color: #c9d1d9;
+}
+
+.adv-tax__table {
+  th,
+  td {
+    white-space: nowrap;
+  }
+}
+// A future instalment is context, not an obligation yet.
+.adv-tax__row--future td {
+  color: #6e7681;
+}
+.adv-tax__req {
+  font-weight: 600;
+}
+.adv-tax__pct {
+  margin-left: 0.35rem;
+  font-size: 0.72rem;
+  color: #6e7681;
+}
+.adv-tax__sales {
+  display: block;
+  font-size: 0.7rem;
+  color: #6e7681;
+}
+.adv-tax__short {
+  color: #f85149;
+  font-weight: 600;
+}
+.adv-tax__ahead {
+  color: #3fb950;
+}
+.adv-tax__ok {
+  color: #8b949e;
+}
+.adv-tax__future {
+  color: #6e7681;
+  font-style: italic;
+}
+.adv-tax__basis {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.6rem;
+
+  .playground-label {
+    margin: 0 0.25rem 0 0;
+    font-size: 0.78rem;
+    color: #8b949e;
+  }
+  .chart-mode-btn {
+    border: 1px solid #30363d;
+    border-radius: 6px;
+  }
+  .chart-mode-btn--active {
+    border-color: #388bfd;
+  }
+}
+
+.adv-tax__mark {
+  display: inline-block;
+  width: 1rem;
+  font-weight: 700;
+  text-align: center;
+}
+.adv-tax__mark--done {
+  color: #3fb950;
+}
+.adv-tax__mark--late {
+  color: #d4a72c;
+}
+// Marks a projected figure rather than a recorded one.
+.adv-tax__mark-proj {
+  color: #6e7681;
+  font-size: 0.85em;
+  vertical-align: super;
+}
+.adv-tax__excess {
+  display: block;
+  font-size: 0.72rem;
+}
+// A missed deadline is history, so it is muted rather than shown as a live demand.
+.adv-tax__lapsed {
+  color: #d4a72c;
+}
+.adv-tax__cell-note {
+  display: block;
+  font-size: 0.68rem;
+  color: #6e7681;
+  font-weight: 400;
+}
+.adv-tax__cell-note--pay {
+  color: #f85149;
+}
+.adv-tax__legend {
+  font-size: 0.78rem;
+  margin-top: 0.4rem;
+}
+.adv-tax__footnote {
+  font-size: 0.78rem;
+  margin-top: 0.75rem;
+}
+.adv-tax__row-actions {
+  display: flex;
+  gap: 0.35rem;
+  white-space: nowrap;
+}
+.adv-tax__row--editing td {
+  background: #10161f;
+}
+.adv-tax__edit-input {
+  font: inherit;
+  font-size: 0.85rem;
+  padding: 0.25rem 0.4rem;
+  border: 1px solid #388bfd;
+  border-radius: 4px;
+  background: #0d1117;
+  color: #e6edf3;
+  width: 100%;
+  min-width: 8rem;
+}
+.adv-tax__edit-input--num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.adv-tax__del {
+  background: none;
+  border: 1px solid #30363d;
+  border-radius: 4px;
+  color: #8b949e;
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.75rem;
+  padding: 0.15rem 0.5rem;
+
+  &:hover {
+    border-color: #f85149;
+    color: #f85149;
+  }
 }
 
 // ===== Mutual fund overlap (Playground) =====
@@ -2836,4 +3112,144 @@ details[open] > .icici-setup__summary::before { content: '⌄ '; }
   .section-title { font-size: 0.95rem; }
   .live-price-day-ticker__item { min-width: 140px; }
   .news-summary { gap: 1rem; }
+}
+
+/* ===== Phones (iPhone 17 Pro Max is 440px wide in portrait) ===== */
+@media (max-width: 560px) {
+  /* Stat strips: two per row rather than one long column */
+  .mfo-stats,
+  .adv-tax__stats {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.75rem 1rem;
+  }
+  .mfo-stat__value,
+  .adv-tax__stat-value {
+    font-size: 1rem;
+  }
+  .mfo-stat__label,
+  .adv-tax__stat-label {
+    font-size: 0.7rem;
+  }
+
+  /* The one actionable number stays prominent but must not overflow */
+  .adv-tax__next-amount {
+    font-size: 1.35rem;
+  }
+  .adv-tax__next {
+    padding: 0.6rem 0.75rem;
+  }
+  .adv-tax__next-break {
+    font-size: 0.75rem;
+  }
+
+  /* Forms and input rows go one field per line, full width */
+  .adv-tax__inputs,
+  .adv-tax__form,
+  .playground-form {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.6rem;
+  }
+  .playground-label {
+    input,
+    select {
+      max-width: none;
+    }
+  }
+  .playground-input--short {
+    max-width: none;
+  }
+  .adv-tax__basis {
+    flex-wrap: wrap;
+  }
+
+  /* Basis toggle and account pills scroll rather than wrap into a tall stack */
+  .mfo-acct-bar {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    padding-bottom: 0.2rem;
+    &::-webkit-scrollbar { display: none; }
+  }
+  .mfo-acct {
+    flex: 0 0 auto;
+  }
+
+  /* Charts need less height on a phone, and the sector legend has no room beside the ring */
+  .mfo-chart--stocks { height: 300px; }
+  .mfo-chart--pairs { height: 290px; }
+  .mfo-chart--sectors { height: 260px; }
+  .mfo-split { gap: 1rem; }
+  .mfo-split__col { flex-basis: 100%; }
+
+  /* Dense tables: tighter cells so more fits before the container has to scroll */
+  .playground-table,
+  .holdings-table {
+    font-size: 0.78rem;
+    th,
+    td {
+      padding: 0.3rem 0.4rem;
+    }
+  }
+  .adv-tax__table {
+    font-size: 0.74rem;
+  }
+  .adv-tax__pct,
+  .adv-tax__sales,
+  .adv-tax__cell-note {
+    font-size: 0.62rem;
+  }
+  /* Row actions stack so the buttons stay tappable instead of squeezing */
+  .adv-tax__row-actions {
+    flex-direction: column;
+    gap: 0.25rem;
+  }
+  .adv-tax__edit-input {
+    min-width: 7rem;
+  }
+
+  /* Extended-hours card: two columns of stats instead of four cramped ones */
+  .ext-stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.35rem 0.75rem;
+  }
+
+  /* Give a scrollable table an obvious edge so it reads as scrollable */
+  .playground-table-wrap,
+  .holdings-table-wrap,
+  .sold-table-wrap {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior-x: contain;
+  }
+
+  /* Tap targets: Apple's guidance is ~44px; these were sized for a mouse */
+  .tab-btn,
+  .chart-mode-btn,
+  .mfo-btn,
+  .adv-tax__del,
+  .export-btn {
+    min-height: 2.1rem;
+  }
+
+  /* Mark-sold dialog: had no max-height, so with the keyboard up its buttons were
+     unreachable. Scroll the dialog and keep it clear of the island / home indicator. */
+  .mark-sold-overlay {
+    align-items: flex-end;
+    padding: env(safe-area-inset-top) 0 0;
+  }
+  .mark-sold-modal {
+    min-width: 0;
+    width: 100%;
+    max-width: none;
+    border-radius: 12px 12px 0 0;
+    padding: 1rem 1rem calc(1rem + env(safe-area-inset-bottom));
+    max-height: 88dvh;
+    overflow-y: auto;
+  }
+  .mark-sold-modal__actions {
+    flex-wrap: wrap;
+  }
 }

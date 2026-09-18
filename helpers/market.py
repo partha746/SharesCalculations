@@ -20,6 +20,7 @@ _YF_CACHE_TTL_SEC = 90  # reuse result for 90s
 # during extended hours; Yahoo (yfinance) now rate-limits this host on every request, so
 # Nasdaq is tried first and yfinance is kept only as a fallback for when it recovers.
 _NASDAQ_QUOTE_URL = "https://api.nasdaq.com/api/quote/{symbol}/info"
+_NASDAQ_EXTENDED_URL = "https://api.nasdaq.com/api/quote/{symbol}/extended-trading"
 _NASDAQ_HEADERS = {
     # The endpoint returns 403 to non-browser agents.
     "User-Agent": (
@@ -43,6 +44,27 @@ def _parse_money(value):
         return float(text)
     except ValueError:
         return None
+
+
+def _parse_priced_at(value):
+    """'$223.9437 (05:11:31 PM)' -> (223.9437, '05:11:31 PM')."""
+    text = str(value or "")
+    at = ""
+    if "(" in text and ")" in text:
+        at = text[text.index("(") + 1:text.rindex(")")].strip()
+        text = text[:text.index("(")]
+    return _parse_money(text), at
+
+
+def _parse_consolidated(value):
+    """'$219.2308 +5.3308 (+2.49%)' -> (219.2308, 5.3308, 2.49)."""
+    parts = str(value or "").split()
+    price = _parse_money(parts[0]) if parts else None
+    change = _parse_money(parts[1]) if len(parts) > 1 else None
+    pct = None
+    if len(parts) > 2:
+        pct = _parse_money(parts[2].strip("()%").replace("+", ""))
+    return price, change, pct
 
 
 class RupeeConv:
@@ -228,6 +250,75 @@ class RupeeConv:
             "prevClose": _parse_money(secondary.get("lastSalePrice")),
             "timestamp": (primary.get("lastTradeTimestamp") or "").strip(),
             "realTime": bool(primary.get("isRealTime")),
+        }
+
+    def extended_session_stats(self, session, symbol="NVDA"):
+        """Pre/post session last, change, high, low and volume from Nasdaq. None if no data.
+
+        `session` is 'pre' or 'post'. Nasdaq resets a session's table shortly before it next
+        opens, so pre-market figures are readable from 4:00 AM ET until the following
+        pre-open, and post-market from 4:00 PM ET until the following post-open.
+
+        The session *open* is not available here: the trade table is capped at the last 100
+        trades per half-hour bucket, which for a liquid symbol covers only the final seconds
+        of the bucket. `extended_price_history` (recorded locally) supplies that instead.
+        """
+        if session not in ("pre", "post"):
+            return None
+        try:
+            resp = self._yf_session().get(
+                _NASDAQ_EXTENDED_URL.format(symbol=symbol.upper()),
+                params={"assetclass": "stocks", "markettype": session},
+                headers=_NASDAQ_HEADERS,
+                timeout=_NASDAQ_TIMEOUT_SEC,
+            )
+            if resp.status_code != 200:
+                print(f"[nasdaq] {symbol} {session}-market: HTTP {resp.status_code}")
+                return None
+            data = (resp.json() or {}).get("data") or {}
+        except Exception as e:
+            print(f"[nasdaq] {symbol} {session}-market: {e}")
+            return None
+
+        rows = ((data.get("infoTable") or {}).get("rows")) or []
+        if not rows:
+            return None  # session has not started, or its table has been reset
+        row = rows[0]
+        last, change, change_pct = _parse_consolidated(row.get("consolidated"))
+        if last is None:
+            return None
+        high, high_at = _parse_priced_at(row.get("highPrice"))
+        low, low_at = _parse_priced_at(row.get("lowPrice"))
+        volume = _parse_money(row.get("volume"))
+        # "Market Close: $213.9". For a pre-market session that is the right reference (the
+        # prior day's close), but for post-market Nasdaq still reports the *previous* day's
+        # close, which folds the whole regular session into the change. Post-market has to be
+        # measured against the close that session opened from.
+        ref_close = _parse_money(str(data.get("previousInfo") or "").split(":")[-1])
+        if session == "post":
+            quote = self.nasdaq_quote(symbol)
+            if quote:
+                # secondaryData holds the regular close while an extended session is running;
+                # once everything is shut, primaryData is that same close.
+                regular_close = quote.get("prevClose") or quote.get("price")
+                if regular_close:
+                    ref_close = regular_close
+        if ref_close:
+            change = round(last - ref_close, 4)
+            change_pct = round(change / ref_close * 100, 2)
+        updates = data.get("lastUpdateInfo") or []
+        return {
+            "session": session,
+            "last": last,
+            "change": change,
+            "changePct": change_pct,
+            "high": high,
+            "highAt": high_at,
+            "low": low,
+            "lowAt": low_at,
+            "volume": int(volume) if volume else None,
+            "prevClose": ref_close,
+            "asOf": (updates[0] if updates else "").strip(),
         }
 
     def _nasdaq_session_price(self, symbol, wanted):

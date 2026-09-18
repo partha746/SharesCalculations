@@ -15,12 +15,16 @@ main {
 }
 
 @media (max-width: 768px) {
+  // viewport-fit=cover puts content under the Dynamic Island and home indicator, so the
+  // insets below keep it clear. max() so there is still padding on devices reporting 0.
   .app-header {
-    padding: 0.7rem 1rem;
+    padding: max(0.7rem, env(safe-area-inset-top)) max(1rem, env(safe-area-inset-right)) 0.7rem
+      max(1rem, env(safe-area-inset-left));
     margin-bottom: 0.75rem;
     h1 { font-size: 1.05rem; }
   }
   main {
-    padding: 0 0.75rem 1rem;
+    padding: 0 max(0.75rem, env(safe-area-inset-right))
+      calc(1rem + env(safe-area-inset-bottom)) max(0.75rem, env(safe-area-inset-left));
   }
 }
