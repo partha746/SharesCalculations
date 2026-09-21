@@ -1,11 +1,32 @@
 @if (loading && !data) {
-  <div class="dashboard-loading">Loading dashboard…</div>
+  <div class="dashboard-loading" role="status" aria-live="polite">
+    <div class="fx-loader" aria-hidden="true">
+      <span class="fx-loader__ring"></span>
+      <span class="fx-loader__orbit">
+        <span class="fx-loader__coin fx-loader__coin--usd"><span>$</span></span>
+        <span class="fx-loader__coin fx-loader__coin--inr"><span>&#8377;</span></span>
+      </span>
+    </div>
+    <p class="dashboard-loading__text">
+      Loading dashboard<span class="fx-loader__dots" aria-hidden="true"><span>.</span><span>.</span><span>.</span></span>
+    </p>
+  </div>
 } @else if (error && !data) {
   <div class="dashboard-error">
     <p>{{ error }}</p>
     <button type="button" class="retry-btn" (click)="load()">Retry</button>
   </div>
 } @else if (data) {
+  <!-- Sticky: stays on screen as the dashboard scrolls. -->
+  <app-overview-time-card
+    [marketOpen]="marketOpen"
+    [isPreMarketSession]="isPreMarketSession"
+    [isPostMarketSession]="isPostMarketSession"
+    [marketNextOpenMs]="marketNextOpenMs"
+    [marketNextCloseMs]="marketNextCloseMs"
+    [marketNextPreMarketStartMs]="marketNextPreMarketStartMs"
+    [marketNextPostMarketEndMs]="marketNextPostMarketEndMs"
+    [lastRefreshedAt]="lastRefreshedAt" />
   @if (loading) {
     <div class="dashboard-refreshing" role="status" aria-live="polite">
       <span class="dashboard-refreshing__spinner">↻</span> Refreshing…
@@ -60,6 +81,16 @@
         <div class="live-price-block__row">
           <span class="live-price-block__label">USD → INR</span>
           <span class="live-price-block__value" title="Live FX feed (not ECB daily only); refreshes with the live price poll.">{{ formatUsdInrRate(data.usdToInrRate) }}</span>
+          @if (usdInrMovement) {
+            <span
+              class="live-price-block__diff live-price-block__diff--fx"
+              [class.live-price-block__diff--up]="usdInrMovement.diff > 0"
+              [class.live-price-block__diff--down]="usdInrMovement.diff < 0"
+              [attr.title]="usdInrMovementTooltip">
+              {{ usdInrMovement.diff > 0 ? '↑' : '↓' }} {{ Math.abs(usdInrMovement.diff) | number:'1.3-3' }}
+              ({{ usdInrMovement.diffPct >= 0 ? '+' : '' }}{{ usdInrMovement.diffPct | number:'1.2-2' }}%)
+            </span>
+          }
         </div>
         <div class="live-price-block__premarket">
           <app-live-price-extended-hint
@@ -136,14 +167,6 @@
           </span>
         </div>
       </div>
-      <app-overview-time-card
-        [marketOpen]="marketOpen"
-        [isPreMarketSession]="isPreMarketSession"
-        [isPostMarketSession]="isPostMarketSession"
-        [marketNextOpenMs]="marketNextOpenMs"
-        [marketNextCloseMs]="marketNextCloseMs"
-        [marketNextPreMarketStartMs]="marketNextPreMarketStartMs"
-        [lastRefreshedAt]="lastRefreshedAt" />
     </div>
     <h3 class="section-subtitle">Live price movement</h3>
     <div class="live-price-chart-controls">
@@ -151,14 +174,56 @@
         <button type="button" class="chart-mode-btn" [class.chart-mode-btn--active]="livePriceChartMode === 'line'" (click)="setLivePriceChartMode('line')">Line</button>
         <button type="button" class="chart-mode-btn" [class.chart-mode-btn--active]="livePriceChartMode === 'candlestick'" (click)="setLivePriceChartMode('candlestick')">Candlestick</button>
       </div>
-      <div class="live-price-chart-toggle live-price-chart-range">
-        <button type="button" class="chart-mode-btn" [class.chart-mode-btn--active]="livePriceRange === '1d'" (click)="setLivePriceRange('1d')">1D</button>
-        <button type="button" class="chart-mode-btn" [class.chart-mode-btn--active]="livePriceRange === '1w'" (click)="setLivePriceRange('1w')">1W</button>
-        <button type="button" class="chart-mode-btn" [class.chart-mode-btn--active]="livePriceRange === '2w'" (click)="setLivePriceRange('2w')">2W</button>
+      <div class="lp-timepicker">
+        <button type="button" class="lp-timepicker__trigger" [class.lp-timepicker__trigger--open]="livePricePickerOpen"
+                (click)="toggleLivePricePicker()" title="Choose a time range">
+          <span class="lp-timepicker__icon" aria-hidden="true">&#128337;</span>
+          <span class="lp-timepicker__label">{{ livePriceRangeLabel }}</span>
+          <span class="lp-timepicker__caret" aria-hidden="true">{{ livePricePickerOpen ? '▴' : '▾' }}</span>
+        </button>
+        @if (livePriceZoomDepth > 0) {
+          <button type="button" class="chart-mode-btn lp-zoom-btn" (click)="livePriceZoomBack()"
+                  [title]="'Step out one zoom level (' + livePriceZoomDepth + ' deep)'">&#8592; Back</button>
+          <button type="button" class="chart-mode-btn lp-zoom-btn" (click)="livePriceZoomReset()"
+                  title="Discard all zooms and return to the selected range">Reset zoom</button>
+        }
+
+        @if (livePricePickerOpen) {
+          <div class="lp-timepicker__panel">
+            <div class="lp-timepicker__col">
+              <div class="lp-timepicker__heading">Quick ranges</div>
+              <div class="lp-timepicker__quick">
+                @for (q of livePriceQuickRanges; track q.key) {
+                  <button type="button" class="lp-timepicker__quick-btn"
+                          [class.lp-timepicker__quick-btn--active]="livePriceRangeMode === 'quick' && livePriceQuickKey === q.key && livePriceZoomDepth === 0"
+                          (click)="applyLivePriceQuickRange(q.key)">{{ q.label }}</button>
+                }
+              </div>
+            </div>
+            <div class="lp-timepicker__col">
+              <div class="lp-timepicker__heading">Absolute range</div>
+              <label class="lp-timepicker__field">
+                From
+                <input type="datetime-local" [(ngModel)]="livePriceAbsFrom" />
+              </label>
+              <label class="lp-timepicker__field">
+                To
+                <input type="datetime-local" [(ngModel)]="livePriceAbsTo" />
+              </label>
+              <button type="button" class="lp-timepicker__apply" (click)="applyLivePriceAbsoluteRange()">Apply range</button>
+              <div class="lp-timepicker__hints">
+                @if (livePriceBoundsLabel) {
+                  <p class="lp-timepicker__bounds">{{ livePriceBoundsLabel }}</p>
+                }
+                <p class="lp-timepicker__bounds">Drag across the chart to zoom into a window.</p>
+              </div>
+            </div>
+          </div>
+        }
       </div>
       <div class="live-price-chart-meta">
         @if (livePriceChartMode === 'line') {
-          <span class="live-price-chart-meta__pill">ET sessions: {{ livePriceLineSessionLabel }}</span>
+          <span class="live-price-chart-meta__pill" title="US trading sessions; times on the chart are IST">Sessions: {{ livePriceLineSessionLabel }}</span>
         } @else {
           <span class="live-price-chart-meta__pill">{{ livePriceCandlestickSummary }}</span>
         }
@@ -182,7 +247,7 @@
         </div>
         @if (showCandleHelp) {
           <div class="candle-insights__help">
-            <p>Each candle is one trading day (ET). <strong class="candle-insights__up">Green</strong> = close above open (buyers won the day); <strong class="candle-insights__down">red</strong> = close below open (sellers won).</p>
+            <p>Each candle is one US trading day. <strong class="candle-insights__up">Green</strong> = close above open (buyers won the day); <strong class="candle-insights__down">red</strong> = close below open (sellers won).</p>
             <ul>
               <li>The thick <strong>body</strong> spans open → close; the thin <strong>wicks</strong> mark the day's high and low.</li>
               <li><strong>Long lower wick:</strong> price fell but recovered — buyers stepped in (bullish).</li>
@@ -196,7 +261,7 @@
     }
     @if (livePriceDayTickerItems.length > 0) {
       <div class="live-price-session-strip">
-        <div class="live-price-day-ticker-head">NVDA by session day (ET)</div>
+        <div class="live-price-day-ticker-head" title="One chip per US trading session, labelled by its US date">NVDA by trading session</div>
         <div class="live-price-day-ticker" role="list" aria-label="NVDA last price and change from open by trading day">
           @for (d of livePriceDayTickerItems; track d.dateKey) {
             <div
@@ -225,9 +290,15 @@
         </div>
       </div>
     }
-    <div class="live-price-chart-wrap">
+    <div class="live-price-chart-wrap"
+         (mousedown)="onLivePriceChartMouseDown($event)"
+         (mousemove)="onLivePriceChartMouseMove($event)"
+         (mouseup)="onLivePriceChartMouseUp()"
+         (mouseleave)="onLivePriceChartMouseLeave()">
       @if (livePriceHistory.length >= 2) {
         <canvas #livePriceChartCanvas class="holdings-chart"></canvas>
+        <!-- Drag selection rectangle; sized from the chart's plot area so it cannot spill out. -->
+        <div class="lp-brush" [ngStyle]="livePriceBrushStyle"></div>
       } @else {
         <p class="live-price-chart-wrap__hint holdings-table__hint">Polling when market is open… Need at least 2 points to show the chart.</p>
       }

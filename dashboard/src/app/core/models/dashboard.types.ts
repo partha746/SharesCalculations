@@ -292,6 +292,8 @@ export interface MarketStatusResponse {
   nextClose?: number;
   /** Next 4:00 AM ET (Mon–Fri) pre-market start in Unix ms */
   nextPreMarketStart?: number;
+  /** Next 8:00 PM ET (Mon–Fri) post-market end in Unix ms. Post-market starts at nextClose. */
+  nextPostMarketEnd?: number;
 }
 
 /** An advance-tax amount actually paid, as recorded by the user. */
@@ -372,7 +374,7 @@ export interface ExtendedSessionStats {
   change: number | null;
   changePct: number | null;
   high: number | null;
-  /** Wall-clock ET of the high, e.g. "05:11:31 PM". */
+  /** Wall clock of the high, converted to IST by the backend, e.g. "02:41:31 AM". */
   highAt: string | null;
   low: number | null;
   lowAt: string | null;
@@ -381,6 +383,10 @@ export interface ExtendedSessionStats {
   prevClose: number | null;
   /** Provider's own freshness line, e.g. "Data last updated Sep 17, 2026 08:00 PM ET." */
   asOf: string | null;
+  /** `asOf` as epoch ms, for picking the more recent of the two sessions. */
+  asOfMs: number | null;
+  /** Just the date from `asOf`, e.g. "Sep 17, 2026". Shown when it is not today. */
+  asOfDate: string | null;
 }
 
 export interface ExtendedSessionResponse {

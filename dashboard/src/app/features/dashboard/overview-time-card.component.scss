@@ -1,75 +1,100 @@
+// Sticky status strip: the clock, session state and last-refresh time stay on screen while
+// the dashboard scrolls. The host is the sticky element so the strip spans the content width.
 :host {
+  position: sticky;
+  top: 0;
+  z-index: 30;
   display: block;
-  height: 100%;
-  min-height: 0;
-  box-sizing: border-box;
+  margin-bottom: 0.9rem;
+  // Cancel the page gutter so the bar reaches the edges when pinned.
+  margin-left: -0.35rem;
+  margin-right: -0.35rem;
 }
 
-.time-card {
-  background: #161b22;
+.time-strip {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.4rem 0.75rem;
+  padding: 0.45rem 0.85rem;
   border: 1px solid #30363d;
   border-radius: 8px;
-  padding: 1rem 1.25rem;
-  min-width: 260px;
+  // Opaque: content scrolls underneath it.
+  background: #12171e;
 }
-@media (max-width: 768px) {
-  .time-card { min-width: 0; }
+
+.time-strip__group {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.45rem;
+  min-width: 0;
 }
-.time-card {
-  min-height: 170px;
-  height: 100%;
-  box-sizing: border-box;
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  gap: 0.5rem;
+// Pushed to the right so the clock and session state stay left-aligned together.
+.time-strip__group--refreshed {
+  margin-left: auto;
 }
-.time-card__title {
-  font-size: 0.85rem;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: #8b949e;
-  margin-bottom: 0.25rem;
-}
-.time-card__clock {
-  font-size: 2rem;
+
+.time-strip__clock {
+  font-size: 1rem;
   font-weight: 600;
   font-variant-numeric: tabular-nums;
   color: #e6edf3;
-  letter-spacing: 0.02em;
+  letter-spacing: 0.01em;
 }
-.time-card__date {
-  font-size: 1rem;
+.time-strip__date {
+  font-size: 0.8rem;
   color: #8b949e;
-  margin-bottom: 0.25rem;
 }
-.time-card__divider {
-  margin: 0.5rem 0 0.35rem;
-  padding-top: 0.5rem;
-  border-top: 1px solid #21262d;
-}
-.time-card__row {
-  display: flex;
-  align-items: baseline;
-  gap: 0.5rem;
-  margin-top: 0.4rem;
-  flex-wrap: wrap;
-  &:first-of-type {
-    margin-top: 0;
-  }
-}
-.time-card__label {
+.time-strip__state {
   font-size: 0.85rem;
-  color: #8b949e;
-  flex-shrink: 0;
-}
-.time-card__value {
-  font-size: 1.05rem;
   font-weight: 500;
-  color: #e6edf3;
-  &.time-card__value--countdown {
-    font-size: 1rem;
-    font-weight: 400;
-    color: #8b949e;
+  color: #c9d1d9;
+}
+.time-strip__muted {
+  font-size: 0.8rem;
+  color: #8b949e;
+  white-space: nowrap;
+}
+// The session currently running, so it reads ahead of the one merely scheduled.
+.time-strip__muted--live {
+  color: #d4a72c;
+  font-weight: 500;
+}
+.time-strip__sep {
+  width: 1px;
+  align-self: stretch;
+  background: #21262d;
+}
+
+.time-strip__dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #6e7681;
+  align-self: center;
+  flex: 0 0 auto;
+}
+.time-strip__dot--open {
+  background: #3fb950;
+}
+.time-strip__dot--ext {
+  background: #d4a72c;
+}
+
+@media (max-width: 560px) {
+  :host {
+    margin-left: 0;
+    margin-right: 0;
   }
+  .time-strip {
+    gap: 0.3rem 0.6rem;
+    padding: 0.4rem 0.6rem;
+  }
+  .time-strip__clock { font-size: 0.92rem; }
+  .time-strip__date,
+  .time-strip__muted { font-size: 0.74rem; }
+  .time-strip__state { font-size: 0.8rem; }
+  // On a narrow screen the separators only add noise once things wrap.
+  .time-strip__sep { display: none; }
+  .time-strip__group--refreshed { margin-left: 0; }
 }

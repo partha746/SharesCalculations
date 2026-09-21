@@ -39,7 +39,7 @@ def get_market_status():
             market_open = _is_nasdaq_open_et()
     except Exception:
         market_open = _is_nasdaq_open_et()
-    next_open_ts, next_close_ts, next_pre_ts = _next_market_open_close_et()
+    next_open_ts, next_close_ts, next_pre_ts, next_post_end_ts = _next_market_open_close_et()
     return jsonify({
         "marketOpen": market_open,
         "isPreMarketSession": _is_premarket_et(),
@@ -47,6 +47,8 @@ def get_market_status():
         "nextOpen": next_open_ts * 1000,
         "nextClose": next_close_ts * 1000,
         "nextPreMarketStart": next_pre_ts * 1000,
+        # Post-market runs from the close to 8 PM ET, so nextClose is also its start.
+        "nextPostMarketEnd": next_post_end_ts * 1000,
     })
 
 
@@ -85,6 +87,8 @@ def get_extended_session():
             "volume": stats.get("volume"),
             "prevClose": stats.get("prevClose"),
             "asOf": stats.get("asOf"),
+            "asOfMs": stats.get("asOfMs"),
+            "asOfDate": stats.get("asOfDate"),
         }
     return jsonify({
         "isPreMarketSession": _is_premarket_et(),

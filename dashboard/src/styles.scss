@@ -17,7 +17,9 @@ body {
   // dvh tracks Safari's collapsing toolbar, so the page does not jump as it hides.
   min-height: 100dvh;
   // No sideways rubber-banding: a table that scrolls should scroll inside its own container.
-  overflow-x: hidden;
+  // `clip` rather than `hidden` — hidden makes body a scroll container, which stops
+  // `position: sticky` working for anything inside it (the status strip).
+  overflow-x: clip;
 }
 
 // Safari zooms the whole page when a focused field is under 16px, which on a phone means

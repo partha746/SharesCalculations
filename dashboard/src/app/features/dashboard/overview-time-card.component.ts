@@ -16,6 +16,8 @@ export class OverviewTimeCardComponent implements OnInit, OnDestroy {
   @Input() marketNextOpenMs: number | null = null;
   @Input() marketNextCloseMs: number | null = null;
   @Input() marketNextPreMarketStartMs: number | null = null;
+  /** Next 8:00 PM ET. Post-market starts at marketNextCloseMs and ends here. */
+  @Input() marketNextPostMarketEndMs: number | null = null;
   @Input() lastRefreshedAt: Date | null = null;
 
   currentTime = new Date();
@@ -40,6 +42,26 @@ export class OverviewTimeCardComponent implements OnInit, OnDestroy {
   formatLastRefreshed(d: Date | null): string {
     if (!d) return '';
     return d.toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' });
+  }
+
+  /** Time only when it was today, so the strip stays on one line; full date otherwise. */
+  formatRefreshedShort(d: Date | null): string {
+    if (!d) return '';
+    const now = new Date();
+    const sameDay = d.getDate() === now.getDate()
+      && d.getMonth() === now.getMonth()
+      && d.getFullYear() === now.getFullYear();
+    return sameDay
+      ? d.toLocaleTimeString('en-IN', { hour12: true, hour: 'numeric', minute: '2-digit' })
+      : d.toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit', hour12: true });
+  }
+
+  /** One phrase for the session, rather than separate Market and Pre-market rows. */
+  get marketStripLabel(): string {
+    if (this.marketOpen) return 'Market open';
+    if (this.isPreMarketSession) return 'Pre-market';
+    if (this.isPostMarketSession) return 'Post-market';
+    return 'Market closed';
   }
 
   formatClock(d: Date): string {
@@ -69,19 +91,25 @@ export class OverviewTimeCardComponent implements OnInit, OnDestroy {
     return 'Pre-market starts in ' + formatCountdownWithSeconds(rem);
   }
 
-  get extendedHoursTimeCardLabel(): string {
-    if (this.isPostMarketSession || (!this.isPreMarketSession && !this.marketOpen)) return 'Post-market';
-    return 'Pre-market';
+  /** "Pre-market ends in 2h 10m" while running, otherwise when it next starts. */
+  get preMarketStatusText(): string {
+    const now = Date.now();
+    if (this.isPreMarketSession) {
+      const rem = (this.marketNextOpenMs ?? 0) - now;
+      return rem > 0 ? 'Pre-market ends in ' + formatCountdown(rem) : 'Pre-market open';
+    }
+    const rem = (this.marketNextPreMarketStartMs ?? 0) - now;
+    return rem > 0 ? 'Pre-market in ' + formatCountdown(rem) : '';
   }
 
-  get extendedHoursTimeCardValue(): string {
-    if (this.isPreMarketSession) return 'Open';
-    if (this.isPostMarketSession) return 'Open';
-    if (this.marketOpen) return 'Closed';
-    return 'Closed';
-  }
-
-  get showPreMarketStartsCountdown(): boolean {
-    return !this.isPreMarketSession && !this.isPostMarketSession && !this.marketOpen && this.preMarketCountdownText.length > 0;
+  /** Post-market starts at the regular close and runs to 8 PM ET. */
+  get postMarketStatusText(): string {
+    const now = Date.now();
+    if (this.isPostMarketSession) {
+      const rem = (this.marketNextPostMarketEndMs ?? 0) - now;
+      return rem > 0 ? 'Post-market ends in ' + formatCountdown(rem) : 'Post-market open';
+    }
+    const rem = (this.marketNextCloseMs ?? 0) - now;
+    return rem > 0 ? 'Post-market in ' + formatCountdown(rem) : '';
   }
 }

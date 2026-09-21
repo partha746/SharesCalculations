@@ -1,7 +1,100 @@
+/* --- Loading state: a dollar and a rupee orbiting each other, which is the USD->INR
+       conversion this dashboard is built around. --- */
 .dashboard-loading {
-  padding: 2rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1.15rem;
+  padding: 4rem 2rem;
   text-align: center;
   color: #8b949e;
+}
+.dashboard-loading__text {
+  margin: 0;
+  font-size: 0.92rem;
+  letter-spacing: 0.01em;
+}
+
+.fx-loader {
+  position: relative;
+  width: 86px;
+  height: 86px;
+}
+.fx-loader__ring {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  border: 1px solid #21262d;
+  animation: fx-ring 2.4s ease-in-out infinite;
+}
+.fx-loader__orbit {
+  position: absolute;
+  inset: 0;
+  animation: fx-orbit 2.2s linear infinite;
+}
+.fx-loader__coin {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 34px;
+  height: 34px;
+  margin: -17px 0 0 -17px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  font-size: 1.05rem;
+  font-weight: 600;
+  line-height: 1;
+
+  /* The orbit rotates the pair; counter-rotating the glyph keeps it upright. */
+  > span {
+    display: block;
+    animation: fx-orbit-counter 2.2s linear infinite;
+  }
+}
+.fx-loader__coin--usd {
+  transform: translateX(-26px);
+  color: #3fb950;
+  background: rgba(63, 185, 80, 0.12);
+  border: 1px solid rgba(63, 185, 80, 0.35);
+}
+.fx-loader__coin--inr {
+  transform: translateX(26px);
+  color: #58a6ff;
+  background: rgba(56, 139, 253, 0.12);
+  border: 1px solid rgba(56, 139, 253, 0.35);
+}
+
+.fx-loader__dots span {
+  animation: fx-dot 1.4s ease-in-out infinite;
+
+  &:nth-child(2) { animation-delay: 0.2s; }
+  &:nth-child(3) { animation-delay: 0.4s; }
+}
+
+@keyframes fx-orbit {
+  to { transform: rotate(360deg); }
+}
+@keyframes fx-orbit-counter {
+  to { transform: rotate(-360deg); }
+}
+@keyframes fx-ring {
+  0%, 100% { transform: scale(1); opacity: 0.45; }
+  50% { transform: scale(1.09); opacity: 1; }
+}
+@keyframes fx-dot {
+  0%, 60%, 100% { opacity: 0.25; }
+  30% { opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fx-loader__ring,
+  .fx-loader__orbit,
+  .fx-loader__coin > span,
+  .fx-loader__dots span {
+    animation: none;
+  }
 }
 
 /* --- Floating quick-nav (tabs) --- */
@@ -217,6 +310,186 @@
 .chart-mode-btn--active {
   background: #388bfd;
   color: #fff;
+}
+
+/* ===== Live price time picker (Kibana-style) + drag-to-zoom ===== */
+
+.lp-timepicker {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+.lp-timepicker__trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  font: inherit;
+  font-size: 0.82rem;
+  padding: 0.35rem 0.7rem;
+  border: 1px solid #30363d;
+  border-radius: 6px;
+  background: #0d1117;
+  color: #c9d1d9;
+  cursor: pointer;
+
+  &:hover { border-color: #484f58; }
+}
+.lp-timepicker__trigger--open { border-color: #388bfd; }
+.lp-timepicker__icon { font-size: 0.85em; filter: grayscale(1); }
+.lp-timepicker__caret { color: #6e7681; }
+.lp-zoom-btn { border: 1px solid #30363d; border-radius: 6px; }
+
+.lp-timepicker__panel {
+  position: absolute;
+  top: calc(100% + 0.45rem);
+  left: 0;
+  z-index: 40;
+  display: flex;
+  gap: 1.5rem;
+  padding: 1.1rem 1.25rem;
+  border: 1px solid #30363d;
+  border-radius: 10px;
+  background: #161b22;
+  // Anchored to the trigger's left edge, so cap it before it runs off screen.
+  max-width: calc(100vw - 2rem);
+}
+.lp-timepicker__col {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  min-width: 0;
+}
+/* Separate the two halves so the quick list and the date form do not read as one block. */
+.lp-timepicker__col + .lp-timepicker__col {
+  padding-left: 1.5rem;
+  border-left: 1px solid #21262d;
+  min-width: 13rem;
+}
+.lp-timepicker__heading {
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #6e7681;
+}
+.lp-timepicker__quick {
+  display: grid;
+  /* Wide enough for "Last 24 hours" at this size; with narrower cells the nowrap labels
+     of adjacent columns ran into each other. */
+  grid-template-columns: repeat(2, minmax(8.5rem, 1fr));
+  gap: 0.25rem 0.75rem;
+}
+.lp-timepicker__quick-btn {
+  font: inherit;
+  font-size: 0.8rem;
+  text-align: left;
+  padding: 0.4rem 0.6rem;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: #c9d1d9;
+  cursor: pointer;
+  white-space: nowrap;
+
+  &:hover { background: #21262d; }
+}
+.lp-timepicker__quick-btn--active { background: #1f6feb; color: #fff; }
+.lp-timepicker__field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #8b949e;
+
+  input {
+    font: inherit;
+    font-size: 0.82rem;
+    text-transform: none;
+    letter-spacing: 0;
+    padding: 0.4rem 0.5rem;
+    border: 1px solid #30363d;
+    border-radius: 6px;
+    background: #0d1117;
+    color: #e6edf3;
+    width: 100%;
+  }
+}
+.lp-timepicker__apply {
+  font: inherit;
+  font-size: 0.82rem;
+  margin-top: 0.35rem;
+  padding: 0.45rem 0.6rem;
+  border: 1px solid #1f6feb;
+  border-radius: 6px;
+  background: #1f6feb;
+  color: #fff;
+  cursor: pointer;
+
+  &:hover { background: #388bfd; }
+}
+.lp-timepicker__bounds {
+  margin: 0;
+  font-size: 0.7rem;
+  line-height: 1.45;
+  color: #6e7681;
+}
+/* Footer hints sit apart from the form controls above them. */
+.lp-timepicker__hints {
+  margin-top: 0.7rem;
+  padding-top: 0.6rem;
+  border-top: 1px solid #21262d;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+/* Selection rectangle drawn while dragging across the plot */
+.lp-brush {
+  position: absolute;
+  pointer-events: none;
+  background: rgba(56, 139, 253, 0.18);
+  border-left: 1px solid #388bfd;
+  border-right: 1px solid #388bfd;
+  z-index: 5;
+}
+
+@media (max-width: 700px) {
+  .lp-timepicker__panel {
+    min-width: 0;
+    width: min(92vw, 21rem);
+    flex-direction: column;
+    gap: 0.9rem;
+    padding: 0.9rem 1rem;
+    max-height: 70dvh;
+    overflow-y: auto;
+  }
+  /* Stacked, so the divider belongs on top rather than the side. */
+  .lp-timepicker__col + .lp-timepicker__col {
+    padding-left: 0;
+    padding-top: 0.9rem;
+    border-left: none;
+    border-top: 1px solid #21262d;
+    min-width: 0;
+  }
+  .lp-timepicker__quick {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.3rem 0.5rem;
+  }
+  .lp-timepicker__quick-btn {
+    font-size: 0.76rem;
+    padding: 0.45rem 0.4rem;
+    text-align: center;
+    /* Must wrap here: at this width a nowrap label would spill into the next column. */
+    white-space: normal;
+  }
+  .lp-timepicker__label {
+    max-width: 11rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
 }
 
 .live-price-clear-graph-btn {
@@ -542,6 +815,13 @@
 .live-price-block__diff--down {
   color: #f85149;
 }
+/* Sits on a secondary row, so it stays smaller than the NVDA movement chip.
+   Up is green here too: a higher USD/INR means the USD-denominated holdings
+   are worth more rupees, which is the direction that matters for this dashboard. */
+.live-price-block__diff--fx {
+  font-size: 0.8em;
+  font-variant-numeric: tabular-nums;
+}
 .live-price-block__diff-prefix {
   font-size: 0.78em;
   font-weight: 500;
@@ -711,7 +991,9 @@
   align-items: stretch;
 }
 .stat-grid--primary {
-  grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+  // auto-fit, not auto-fill: this row holds two cards, and auto-fill would keep the empty
+  // third track a wide screen has room for, stranding dead space on the right.
+  grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
 }
 .realised-profit-block {
   display: flex;

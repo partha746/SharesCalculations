@@ -106,7 +106,12 @@ def _seconds_until_next_market_open_et():
 
 
 def _next_market_open_close_et():
-    """Return (next_open_utc_ts_sec, next_close_utc_ts_sec, next_premarket_utc_ts_sec) for 9:30 AM, 4:00 PM, and 4:00 AM ET (Mon-Fri). Pre-market = 4:00 AM–9:30 AM ET."""
+    """Next 9:30 AM, 4:00 PM, 4:00 AM and 8:00 PM ET (Mon–Fri), as UTC epoch seconds.
+
+    Returns (next_open, next_close, next_premarket_start, next_postmarket_end). Pre-market
+    runs 4:00–9:30 AM ET and post-market 4:00–8:00 PM ET, so next_close doubles as the
+    post-market start.
+    """
     from datetime import timedelta as td
     if ZoneInfo is not None:
         et_now = datetime.now(ZoneInfo("America/New_York"))
@@ -168,7 +173,22 @@ def _next_market_open_close_et():
             days = 1
         next_pre = datetime.combine(et_now.date() + td(days=days), premarket_t)
     next_pre_ts = to_ts(next_pre)
-    return (next_open_ts, next_close_ts, next_pre_ts)
+
+    # Next 8:00 PM ET (post-market end, Mon–Fri). While a post-market session is running it
+    # is today's 8 PM; otherwise the next weekday's, so the UI can count down either way.
+    postmarket_end_t = datetime.strptime("20:00", "%H:%M").time()
+    if et_now.weekday() < 5 and et_now.time() < postmarket_end_t:
+        next_post_end = datetime.combine(et_now.date(), postmarket_end_t)
+    else:
+        days = 1
+        if et_now.weekday() == 4:
+            days = 3
+        elif et_now.weekday() == 5:
+            days = 2
+        next_post_end = datetime.combine(et_now.date() + td(days=days), postmarket_end_t)
+    next_post_end_ts = to_ts(next_post_end)
+
+    return (next_open_ts, next_close_ts, next_pre_ts, next_post_end_ts)
 
 
 def _get_previous_day_inr_rate():
@@ -500,7 +520,7 @@ def _live_price_recorder_loop():
                 # Sleep to whichever comes first: the regular open or the pre-market open,
                 # otherwise an overnight sleep would run straight past 4:00 AM ET.
                 sec = _seconds_until_next_market_open_et()
-                _, _, next_pre_ts = _next_market_open_close_et()
+                _, _, next_pre_ts, _ = _next_market_open_close_et()
                 pre_sec = int(next_pre_ts - time.time())
                 if 0 < pre_sec < sec:
                     sec = pre_sec

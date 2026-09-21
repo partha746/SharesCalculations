@@ -1,6 +1,7 @@
 """USD->INR FX rates + NVDA stock/live/pre-post prices (Finnhub, Frankfurter, Nasdaq, yfinance)."""
 import datetime as dt
 import locale
+import re
 import sqlite3
 import time
 from datetime import date, datetime, timedelta
@@ -46,6 +47,31 @@ def _parse_money(value):
         return None
 
 
+try:
+    from zoneinfo import ZoneInfo  # Python 3.9+
+except ImportError:  # host scripts may still be on 3.8
+    ZoneInfo = None
+
+
+def _et_clock_to_ist(day_text, clock_text):
+    """'Sep 17, 2026' + '05:11:31 PM' in ET -> '02:41:31 AM' in IST.
+
+    Nasdaq quotes extended-hours timestamps as a bare ET wall clock, so the session's date
+    is needed to shift it. Returns the original string when it cannot be parsed.
+    """
+    if not clock_text:
+        return clock_text
+    try:
+        naive = datetime.strptime("{} {}".format(day_text, clock_text), "%b %d, %Y %I:%M:%S %p")
+    except (ValueError, TypeError):
+        return clock_text
+    if ZoneInfo is None:
+        # ET is UTC-4 (EDT) or UTC-5 (EST); IST is UTC+5:30, so EDT differs by 9h30m.
+        return (naive + timedelta(hours=9, minutes=30)).strftime("%I:%M:%S %p")
+    et = naive.replace(tzinfo=ZoneInfo("America/New_York"))
+    return et.astimezone(ZoneInfo("Asia/Kolkata")).strftime("%I:%M:%S %p")
+
+
 def _parse_priced_at(value):
     """'$223.9437 (05:11:31 PM)' -> (223.9437, '05:11:31 PM')."""
     text = str(value or "")
@@ -54,6 +80,29 @@ def _parse_priced_at(value):
         at = text[text.index("(") + 1:text.rindex(")")].strip()
         text = text[:text.index("(")]
     return _parse_money(text), at
+
+
+def _parse_as_of(text):
+    """'Data last updated Sep 21, 2026 09:30 AM ET.' -> (epoch_ms, 'Sep 21, 2026').
+
+    Nasdaq keeps a session's table readable until shortly before it next opens, so during
+    Monday's regular hours the post table still holds Friday's numbers while the pre table
+    holds this morning's. Callers need this to tell which one is actually the latest.
+    """
+    m = re.search(r"([A-Z][a-z]{2} \d{1,2}, \d{4})(?:\s+(\d{1,2}:\d{2}\s*[AP]M))?", str(text or ""))
+    if not m:
+        return None, ""
+    day, clock = m.group(1), m.group(2)
+    try:
+        when = datetime.strptime(
+            "{} {}".format(day, clock) if clock else day,
+            "%b %d, %Y %I:%M %p" if clock else "%b %d, %Y",
+        )
+    except ValueError:
+        return None, day
+    # Timestamps are quoted in ET; treat them as UTC-4/5 only to order sessions, which is
+    # all this is used for, so the exact offset does not matter.
+    return int((when - datetime(1970, 1, 1)).total_seconds() + 4 * 3600) * 1000, day
 
 
 def _parse_consolidated(value):
@@ -307,7 +356,13 @@ class RupeeConv:
             change = round(last - ref_close, 4)
             change_pct = round(change / ref_close * 100, 2)
         updates = data.get("lastUpdateInfo") or []
+        as_of_ms, as_of_date = _parse_as_of(updates[0] if updates else "")
+        # Surface the high/low clock in IST; the raw feed quotes them in ET.
+        high_at = _et_clock_to_ist(as_of_date, high_at)
+        low_at = _et_clock_to_ist(as_of_date, low_at)
         return {
+            "asOfMs": as_of_ms,
+            "asOfDate": as_of_date,
             "session": session,
             "last": last,
             "change": change,

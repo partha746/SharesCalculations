@@ -17,11 +17,11 @@
         {{ usd(session.open) }}@if (session.open != null) {<span class="ext-stats__mark">*</span>}
       </dd>
     </div>
-    <div class="ext-stats__item" [title]="session.highAt ? 'High at ' + session.highAt + ' ET' : ''">
+    <div class="ext-stats__item" [title]="session.highAt ? 'High at ' + session.highAt + ' IST' : ''">
       <dt>High</dt>
       <dd>{{ usd(session.high) }}</dd>
     </div>
-    <div class="ext-stats__item" [title]="session.lowAt ? 'Low at ' + session.lowAt + ' ET' : ''">
+    <div class="ext-stats__item" [title]="session.lowAt ? 'Low at ' + session.lowAt + ' IST' : ''">
       <dt>Low</dt>
       <dd>{{ usd(session.low) }}</dd>
     </div>

@@ -55,7 +55,29 @@ export class LivePriceExtendedHintComponent implements OnInit, OnDestroy {
     if (this.isPostMarketSession) {
       return this.postSession ?? this.priceOnly('post', this.fallbackPostUsd);
     }
-    return this.postSession ?? this.preSession ?? null;
+    // Outside both sessions, show whichever ran most recently. Nasdaq keeps each table
+    // readable until shortly before it next opens, so during Monday's regular hours the
+    // post table still holds Friday's numbers while pre holds this morning's — preferring
+    // post unconditionally would hide the fresher session.
+    const pre = this.preSession;
+    const post = this.postSession;
+    if (pre && post) {
+      return (post.asOfMs ?? 0) >= (pre.asOfMs ?? 0) ? post : pre;
+    }
+    return pre ?? post ?? null;
+  }
+
+  /** Date of the session being shown, when it is not today's. */
+  get staleDateLabel(): string | null {
+    const s = this.session;
+    if (!s?.asOfDate || !s.asOfMs) return null;
+    const shown = new Date(s.asOfMs);
+    const today = new Date();
+    const sameDay =
+      shown.getUTCFullYear() === today.getUTCFullYear() &&
+      shown.getUTCMonth() === today.getUTCMonth() &&
+      shown.getUTCDate() === today.getUTCDate();
+    return sameDay ? null : s.asOfDate;
   }
 
   /** Minimal stats carrying just a last price, for the gap before the session table fills. */
@@ -64,7 +86,8 @@ export class LivePriceExtendedHintComponent implements OnInit, OnDestroy {
     return {
       session, open: null, openAtMs: null, openIsRecorded: false, recordedTicks: 0,
       last, change: null, changePct: null, high: null, highAt: null,
-      low: null, lowAt: null, volume: null, prevClose: null, asOf: null,
+      low: null, lowAt: null, volume: null, prevClose: null,
+      asOf: null, asOfMs: null, asOfDate: null,
     };
   }
 
@@ -84,7 +107,10 @@ export class LivePriceExtendedHintComponent implements OnInit, OnDestroy {
     const s = this.session;
     if (!s) return this.liveCardExtendedHoursClosedTitle;
     const name = s.session === 'pre' ? 'Pre-market' : 'Post-market';
-    return this.isHistoric ? `${name} (closed)` : name;
+    if (!this.isHistoric) return name;
+    // Date it when it is not today's session, so Friday's numbers on a Monday are obvious.
+    const stale = this.staleDateLabel;
+    return stale ? `${name} · ${stale}` : `${name} (closed)`;
   }
 
   get changeClass(): string {

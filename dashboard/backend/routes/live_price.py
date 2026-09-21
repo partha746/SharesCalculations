@@ -17,17 +17,58 @@ bp = Blueprint("live_price", __name__)
 # OHLC bucket counts stay accurate no matter how many dashboards are open.
 _HISTORY_DEDUPE_WINDOW_MS = 10_000
 
+@bp.route("/api/live-price-history/range", methods=["GET"])
+def get_live_price_history_range():
+    """Oldest and newest recorded tick, so a time picker can bound its inputs."""
+    with get_db() as conn:
+        _ensure_live_price_history_table(conn)
+        row = conn.execute(
+            "SELECT MIN(bucket_ms), MAX(last_ts_ms), COUNT(*) FROM live_price_ohlc_1d"
+        ).fetchone()
+    if not row or row[0] is None:
+        return jsonify({"minMs": None, "maxMs": None, "days": 0})
+    min_ms, max_ms = int(row[0]), int(row[1])
+    return jsonify({
+        "minMs": min_ms,
+        "maxMs": max_ms,
+        "days": max(1, round((max_ms - min_ms) / 86400000)),
+    })
+
+
 @bp.route("/api/live-price-history", methods=["GET"])
 def get_live_price_history():
-    """Server-aggregated OHLC history for charts. Params: days (1..370), maxPoints (100..5000).
-    Picks a bucket size so the response stays <= maxPoints, sourced from the smallest suitable rollup table.
+    """Server-aggregated OHLC history for charts.
+
+    Window: either `from`/`to` (epoch ms, for an absolute range or a zoom) or `days` (1..370)
+    for a trailing window. `maxPoints` (100..5000) caps the response; the bucket size is chosen
+    from the span so a two-hour zoom resolves to minutes while a year resolves to days.
     Returns ascending points: {timestamp, open, high, low, livePriceUsd(=close), usdToInrRate(=close), avg, n}.
     """
-    days = min(370, max(1, int(request.args.get("days", 7))))
     max_points = min(5000, max(100, int(request.args.get("maxPoints", 1500))))
     now_ms = int(time.time() * 1000)
-    start_ms = now_ms - days * 86400000
-    span_ms = max(days * 86400000, 1)
+
+    def _ms(name):
+        raw = request.args.get(name)
+        try:
+            return int(float(raw)) if raw not in (None, "") else None
+        except (TypeError, ValueError):
+            return None
+
+    from_ms, to_ms = _ms("from"), _ms("to")
+    if from_ms is not None or to_ms is not None:
+        end_ms = to_ms if to_ms is not None else now_ms
+        start_ms = from_ms if from_ms is not None else end_ms - 86400000
+        if start_ms > end_ms:
+            start_ms, end_ms = end_ms, start_ms
+        # A zero-width drag would divide by zero when sizing buckets.
+        if end_ms - start_ms < 60000:
+            end_ms = start_ms + 60000
+    else:
+        days = min(370, max(1, int(request.args.get("days", 7))))
+        end_ms = now_ms
+        start_ms = now_ms - days * 86400000
+
+    span_ms = max(end_ms - start_ms, 1)
     target = span_ms / max_points
     bucket = next((b for b in _AGG_BUCKETS_MS if b >= target), _AGG_BUCKETS_MS[-1])
 
@@ -38,15 +79,17 @@ def get_live_price_history():
             # filtering on bucket_ms would drop the oldest day whenever the window starts mid-session.
             # A day belongs in range if any of its ticks do, i.e. its last tick is at/after the start.
             rows = conn.execute(
-                "SELECT bucket_ms, open, high, low, close, sum_price, n, rate_close FROM live_price_ohlc_1d WHERE last_ts_ms >= ? ORDER BY bucket_ms ASC",
-                (start_ms,),
+                "SELECT bucket_ms, open, high, low, close, sum_price, n, rate_close FROM live_price_ohlc_1d "
+                "WHERE last_ts_ms >= ? AND bucket_ms <= ? ORDER BY bucket_ms ASC",
+                (start_ms, end_ms),
             ).fetchall()
             src = [(r[0], r[1], r[2], r[3], r[4], r[5], r[6], r[7]) for r in rows]
         else:
             table = "live_price_ohlc_1h" if bucket >= 3600000 else "live_price_ohlc_1m"
             rows = conn.execute(
-                f"SELECT bucket_ms, open, high, low, close, sum_price, n, rate_close FROM {table} WHERE bucket_ms >= ? ORDER BY bucket_ms ASC",
-                (start_ms,),
+                f"SELECT bucket_ms, open, high, low, close, sum_price, n, rate_close FROM {table} "
+                "WHERE bucket_ms >= ? AND bucket_ms <= ? ORDER BY bucket_ms ASC",
+                (start_ms, end_ms),
             ).fetchall()
             src = [(r[0], r[1], r[2], r[3], r[4], r[5], r[6], r[7]) for r in rows]
 

@@ -357,18 +357,16 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
   marketNextOpenMs: number | null = null;
   marketNextCloseMs: number | null = null;
   marketNextPreMarketStartMs: number | null = null;
+  /** Next 8:00 PM ET (post-market end); post-market starts at marketNextCloseMs. */
+  marketNextPostMarketEndMs: number | null = null;
   /** Show data label when |diff from open %| is at least this (e.g. 1.6). */
   livePriceChartMode: 'line' | 'candlestick' = 'line';
-  /** Visible range for the live price chart, by most-recent ET session days. Default 1 week. */
-  livePriceRange: '1d' | '1w' | '2w' = '1w';
-  /** Calendar days fetched for each range option (server picks bucket resolution to fit). */
-  private static readonly LIVE_PRICE_RANGE_DAYS: Record<'1d' | '1w' | '2w', number> = { '1d': 1, '1w': 7, '2w': 14 };
   /** True while clearing the live price history (graph) from the backend. */
   clearGraphInProgress = false;
   private livePricePollingInterval: ReturnType<typeof setInterval> | null = null;
   private static readonly LIVE_PRICE_POLL_MS = 14000;
-  private static readonly LIVE_PRICE_HISTORY_DAYS = 14;
-  private static readonly LIVE_PRICE_HISTORY_DAYS_MS = DashboardComponent.LIVE_PRICE_HISTORY_DAYS * 24 * 60 * 60 * 1000;
+  // The visible window comes from the time picker (livePriceEffectiveRange); there is no
+  // fixed history horizon any more, so a 90-day or all-time view survives polling.
   private static readonly LIVE_PRICE_HISTORY_MAX = 50000;
 
   constructor(
@@ -514,15 +512,17 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
       livePriceUsd: this.data.livePriceUsd,
       usdToInrRate: this.data.usdToInrRate,
     };
-    const fetchDays = this.livePriceRangeFetchDays();
-    this.dashboardService.getLivePriceHistory(fetchDays).subscribe({
+    const { from, to } = this.livePriceEffectiveRange;
+    const isLive = this.livePriceRangeIsLive;
+    this.dashboardService.getLivePriceHistoryBetween(from, to).subscribe({
       next: (stored) => {
         const combined = stored.length ? [...stored] : [];
-        combined.push(currentPoint);
+        // Only tack the current price onto a window that runs up to now; on a historical
+        // window it would draw a spurious point at the right edge.
+        if (isLive) combined.push(currentPoint);
         combined.sort((a, b) => a.timestamp - b.timestamp);
-        const cutoff = now - fetchDays * 24 * 60 * 60 * 1000;
         this.livePriceHistory = combined
-          .filter((p) => p.timestamp >= cutoff)
+          .filter((p) => p.timestamp >= from && p.timestamp <= Math.max(to, isLive ? now : to))
           .slice(-DashboardComponent.LIVE_PRICE_HISTORY_MAX);
         if (this.livePriceHistory.length >= 2) {
           const prev = this.livePriceHistory[this.livePriceHistory.length - 2];
@@ -590,6 +590,7 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
           this.marketNextOpenMs = status.nextOpen ?? null;
           this.marketNextCloseMs = status.nextClose ?? null;
           this.marketNextPreMarketStartMs = status.nextPreMarketStart ?? null;
+          this.marketNextPostMarketEndMs = status.nextPostMarketEnd ?? null;
           this.cdr.markForCheck();
           // Always fetch live price so we get pre-market/post-market price when in those sessions
           this.fetchAndPushLivePrice();
@@ -602,6 +603,7 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
           this.marketNextOpenMs = null;
           this.marketNextCloseMs = null;
           this.marketNextPreMarketStartMs = null;
+          this.marketNextPostMarketEndMs = null;
           this.cdr.markForCheck();
         },
       });
@@ -662,11 +664,15 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
         this.lastRefreshedAt = new Date(res.lastUpdated);
         const now = Date.now();
         const point = { timestamp: now, livePriceUsd: res.livePriceUsd, usdToInrRate: res.usdToInrRate };
-        if (this.marketOpen) {
+        // Only extend a window that runs up to now; on a historical or zoomed range the live
+        // tick does not belong, and trimming to it would discard the range being viewed.
+        if (this.marketOpen && this.livePriceRangeIsLive) {
           // In-memory only: the backend recorder is the single writer of live_price_history, so
           // posting here too would double every tick (and inflate the OHLC bucket counts).
           this.livePriceHistory.push(point);
-          const cutoff = now - DashboardComponent.LIVE_PRICE_HISTORY_DAYS_MS;
+          // Trim to the selected range. This used to be a fixed 14 days, which silently cut a
+          // 30/90-day or "all recorded" view back to a fortnight on the first poll after load.
+          const cutoff = this.livePriceEffectiveRange.from;
           this.livePriceHistory = this.livePriceHistory.filter((p) => p.timestamp >= cutoff);
           if (this.livePriceHistory.length > DashboardComponent.LIVE_PRICE_HISTORY_MAX) {
             this.livePriceHistory = this.livePriceHistory.slice(-DashboardComponent.LIVE_PRICE_HISTORY_MAX);
@@ -1963,17 +1969,244 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
     this.initOrUpdateLivePriceChart();
   }
 
-  setLivePriceRange(range: '1d' | '1w' | '2w'): void {
-    if (this.livePriceRange === range) return;
-    this.livePriceRange = range;
-    // Range drives the fetch so each range gets an appropriate server-side resolution.
-    if (this.livePriceChart) { this.livePriceChart.destroy(); this.livePriceChart = null; }
-    this.loadLivePriceHistoryFromDb();
+  /** USD/INR change against the previous calendar day's rate, or null when unknown. */
+  get usdInrMovement(): { diff: number; diffPct: number; prev: number } | null {
+    const now = this.data?.usdToInrRate;
+    const prev = this.data?.previousCloseUsdToInrRate;
+    if (now == null || prev == null || prev <= 0) return null;
+    const diff = now - prev;
+    // Sub-0.1 paisa is rounding noise in the feed, not a move worth showing.
+    if (Math.abs(diff) < 0.001) return null;
+    return { diff, diffPct: (diff / prev) * 100, prev };
   }
 
-  /** Calendar days to fetch for the selected range. */
-  private livePriceRangeFetchDays(): number {
-    return DashboardComponent.LIVE_PRICE_RANGE_DAYS[this.livePriceRange];
+  get usdInrMovementTooltip(): string {
+    const m = this.usdInrMovement;
+    if (!m) return 'Live FX feed; refreshes with the live price poll.';
+    const dir = m.diff > 0 ? 'weaker' : 'stronger';
+    return `Yesterday ${this.formatUsdInrRate(m.prev)} → today ${this.formatUsdInrRate(this.data!.usdToInrRate)}. `
+      + `The rupee is ${dir} by ${Math.abs(m.diff).toFixed(3)} vs the dollar.`;
+  }
+
+  // ===== Live price chart: time range picker + drag-to-zoom =====
+
+  /** Quick ranges, newest-relative. `ms: 0` means "everything we have recorded". */
+  readonly livePriceQuickRanges: { key: string; label: string; short: string; ms: number }[] = [
+    { key: '1h', label: 'Last 1 hour', short: '1H', ms: 3600000 },
+    { key: '4h', label: 'Last 4 hours', short: '4H', ms: 4 * 3600000 },
+    { key: '1d', label: 'Last 24 hours', short: '1D', ms: 86400000 },
+    { key: '3d', label: 'Last 3 days', short: '3D', ms: 3 * 86400000 },
+    { key: '1w', label: 'Last 7 days', short: '1W', ms: 7 * 86400000 },
+    { key: '2w', label: 'Last 14 days', short: '2W', ms: 14 * 86400000 },
+    { key: '1M', label: 'Last 30 days', short: '1M', ms: 30 * 86400000 },
+    { key: '3M', label: 'Last 90 days', short: '3M', ms: 90 * 86400000 },
+    { key: 'all', label: 'All recorded', short: 'All', ms: 0 },
+  ];
+  livePriceRangeMode: 'quick' | 'absolute' = 'quick';
+  livePriceQuickKey = '1w';
+  /** datetime-local strings for the absolute range inputs. */
+  livePriceAbsFrom = '';
+  livePriceAbsTo = '';
+  livePricePickerOpen = false;
+  /** Earliest/latest tick on the server, for the picker's hint and the "All" range. */
+  livePriceBounds: { minMs: number | null; maxMs: number | null; days: number } | null = null;
+  /** Each drag-to-zoom pushes a window; Back pops one. */
+  livePriceZoomStack: { from: number; to: number }[] = [];
+
+  /** Live drag state, in canvas pixels. Non-null only while the pointer is down. */
+  livePriceBrush: { startX: number; currentX: number } | null = null;
+
+  get livePriceZoomDepth(): number {
+    return this.livePriceZoomStack.length;
+  }
+
+  /** The window actually plotted: the innermost zoom, else the picked quick/absolute range. */
+  get livePriceEffectiveRange(): { from: number; to: number } {
+    if (this.livePriceZoomStack.length) {
+      return this.livePriceZoomStack[this.livePriceZoomStack.length - 1];
+    }
+    const now = Date.now();
+    if (this.livePriceRangeMode === 'absolute') {
+      const from = this.parseDate(this.livePriceAbsFrom);
+      const to = this.parseDate(this.livePriceAbsTo);
+      if (from > 0 && to > 0) return from <= to ? { from, to } : { from: to, to: from };
+    }
+    const q = this.livePriceQuickRanges.find((r) => r.key === this.livePriceQuickKey)
+      ?? this.livePriceQuickRanges[4];
+    if (q.ms === 0) {
+      return { from: this.livePriceBounds?.minMs ?? now - 370 * 86400000, to: now };
+    }
+    return { from: now - q.ms, to: now };
+  }
+
+  /** True when the window runs up to roughly now, so the live point belongs on the chart. */
+  private get livePriceRangeIsLive(): boolean {
+    return this.livePriceEffectiveRange.to >= Date.now() - 60000;
+  }
+
+  get livePriceRangeLabel(): string {
+    if (this.livePriceZoomStack.length) {
+      const { from, to } = this.livePriceEffectiveRange;
+      return `${this.formatRangeStamp(from)} → ${this.formatRangeStamp(to)}`;
+    }
+    if (this.livePriceRangeMode === 'absolute') {
+      const { from, to } = this.livePriceEffectiveRange;
+      return `${this.formatRangeStamp(from)} → ${this.formatRangeStamp(to)}`;
+    }
+    return this.livePriceQuickRanges.find((r) => r.key === this.livePriceQuickKey)?.label ?? 'Last 7 days';
+  }
+
+  /** Compact stamp for the range pill: drops the time when the window spans whole days. */
+  private formatRangeStamp(ms: number): string {
+    const d = new Date(ms);
+    const spanMs = Math.abs(this.livePriceEffectiveRange.to - this.livePriceEffectiveRange.from);
+    const opts: Intl.DateTimeFormatOptions = spanMs > 3 * 86400000
+      ? { day: '2-digit', month: 'short' }
+      : { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit', hour12: false };
+    return d.toLocaleString(undefined, opts);
+  }
+
+  toggleLivePricePicker(): void {
+    this.livePricePickerOpen = !this.livePricePickerOpen;
+    if (this.livePricePickerOpen && !this.livePriceBounds) this.loadLivePriceBounds();
+    if (this.livePricePickerOpen && !this.livePriceAbsFrom) {
+      // Seed the absolute inputs from whatever is on screen, so switching tabs is not a blank form.
+      const { from, to } = this.livePriceEffectiveRange;
+      this.livePriceAbsFrom = this.toLocalInput(from);
+      this.livePriceAbsTo = this.toLocalInput(to);
+    }
+    this.cdr.markForCheck();
+  }
+
+  private toLocalInput(ms: number): string {
+    const d = new Date(ms - new Date(ms).getTimezoneOffset() * 60000);
+    return d.toISOString().slice(0, 16);
+  }
+
+  private loadLivePriceBounds(): void {
+    this.dashboardService.getLivePriceHistoryBounds().subscribe({
+      next: (b) => { this.livePriceBounds = b; this.cdr.markForCheck(); },
+      error: () => {},
+    });
+  }
+
+  get livePriceBoundsLabel(): string {
+    const b = this.livePriceBounds;
+    if (!b?.minMs || !b?.maxMs) return '';
+    const day = (ms: number) => new Date(ms).toLocaleDateString(undefined, { day: '2-digit', month: 'short' });
+    const year = new Date(b.maxMs).getFullYear();
+    return `${b.days} days recorded · ${day(b.minMs)} – ${day(b.maxMs)} ${year}`;
+  }
+
+  applyLivePriceQuickRange(key: string): void {
+    this.livePriceQuickKey = key;
+    this.livePriceRangeMode = 'quick';
+    this.livePriceZoomStack = [];
+    this.livePricePickerOpen = false;
+    this.reloadLivePriceChart();
+  }
+
+  applyLivePriceAbsoluteRange(): void {
+    const from = this.parseDate(this.livePriceAbsFrom);
+    const to = this.parseDate(this.livePriceAbsTo);
+    if (!from || !to) return;
+    this.livePriceRangeMode = 'absolute';
+    this.livePriceZoomStack = [];
+    this.livePricePickerOpen = false;
+    this.reloadLivePriceChart();
+  }
+
+  /** Step out of the innermost zoom. */
+  livePriceZoomBack(): void {
+    if (!this.livePriceZoomStack.length) return;
+    this.livePriceZoomStack = this.livePriceZoomStack.slice(0, -1);
+    this.reloadLivePriceChart();
+  }
+
+  /** Drop every zoom and return to the picked range. */
+  livePriceZoomReset(): void {
+    if (!this.livePriceZoomStack.length) return;
+    this.livePriceZoomStack = [];
+    this.reloadLivePriceChart();
+  }
+
+  private reloadLivePriceChart(): void {
+    if (this.livePriceChart) { this.livePriceChart.destroy(); this.livePriceChart = null; }
+    this.loadLivePriceHistoryFromDb();
+    this.cdr.markForCheck();
+  }
+
+  // --- Drag-to-zoom. Mouse only, so touch panning and scrolling are untouched. ---
+
+  /** Ignore a click-sized drag; anything narrower is a click, not a selection. */
+  private static readonly LIVE_PRICE_BRUSH_MIN_PX = 8;
+
+  onLivePriceChartMouseDown(event: MouseEvent): void {
+    if (event.button !== 0 || !this.livePriceChart) return;
+    const x = this.brushX(event);
+    if (x == null) return;
+    this.livePriceBrush = { startX: x, currentX: x };
+    this.cdr.markForCheck();
+  }
+
+  onLivePriceChartMouseMove(event: MouseEvent): void {
+    if (!this.livePriceBrush) return;
+    const x = this.brushX(event);
+    if (x == null) return;
+    this.livePriceBrush = { ...this.livePriceBrush, currentX: x };
+    this.cdr.markForCheck();
+  }
+
+  onLivePriceChartMouseUp(): void {
+    const brush = this.livePriceBrush;
+    this.livePriceBrush = null;
+    if (!brush || !this.livePriceChart) { this.cdr.markForCheck(); return; }
+    const width = Math.abs(brush.currentX - brush.startX);
+    if (width < DashboardComponent.LIVE_PRICE_BRUSH_MIN_PX) { this.cdr.markForCheck(); return; }
+    const scale = (this.livePriceChart.scales as Record<string, any>)['x'];
+    if (!scale?.getValueForPixel) { this.cdr.markForCheck(); return; }
+    const a = Number(scale.getValueForPixel(Math.min(brush.startX, brush.currentX)));
+    const b = Number(scale.getValueForPixel(Math.max(brush.startX, brush.currentX)));
+    if (!Number.isFinite(a) || !Number.isFinite(b) || b - a < 60000) { this.cdr.markForCheck(); return; }
+    this.livePriceZoomStack = [...this.livePriceZoomStack, { from: a, to: b }];
+    this.reloadLivePriceChart();
+  }
+
+  /** Cancel an in-flight drag when the pointer leaves the plot. */
+  onLivePriceChartMouseLeave(): void {
+    if (!this.livePriceBrush) return;
+    this.livePriceBrush = null;
+    this.cdr.markForCheck();
+  }
+
+  /** Pointer x within the canvas, clamped to the plot area so the overlay cannot escape it. */
+  private brushX(event: MouseEvent): number | null {
+    const canvas = this.livePriceChartCanvas?.nativeElement;
+    const chart = this.livePriceChart;
+    if (!canvas || !chart) return null;
+    const rect = canvas.getBoundingClientRect();
+    const x = event.clientX - rect.left;
+    return Math.max(chart.chartArea.left, Math.min(chart.chartArea.right, x));
+  }
+
+  /** Inline styles for the drag rectangle.
+   *
+   * chartArea and the brush x are canvas coordinates, but the overlay is positioned against
+   * the padded wrapper, so shift by where the canvas sits inside it.
+   */
+  get livePriceBrushStyle(): Record<string, string> {
+    const b = this.livePriceBrush;
+    const chart = this.livePriceChart;
+    const canvas = this.livePriceChartCanvas?.nativeElement;
+    if (!b || !chart || !canvas) return { display: 'none' };
+    const width = Math.abs(b.currentX - b.startX);
+    return {
+      display: width < 2 ? 'none' : 'block',
+      left: `${canvas.offsetLeft + Math.min(b.startX, b.currentX)}px`,
+      width: `${width}px`,
+      top: `${canvas.offsetTop + chart.chartArea.top}px`,
+      height: `${chart.chartArea.bottom - chart.chartArea.top}px`,
+    };
   }
 
   get livePriceLineSessionLabel(): string {
@@ -2151,12 +2384,13 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
     this.livePriceChart.update('none');
   }
 
+  /** Axis labels in the viewer's own zone (IST here). Sessions are still *grouped* by ET
+   *  calendar day, which is what defines a trading day — only the clock is local. */
   private formatXLabel(ts: number, intraday = false): string {
-    return new Date(ts).toLocaleString('en-US', intraday ? {
-      hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'America/New_York',
+    return new Date(ts).toLocaleString('en-IN', intraday ? {
+      hour: '2-digit', minute: '2-digit', hour12: false,
     } : {
-      month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
-      hour12: false, timeZone: 'America/New_York',
+      month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false,
     });
   }
 
@@ -2308,10 +2542,10 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
                 if (!items.length) return '';
                 const p = this.livePriceLinePoints[items[0].dataIndex];
                 if (!p) return '';
-                return new Date(p.timestamp).toLocaleString('en-US', {
+                return new Date(p.timestamp).toLocaleString('en-IN', {
                   weekday: 'short', month: 'short', day: 'numeric',
-                  hour: '2-digit', minute: '2-digit', hour12: true, timeZone: 'America/New_York',
-                }) + ' ET';
+                  hour: '2-digit', minute: '2-digit', hour12: true,
+                }) + ' IST';
               },
               label: (item: any) => {
                 const p = this.livePriceLinePoints[item.dataIndex];

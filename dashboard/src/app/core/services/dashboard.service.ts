@@ -101,6 +101,20 @@ export class DashboardService {
     return this.http.get<MfOverlapResponse>(`${this.apiUrl}/mf/overlap?t=${Date.now()}${r}`);
   }
 
+  /** Oldest/newest recorded tick, used to bound the time picker. */
+  getLivePriceHistoryBounds(): Observable<{ minMs: number | null; maxMs: number | null; days: number }> {
+    return this.http.get<{ minMs: number | null; maxMs: number | null; days: number }>(
+      `${this.apiUrl}/live-price-history/range?t=${Date.now()}`,
+    );
+  }
+
+  /** OHLC history for an absolute window; the server picks a bucket size to fit maxPoints. */
+  getLivePriceHistoryBetween(fromMs: number, toMs: number, maxPoints = 1500): Observable<LivePriceHistoryPoint[]> {
+    return this.http.get<LivePriceHistoryPoint[]>(
+      `${this.apiUrl}/live-price-history?from=${Math.round(fromMs)}&to=${Math.round(toMs)}&maxPoints=${maxPoints}`,
+    );
+  }
+
   /** Server-aggregated OHLC live price history for the chart (bucketed to <= maxPoints). */
   getLivePriceHistory(days = 7, maxPoints = 1500): Observable<LivePriceHistoryPoint[]> {
     return this.http.get<LivePriceHistoryPoint[]>(`${this.apiUrl}/live-price-history?days=${days}&maxPoints=${maxPoints}`);

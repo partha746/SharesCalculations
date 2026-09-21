@@ -129,17 +129,21 @@ def _build_dashboard_response():
     }
     if open_price is not None:
         payload["openPriceUsd"] = round(open_price, 2)
+    # Prefer Frankfurter historical (same family as live INR) for "yesterday's" rate, then the DB.
+    # Resolved outside the prev_close block so the FX day-change shows even when the stock's
+    # previous close is unavailable, and left absent when genuinely unknown rather than
+    # defaulting to today's rate, which would render as a fake zero change.
+    prev_inr_rate = (
+        rupee_conv_obj.get_usd_to_inr_for_prior_calendar_day()
+        or _get_previous_day_inr_rate()
+    )
+    if prev_inr_rate:
+        # 4 dp to match usdToInrRate; at 2 dp the day's move rounded away.
+        payload["previousCloseUsdToInrRate"] = round(float(prev_inr_rate), 4)
     if prev_close is not None:
-        # Prefer Frankfurter historical (same family as live INR) for "yesterday's" rate; then DB; else today.
-        prev_inr_rate = (
-            rupee_conv_obj.get_usd_to_inr_for_prior_calendar_day()
-            or _get_previous_day_inr_rate()
-            or todays_rp
-        )
         payload["previousCloseUsd"] = round(prev_close, 2)
         payload["previousCloseValueUsd"] = round(all_qty * prev_close, 2)
-        payload["previousCloseValueInr"] = round(all_qty * prev_close * prev_inr_rate, 2)
-        payload["previousCloseUsdToInrRate"] = round(prev_inr_rate, 2)
+        payload["previousCloseValueInr"] = round(all_qty * prev_close * (prev_inr_rate or todays_rp), 2)
     if _is_premarket_et():
         premarket = rupee_conv_obj.get_premarket_price("NVDA")
         if premarket is not None:
