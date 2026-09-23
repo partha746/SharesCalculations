@@ -15,6 +15,10 @@ import {
   LivePriceHistoryPoint,
   LivePriceResponse,
   MarketStatusResponse,
+  MetalHistoryPoint,
+  MetalHoldingsResponse,
+  MetalKey,
+  MetalsResponse,
   MfHoldingsResponse,
   MfOverlapResponse,
   MfSearchResult,
@@ -53,6 +57,29 @@ export class DashboardService {
   /** Pre/post-market open, high, low, last and volume for NVDA. */
   getExtendedSession(): Observable<ExtendedSessionResponse> {
     return this.http.get<ExtendedSessionResponse>(`${this.apiUrl}/extended-session?t=${Date.now()}`);
+  }
+
+  /** Pune gold/silver rates with each series' day range. */
+  getMetals(): Observable<MetalsResponse> {
+    return this.http.get<MetalsResponse>(`${this.apiUrl}/metals?t=${Date.now()}`);
+  }
+  /** Recorded rate history for one metal series. */
+  getMetalHistory(metal: MetalKey, fromMs?: number, toMs?: number): Observable<MetalHistoryPoint[]> {
+    const from = fromMs != null ? `&from=${Math.round(fromMs)}` : '';
+    const to = toMs != null ? `&to=${Math.round(toMs)}` : '';
+    return this.http.get<MetalHistoryPoint[]>(`${this.apiUrl}/metals/history?metal=${metal}${from}${to}`);
+  }
+  getMetalHoldings(): Observable<MetalHoldingsResponse> {
+    return this.http.get<MetalHoldingsResponse>(`${this.apiUrl}/metals/holdings?t=${Date.now()}`);
+  }
+  addMetalHolding(body: { metal: MetalKey; grams: number; pricePaidPerGram: number; buyDate: string; note?: string }): Observable<{ id: number }> {
+    return this.http.post<{ id: number }>(`${this.apiUrl}/metals/holdings`, body);
+  }
+  updateMetalHolding(id: number, body: { metal?: MetalKey; grams?: number; pricePaidPerGram?: number; buyDate?: string; note?: string }): Observable<{ ok: boolean }> {
+    return this.http.put<{ ok: boolean }>(`${this.apiUrl}/metals/holdings/${id}`, body);
+  }
+  deleteMetalHolding(id: number): Observable<{ ok: boolean }> {
+    return this.http.delete<{ ok: boolean }>(`${this.apiUrl}/metals/holdings/${id}`);
   }
 
   /** Advance-tax payments recorded for a financial year (FY start year, e.g. 2026). */

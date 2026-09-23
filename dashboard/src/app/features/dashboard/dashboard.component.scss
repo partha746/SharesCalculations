@@ -2218,6 +2218,113 @@ input[type='month'] {
   color: #f85149;
 }
 
+// ===== Metal tab (Pune gold & silver) =====
+
+.metal-section {
+  margin-top: 0.75rem;
+}
+.metal-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 1rem;
+  margin-bottom: 1.25rem;
+}
+.metal-cards--totals {
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 1rem 1.5rem;
+}
+.metal-card {
+  background: #161b22;
+  border: 1px solid #30363d;
+  // A left accent rather than a tinted fill, so it stays flat like the rest of the app.
+  border-left: 3px solid #6e7681;
+  border-radius: 8px;
+  padding: 1rem 1.25rem;
+}
+.metal-card--gold {
+  border-left-color: #d4a72c;
+}
+.metal-card__title {
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #8b949e;
+  margin-bottom: 0.5rem;
+}
+.metal-card__row {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  margin-top: 0.3rem;
+}
+.metal-card__row--main {
+  margin: 0 0 0.5rem;
+  flex-wrap: wrap;
+}
+.metal-card__value {
+  font-size: 1.6rem;
+  font-weight: 600;
+  color: #e6edf3;
+  font-variant-numeric: tabular-nums;
+}
+.metal-card__unit {
+  font-size: 0.8rem;
+  color: #8b949e;
+}
+.metal-card__label {
+  font-size: 0.8rem;
+  color: #8b949e;
+  min-width: 5.5rem;
+}
+.metal-card__sub {
+  font-size: 0.9rem;
+  color: #c9d1d9;
+  font-variant-numeric: tabular-nums;
+}
+.metal-card__sub--muted {
+  color: #6e7681;
+  font-style: italic;
+}
+.metal-card__diff {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: #8b949e;
+  font-variant-numeric: tabular-nums;
+
+  &.is-up { color: #3fb950; }
+  &.is-down { color: #f85149; }
+}
+.metal-calc {
+  max-width: 34rem;
+
+  td:first-child {
+    color: #8b949e;
+  }
+}
+.metal-calc__total td {
+  border-top: 1px solid #30363d;
+  font-weight: 600;
+  color: #e6edf3;
+  font-size: 1rem;
+}
+.metal-chart-wrap {
+  position: relative;
+  height: 320px;
+  background: #161b22;
+  border: 1px solid #30363d;
+  border-radius: 8px;
+  padding: 0.75rem 1rem;
+  margin-bottom: 1.5rem;
+}
+
+@media (max-width: 560px) {
+  .metal-cards {
+    grid-template-columns: 1fr;
+  }
+  .metal-card__value { font-size: 1.3rem; }
+  .metal-chart-wrap { height: 260px; }
+}
+
 // ===== Advance tax (Sold tab) =====
 
 .adv-tax {

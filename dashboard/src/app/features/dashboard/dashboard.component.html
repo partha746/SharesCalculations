@@ -394,6 +394,7 @@
       <button type="button" class="tab-btn" [class.tab-btn--active]="activeTab === 'sold'" (click)="setActiveTab('sold')">Sold Shares</button>
       <button type="button" class="tab-btn" [class.tab-btn--active]="activeTab === 'playground'" (click)="setActiveTab('playground')">Playground</button>
       <button type="button" class="tab-btn" [class.tab-btn--active]="activeTab === 'networth'" (click)="setActiveTab('networth')">Net worth</button>
+      <button type="button" class="tab-btn" [class.tab-btn--active]="activeTab === 'metal'" (click)="setActiveTab('metal')">Metal</button>
       <button type="button" class="tab-btn" [class.tab-btn--active]="activeTab === 'financial'" (click)="setActiveTab('financial')">Financial planning</button>
       <button type="button" class="tab-btn" [class.tab-btn--active]="activeTab === 'news'" (click)="setActiveTab('news')">News</button>
       <button type="button" class="tab-btn" [class.tab-btn--active]="activeTab === 'icici'" (click)="setActiveTab('icici')">ICICI Direct</button>
@@ -754,6 +755,357 @@
     }
     @if (activeTab === 'data') {
       <app-data-tab />
+    }
+
+    @if (activeTab === 'metal') {
+      <div class="metal-section">
+        <div class="section-title-row">
+          <h2 class="section-title">Gold &amp; Silver — Pune</h2>
+          <button type="button" class="mfo-btn" [disabled]="metalsLoading" (click)="loadMetals(); loadMetalHistory()">
+            {{ metalsLoading ? 'Refreshing…' : 'Refresh rates' }}
+          </button>
+        </div>
+
+        @if (metalsError) {
+          <p class="playground-desc playground-desc--warning">{{ metalsError }}</p>
+        }
+        @if (metals?.stale) {
+          <p class="playground-desc playground-desc--warning">
+            Live fetch failed; showing the last rates retrieved.
+          </p>
+        }
+
+        <div class="metal-cards">
+          @for (m of metalHeadline; track m.metal) {
+            <div class="metal-card" [class.metal-card--gold]="m.metal.startsWith('gold')">
+              <div class="metal-card__title">{{ m.label }}</div>
+              <div class="metal-card__row metal-card__row--main">
+                <span class="metal-card__value">₹ {{ formatInrOrDash(m.pricePerGram) }}</span>
+                <span class="metal-card__unit">/ gram</span>
+                @if (m.change != null) {
+                  <span class="metal-card__diff"
+                        [class.is-up]="metalChangeClass(m) === 'is-up'"
+                        [class.is-down]="metalChangeClass(m) === 'is-down'"
+                        [attr.title]="'Against the last rate recorded before the past 24 hours (₹ ' + formatInrOrDash(m.prevClose) + ')'">
+                    {{ m.change > 0 ? '↑' : '↓' }} ₹ {{ formatInrOrDash(Math.abs(m.change)) }}
+                    @if (m.changePct != null) { ({{ m.changePct >= 0 ? '+' : '' }}{{ m.changePct | number:'1.2-2' }}%) }
+                  </span>
+                }
+              </div>
+              <div class="metal-card__row">
+                <span class="metal-card__label">Per 10 g</span>
+                <span class="metal-card__sub">₹ {{ formatInrOrDash(m.pricePer10g) }}</span>
+              </div>
+              <div class="metal-card__row">
+                <span class="metal-card__label">Per kg</span>
+                <span class="metal-card__sub">₹ {{ formatInrOrDash(m.pricePerKg) }}</span>
+              </div>
+              @if (m.dayHigh != null && m.dayLow != null && m.samples > 1) {
+                <div class="metal-card__row">
+                  <span class="metal-card__label">24h range</span>
+                  <span class="metal-card__sub">₹ {{ formatInrOrDash(m.dayHigh) }} / ₹ {{ formatInrOrDash(m.dayLow) }}</span>
+                </div>
+              } @else {
+                <div class="metal-card__row">
+                  <span class="metal-card__label">24h range</span>
+                  <span class="metal-card__sub metal-card__sub--muted"
+                        title="Builds up as the recorder takes snapshots every 15 minutes">
+                    building… ({{ m.samples }} snapshot{{ m.samples === 1 ? '' : 's' }})
+                  </span>
+                </div>
+              }
+            </div>
+          }
+        </div>
+
+        @if (metalOther.length) {
+          <h3 class="playground-multi-subtitle">Other purities</h3>
+          <div class="playground-table-wrap">
+            <table class="holdings-table playground-table">
+              <thead>
+                <tr class="holdings-table__header">
+                  <th>Purity</th><th>Per gram</th><th>Per 10 g</th><th>Change</th>
+                </tr>
+              </thead>
+              <tbody>
+                @for (m of metalOther; track m.metal) {
+                  <tr>
+                    <td>{{ m.label }}</td>
+                    <td class="mfo-num">₹ {{ formatInrOrDash(m.pricePerGram) }}</td>
+                    <td class="mfo-num">₹ {{ formatInrOrDash(m.pricePer10g) }}</td>
+                    <td class="mfo-num">
+                      @if (m.change != null) {
+                        <span [class.adv-tax__ahead]="m.change > 0" [class.adv-tax__short]="m.change < 0">
+                          {{ m.change > 0 ? '↑' : '↓' }} ₹ {{ formatInrOrDash(Math.abs(m.change)) }}
+                        </span>
+                      } @else { <span class="adv-tax__future">—</span> }
+                    </td>
+                  </tr>
+                }
+              </tbody>
+            </table>
+          </div>
+        }
+
+        <div class="section-title-row">
+          <h3 class="playground-multi-subtitle">Rate history</h3>
+          <div class="live-price-chart-toggle">
+            @for (o of metalOptions; track o.key) {
+              <button type="button" class="chart-mode-btn" [class.chart-mode-btn--active]="metalChartKey === o.key"
+                      (click)="setMetalChart(o.key)">{{ o.label }}</button>
+            }
+          </div>
+          <div class="live-price-chart-toggle">
+            @for (d of metalChartRanges; track d) {
+              <button type="button" class="chart-mode-btn" [class.chart-mode-btn--active]="metalChartDays === d"
+                      (click)="setMetalChartDays(d)">{{ d }}d</button>
+            }
+          </div>
+        </div>
+        <div class="metal-chart-wrap">
+          @if (metalHistoryHasData) {
+            <canvas #metalChartCanvas></canvas>
+          } @else {
+            <p class="holdings-table__hint">
+              Only {{ metalHistoryCount }} snapshot(s) recorded so far. The rate is captured every 15 minutes,
+              so the chart fills in from here — bullion rates change about once a day.
+            </p>
+          }
+        </div>
+
+        <h3 class="playground-multi-subtitle">What you'd actually pay</h3>
+        <p class="playground-desc">
+          The rates above are the <strong>bare metal value</strong> — the source states they exclude GST, TCS and other
+          levies, and they never include making charges. This builds up from that to a counter price. GST applies to
+          metal <em>plus</em> making, not the metal alone.
+        </p>
+        <div class="adv-tax__inputs">
+          <label class="playground-label">
+            Metal
+            <select class="playground-input" [(ngModel)]="metalCalcKey" (ngModelChange)="saveMetalCalcSettings()">
+              @for (o of metalOptions; track o.key) {
+                <option [ngValue]="o.key">{{ o.label }}</option>
+              }
+            </select>
+          </label>
+          <label class="playground-label">
+            Grams
+            <input type="number" min="0" step="0.5" class="playground-input playground-input--short"
+                   [ngModel]="metalCalcGrams"
+                   (ngModelChange)="metalCalcGrams = $event === '' || $event == null ? null : $event; saveMetalCalcSettings()" />
+          </label>
+          <label class="playground-label">
+            Making charges %
+            <input type="number" min="0" max="40" step="0.5" class="playground-input playground-input--short"
+                   [(ngModel)]="metalCalcMakingPct" (ngModelChange)="saveMetalCalcSettings()"
+                   title="Typically 1% to 12%, depending on the jeweller and the design" />
+          </label>
+          <label class="playground-label">
+            GST %
+            <input type="number" min="0" max="30" step="0.5" class="playground-input playground-input--short"
+                   [(ngModel)]="metalCalcGstPct" (ngModelChange)="saveMetalCalcSettings()"
+                   title="3% on gold jewellery at present" />
+          </label>
+        </div>
+
+        @if (metalCalc) {
+          <div class="playground-table-wrap">
+            <table class="holdings-table playground-table metal-calc">
+              <tbody>
+                <tr>
+                  <td>Metal value <span class="adv-tax__cell-note">{{ metalCalc.grams | number:'1.0-3' }} g × ₹ {{ formatInr(metalCalc.rate) }}/g</span></td>
+                  <td class="mfo-num">₹ {{ formatInr(metalCalc.base) }}</td>
+                </tr>
+                <tr>
+                  <td>Making charges <span class="adv-tax__cell-note">{{ metalCalcMakingPct }}% of metal value</span></td>
+                  <td class="mfo-num">+ ₹ {{ formatInr(metalCalc.making) }}</td>
+                </tr>
+                <tr>
+                  <td>GST <span class="adv-tax__cell-note">{{ metalCalcGstPct }}% of metal + making</span></td>
+                  <td class="mfo-num">+ ₹ {{ formatInr(metalCalc.gst) }}</td>
+                </tr>
+                <tr class="metal-calc__total">
+                  <td>You pay</td>
+                  <td class="mfo-num">₹ {{ formatInr(metalCalc.total) }}</td>
+                </tr>
+                <tr>
+                  <td>Effective per gram <span class="adv-tax__cell-note">all-in</span></td>
+                  <td class="mfo-num">₹ {{ formatInr(metalCalc.perGramAllIn) }}
+                    <span class="adv-tax__cell-note">{{ metalCalc.premiumPct | number:'1.1-1' }}% over metal</span>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <p class="playground-desc adv-tax__footnote">
+            Only the metal value is recoverable when you sell — buy-back is quoted on the bare rate, so the
+            ₹ {{ formatInr(metalCalc.making + metalCalc.gst) }} of making and GST is a sunk cost on day one.
+          </p>
+        }
+
+        <h3 class="playground-multi-subtitle">Your holdings</h3>
+        <p class="playground-desc">
+          Recorded as purchase lots, so gain is measured against what you actually paid rather than a blended average.
+        </p>
+
+        @if (metalHoldings && metalHoldings.holdings.length) {
+          <div class="metal-cards metal-cards--totals">
+            <div class="adv-tax__stat">
+              <span class="adv-tax__stat-value">{{ metalHoldings.totals.grams | number:'1.0-3' }} g</span>
+              <span class="adv-tax__stat-label">Total held</span>
+            </div>
+            <div class="adv-tax__stat">
+              <span class="adv-tax__stat-value">₹ {{ formatInr(metalHoldings.totals.investedInr) }}</span>
+              <span class="adv-tax__stat-label">Invested</span>
+            </div>
+            <div class="adv-tax__stat">
+              <span class="adv-tax__stat-value">₹ {{ formatInr(metalHoldings.totals.valueInr) }}</span>
+              <span class="adv-tax__stat-label">Current value</span>
+            </div>
+            <div class="adv-tax__stat">
+              <span class="adv-tax__stat-value"
+                    [class.adv-tax__stat-value--ahead]="metalHoldings.totals.gainInr > 0"
+                    [class.adv-tax__stat-value--short]="metalHoldings.totals.gainInr < 0">
+                ₹ {{ formatInr(metalHoldings.totals.gainInr) }}
+                @if (metalHoldings.totals.gainPct != null) {
+                  <span class="metal-card__unit">({{ metalHoldings.totals.gainPct >= 0 ? '+' : '' }}{{ metalHoldings.totals.gainPct | number:'1.1-1' }}%)</span>
+                }
+              </span>
+              <span class="adv-tax__stat-label">Unrealised gain</span>
+            </div>
+          </div>
+
+          <div class="playground-table-wrap">
+            <table class="holdings-table playground-table">
+              <thead>
+                <tr class="holdings-table__header">
+                  <th>Bought</th><th>Metal</th><th>Grams</th><th>Paid /g</th>
+                  <th>Now /g</th><th>Invested</th><th>Value</th><th>Gain</th><th>Note</th><th></th>
+                </tr>
+              </thead>
+              <tbody>
+                @for (h of metalHoldings.holdings; track h.id) {
+                  @if (metalEditId === h.id) {
+                    <tr class="adv-tax__row--editing">
+                      <td><input type="date" class="adv-tax__edit-input" [(ngModel)]="metalEditBuyDate" /></td>
+                      <td>
+                        <select class="adv-tax__edit-input" [(ngModel)]="metalEditKey">
+                          @for (o of metalOptions; track o.key) {
+                            <option [ngValue]="o.key">{{ o.label }}</option>
+                          }
+                        </select>
+                      </td>
+                      <td>
+                        <input type="number" min="0" step="0.1" class="adv-tax__edit-input adv-tax__edit-input--num"
+                               [ngModel]="metalEditGrams"
+                               (ngModelChange)="metalEditGrams = $event === '' || $event == null ? null : $event" />
+                      </td>
+                      <td>
+                        <input type="number" min="0" step="1" class="adv-tax__edit-input adv-tax__edit-input--num"
+                               [ngModel]="metalEditPricePaid"
+                               (ngModelChange)="metalEditPricePaid = $event === '' || $event == null ? null : $event" />
+                      </td>
+                      <td colspan="4" class="adv-tax__cell-note">Saving recalculates value and gain</td>
+                      <td><input type="text" class="adv-tax__edit-input" [(ngModel)]="metalEditNote" placeholder="note" /></td>
+                      <td class="adv-tax__row-actions">
+                        <button type="button" class="mfo-btn" [disabled]="metalHoldingSaving" (click)="saveEditMetalHolding()">
+                          {{ metalHoldingSaving ? 'Saving…' : 'Save' }}
+                        </button>
+                        <button type="button" class="adv-tax__del" (click)="cancelEditMetalHolding()">Cancel</button>
+                      </td>
+                    </tr>
+                  } @else {
+                    <tr>
+                      <td>{{ formatDate(h.buyDate) }}</td>
+                      <td>{{ h.label }}</td>
+                      <td class="mfo-num">{{ h.grams | number:'1.0-3' }}</td>
+                      <td class="mfo-num">₹ {{ formatInr(h.pricePaidPerGram) }}</td>
+                      <td class="mfo-num">₹ {{ formatInrOrDash(h.currentPricePerGram) }}</td>
+                      <td class="mfo-num">₹ {{ formatInr(h.investedInr) }}</td>
+                      <td class="mfo-num">₹ {{ formatInrOrDash(h.valueInr) }}</td>
+                      <td class="mfo-num">
+                        <span [class.adv-tax__ahead]="(h.gainInr ?? 0) > 0" [class.adv-tax__short]="(h.gainInr ?? 0) < 0">
+                          ₹ {{ formatInrOrDash(h.gainInr) }}
+                          @if (h.gainPct != null) {
+                            <span class="adv-tax__cell-note">{{ h.gainPct >= 0 ? '+' : '' }}{{ h.gainPct | number:'1.1-1' }}%</span>
+                          }
+                        </span>
+                      </td>
+                      <td>{{ h.note || '—' }}</td>
+                      <td class="adv-tax__row-actions">
+                        <button type="button" class="adv-tax__del" title="Change date, metal, grams, price or note"
+                                (click)="startEditMetalHolding(h)">Edit</button>
+                        <button type="button" class="adv-tax__del" (click)="deleteMetalHolding(h.id)">Remove</button>
+                      </td>
+                    </tr>
+                  }
+                }
+              </tbody>
+            </table>
+          </div>
+        } @else {
+          <p class="holdings-table__hint">No lots recorded yet. Add one below.</p>
+        }
+
+        <h3 class="playground-multi-subtitle">Add a purchase</h3>
+        <p class="playground-desc">
+          Enter the bill total or the per-gram rate — filling either one works out the other from the grams.
+          Lots are stored per gram, so gain stays comparable across purchases of different sizes.
+        </p>
+        <div class="adv-tax__form">
+          <label class="playground-label">
+            Metal
+            <select class="playground-input" [(ngModel)]="newMetalKey" (ngModelChange)="onNewMetalKeyChange()">
+              @for (o of metalOptions; track o.key) {
+                <option [ngValue]="o.key">{{ o.label }}</option>
+              }
+            </select>
+          </label>
+          <label class="playground-label">
+            Grams
+            <input type="number" min="0" step="0.1" class="playground-input playground-input--short"
+                   [ngModel]="newMetalGrams"
+                   (ngModelChange)="newMetalGrams = $event === '' || $event == null ? null : $event; onMetalGramsChange()"
+                   placeholder="e.g. 10" />
+          </label>
+          <label class="playground-label">
+            Total paid (₹)
+            <input type="number" min="0" step="1" class="playground-input"
+                   [ngModel]="newMetalTotalPaid"
+                   (ngModelChange)="newMetalTotalPaid = $event === '' || $event == null ? null : $event; onMetalTotalPaidChange()"
+                   placeholder="e.g. 125000"
+                   title="Enter the bill total; the per-gram figure is worked out from it" />
+          </label>
+          <label class="playground-label">
+            <span>or per gram (₹)</span>
+            <input type="number" min="0" step="1" class="playground-input"
+                   [ngModel]="newMetalPricePaid"
+                   (ngModelChange)="newMetalPricePaid = $event === '' || $event == null ? null : $event; onMetalPerGramChange()"
+                   placeholder="e.g. 12500"
+                   title="Either field fills the other; edit whichever you know" />
+          </label>
+          <label class="playground-label">
+            Bought on
+            <input type="date" class="playground-input" [(ngModel)]="newMetalBuyDate" />
+          </label>
+          <label class="playground-label adv-tax__form-note">
+            Note
+            <input type="text" class="playground-input" [(ngModel)]="newMetalNote" placeholder="jeweller, bill no." />
+          </label>
+          <button type="button" class="mfo-btn" [disabled]="metalHoldingSaving" (click)="addMetalHolding()">
+            {{ metalHoldingSaving ? 'Saving…' : 'Add lot' }}
+          </button>
+        </div>
+        @if (metalHoldingsError) {
+          <p class="playground-desc playground-desc--warning">{{ metalHoldingsError }}</p>
+        }
+
+        <p class="playground-desc adv-tax__footnote">
+          Rates are scraped from {{ metals?.source || 'GoodReturns' }} for {{ metals?.city || 'Pune' }} and snapshotted
+          every 15 minutes, which is what builds the chart and the 24h range. They are retail quotes including duty and
+          GST, so a jeweller's counter price will differ by making charges. Treat these as a tracking aid, not a dealer quote.
+        </p>
+      </div>
     }
 
     @if (activeTab === 'news') {

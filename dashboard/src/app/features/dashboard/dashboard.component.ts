@@ -44,8 +44,8 @@ export function currentFyStartYear(now: Date = new Date()): number {
 }
 
 /** Dashboard tabs, each mapped to a URL path segment (e.g. /holdings). */
-export type DashboardTab = 'holdings' | 'sold' | 'playground' | 'data' | 'financial' | 'networth' | 'tax' | 'icici' | 'news';
-export const DASHBOARD_TABS: readonly DashboardTab[] = ['holdings', 'sold', 'playground', 'networth', 'financial', 'news', 'icici', 'tax', 'data'];
+export type DashboardTab = 'holdings' | 'sold' | 'playground' | 'data' | 'financial' | 'networth' | 'tax' | 'icici' | 'news' | 'metal';
+export const DASHBOARD_TABS: readonly DashboardTab[] = ['holdings', 'sold', 'playground', 'networth', 'metal', 'financial', 'news', 'icici', 'tax', 'data'];
 
 Chart.register(ChartDataLabels, CandlestickController, CandlestickElement, OhlcController, OhlcElement);
 import {
@@ -63,6 +63,12 @@ import {
   IciciSortCol,
   LivePriceDayTickerItem,
   LivePriceHistoryPoint,
+  MetalHistoryPoint,
+  MetalHolding,
+  MetalHoldingsResponse,
+  MetalKey,
+  MetalRate,
+  MetalsResponse,
   MfHolding,
   MfOverlapAccount,
   MfOverlapPair,
@@ -1856,6 +1862,7 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
       this.livePriceChart = null;
     }
     this.destroyMfOverlapCharts();
+    this.destroyMetalChart();
   }
 
   private initOrUpdateLivePriceChart(): void {
@@ -3342,6 +3349,7 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
     { id: 'sold', label: 'Sold Shares' },
     { id: 'playground', label: 'Playground' },
     { id: 'networth', label: 'Net worth' },
+    { id: 'metal', label: 'Metal' },
     { id: 'financial', label: 'Financial planning' },
     { id: 'news', label: 'News' },
     { id: 'icici', label: 'ICICI Direct' },
@@ -3364,8 +3372,9 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
   /** Apply a tab: set active state and run its data-load / chart lifecycle side-effects. Called from the route param subscription. */
   private applyTab(tab: DashboardTab): void {
     this.activeTab = tab;
-    // The overlap canvases are removed from the DOM when the Playground unmounts.
+    // Canvases are removed from the DOM when their tab unmounts, so drop the charts too.
     if (tab !== 'playground') this.destroyMfOverlapCharts();
+    if (tab !== 'metal') this.destroyMetalChart();
     if (tab === 'icici') {
       this.loadBreezeStatus();
       this.loadMfHoldings();
@@ -3383,6 +3392,13 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
       else if (this.soldRows.length > 0) setTimeout(() => this.initOrUpdateSoldChart(), 0);
       this.loadAdvanceTaxSettings();
       this.loadAdvanceTaxPayments();
+    } else if (tab === 'metal') {
+      if (this.holdingsChart) { this.holdingsChart.destroy(); this.holdingsChart = null; }
+      if (this.soldChart) { this.soldChart.destroy(); this.soldChart = null; }
+      this.loadMetalCalcSettings();
+      this.loadMetals();
+      this.loadMetalHoldings();
+      this.loadMetalHistory();
     } else if (tab === 'playground' || tab === 'financial' || tab === 'icici' || tab === 'news' || tab === 'networth') {
       if (this.holdingsChart) {
         this.holdingsChart.destroy();
@@ -4053,6 +4069,401 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
   setSoldSort(key: keyof SoldRow): void {
     if (this.soldSortKey === key) this.soldSortDir *= -1;
     else { this.soldSortKey = key; this.soldSortDir = 1; }
+  }
+
+  // ===== Metal tab: Pune gold & silver =====
+
+  metals: MetalsResponse | null = null;
+  metalsLoading = false;
+  metalsError: string | null = null;
+  metalHoldings: MetalHoldingsResponse | null = null;
+  metalHoldingsError: string | null = null;
+  metalHoldingSaving = false;
+  /** Which series the chart is showing. */
+  metalChartKey: MetalKey = 'gold24k';
+  metalChartDays = 30;
+  readonly metalChartRanges = [7, 30, 90, 365];
+  private metalChart: InstanceType<typeof Chart> | null = null;
+  @ViewChild('metalChartCanvas') metalChartCanvas?: ElementRef<HTMLCanvasElement>;
+  private metalHistory: MetalHistoryPoint[] = [];
+
+  // Add-lot form. Total and per-gram derive from each other, since a bill shows the total
+  // while the stored lot needs a per-gram figure.
+  newMetalKey: MetalKey = 'gold24k';
+  newMetalGrams: number | null = null;
+  newMetalPricePaid: number | null = null;
+  newMetalTotalPaid: number | null = null;
+  newMetalBuyDate = '';
+  newMetalNote = '';
+  /** Whichever of the two the user typed last; the other is recomputed when grams change. */
+  private metalPriceAnchor: 'total' | 'perGram' = 'total';
+
+  private get newMetalGramsValue(): number {
+    const g = Number(this.newMetalGrams);
+    return Number.isFinite(g) && g > 0 ? g : 0;
+  }
+
+  onMetalTotalPaidChange(): void {
+    this.metalPriceAnchor = 'total';
+    const total = Number(this.newMetalTotalPaid);
+    const grams = this.newMetalGramsValue;
+    this.newMetalPricePaid = grams && Number.isFinite(total) && total > 0
+      ? Math.round((total / grams) * 100) / 100
+      : null;
+    this.cdr.markForCheck();
+  }
+
+  onMetalPerGramChange(): void {
+    this.metalPriceAnchor = 'perGram';
+    const perGram = Number(this.newMetalPricePaid);
+    const grams = this.newMetalGramsValue;
+    this.newMetalTotalPaid = grams && Number.isFinite(perGram) && perGram > 0
+      ? Math.round(perGram * grams * 100) / 100
+      : null;
+    this.cdr.markForCheck();
+  }
+
+  /** Grams changed: hold whichever figure was typed and recompute the other from it. */
+  onMetalGramsChange(): void {
+    if (this.metalPriceAnchor === 'total') this.onMetalTotalPaidChange();
+    else this.onMetalPerGramChange();
+  }
+
+  readonly metalOptions: { key: MetalKey; label: string }[] = [
+    { key: 'gold24k', label: 'Gold 24K' },
+    { key: 'gold22k', label: 'Gold 22K' },
+    { key: 'gold18k', label: 'Gold 18K' },
+    { key: 'silver', label: 'Silver' },
+  ];
+
+  /** The two headline cards; the other purities stay in the rates table. */
+  get metalHeadline(): MetalRate[] {
+    const list = this.metals?.metals ?? [];
+    return ['gold24k', 'silver']
+      .map((k) => list.find((m) => m.metal === k))
+      .filter((m): m is MetalRate => !!m);
+  }
+
+  get metalOther(): MetalRate[] {
+    return (this.metals?.metals ?? []).filter((m) => m.metal !== 'gold24k' && m.metal !== 'silver');
+  }
+
+  loadMetals(): void {
+    this.metalsLoading = true;
+    this.metalsError = null;
+    this.cdr.markForCheck();
+    this.dashboardService.getMetals().subscribe({
+      next: (res) => {
+        this.metals = res;
+        this.metalsLoading = false;
+        this.cdr.markForCheck();
+      },
+      error: (err) => {
+        this.metalsError = err?.error?.error || err?.message || 'Could not load metal rates';
+        this.metalsLoading = false;
+        this.cdr.markForCheck();
+      },
+    });
+  }
+
+  loadMetalHoldings(): void {
+    this.dashboardService.getMetalHoldings().subscribe({
+      next: (res) => { this.metalHoldings = res; this.cdr.markForCheck(); },
+      error: (err) => {
+        this.metalHoldingsError = err?.error?.error || err?.message || 'Could not load holdings';
+        this.cdr.markForCheck();
+      },
+    });
+  }
+
+  setMetalChart(metal: MetalKey): void {
+    this.metalChartKey = metal;
+    this.loadMetalHistory();
+  }
+
+  setMetalChartDays(days: number): void {
+    this.metalChartDays = days;
+    this.loadMetalHistory();
+  }
+
+  loadMetalHistory(): void {
+    const to = Date.now();
+    const from = to - this.metalChartDays * 86400000;
+    this.dashboardService.getMetalHistory(this.metalChartKey, from, to).subscribe({
+      next: (points) => {
+        this.metalHistory = points ?? [];
+        this.cdr.markForCheck();
+        setTimeout(() => this.initOrUpdateMetalChart(), 0);
+      },
+      error: () => { this.metalHistory = []; this.cdr.markForCheck(); },
+    });
+  }
+
+  /** Enough recorded points to draw a line; one snapshot is not a chart. */
+  get metalHistoryHasData(): boolean {
+    return this.metalHistory.length >= 2;
+  }
+
+  get metalHistoryCount(): number {
+    return this.metalHistory.length;
+  }
+
+  private destroyMetalChart(): void {
+    this.metalChart?.destroy();
+    this.metalChart = null;
+  }
+
+  private initOrUpdateMetalChart(): void {
+    const canvas = this.metalChartCanvas?.nativeElement;
+    if (!canvas || this.metalHistory.length < 2) { this.destroyMetalChart(); return; }
+    const labels = this.metalHistory.map((p) =>
+      new Date(p.timestamp).toLocaleString('en-IN', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit', hour12: false }));
+    const data = this.metalHistory.map((p) => p.pricePerGram);
+    const isGold = this.metalChartKey.startsWith('gold');
+    const colour = isGold ? '#d4a72c' : '#8b949e';
+
+    if (this.metalChart) {
+      this.metalChart.data.labels = labels;
+      const ds = this.metalChart.data.datasets[0] as { data: number[]; label: string; borderColor: string; backgroundColor: string };
+      ds.data = data;
+      ds.label = this.metalOptions.find((o) => o.key === this.metalChartKey)?.label ?? 'Rate';
+      ds.borderColor = colour;
+      ds.backgroundColor = colour + '22';
+      this.metalChart.update();
+      return;
+    }
+    this.metalChart = new Chart(canvas, {
+      type: 'line',
+      data: {
+        labels,
+        datasets: [{
+          label: this.metalOptions.find((o) => o.key === this.metalChartKey)?.label ?? 'Rate',
+          data,
+          borderColor: colour,
+          backgroundColor: colour + '22',
+          borderWidth: 2,
+          pointRadius: 0,
+          pointHoverRadius: 4,
+          tension: 0.25,
+          fill: true,
+        }],
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        interaction: { mode: 'index', intersect: false },
+        plugins: {
+          legend: { display: false },
+          datalabels: { display: false },
+          tooltip: {
+            callbacks: {
+              label: (ctx: any) => '₹ ' + this.formatInr(Number(ctx.parsed.y)) + ' / gram',
+            },
+          },
+        },
+        scales: {
+          x: {
+            title: { display: true, text: 'Recorded at (IST)', color: '#8b949e' },
+            ticks: { color: '#8b949e', maxTicksLimit: 8, maxRotation: 0 },
+            grid: { display: false },
+          },
+          y: {
+            beginAtZero: false,
+            title: { display: true, text: '₹ per gram', color: '#8b949e' },
+            ticks: { color: '#8b949e', callback: (v: any) => '₹' + this.formatInrCompact(Number(v)) },
+            grid: { color: '#21262d' },
+          },
+        },
+      },
+    });
+  }
+
+  addMetalHolding(): void {
+    this.metalHoldingsError = null;
+    const grams = Number(this.newMetalGrams);
+    const paid = Number(this.newMetalPricePaid);
+    const date = (this.newMetalBuyDate || '').trim();
+    if (!Number.isFinite(grams) || grams <= 0) { this.metalHoldingsError = 'Enter the grams bought.'; this.cdr.markForCheck(); return; }
+    if (!Number.isFinite(paid) || paid <= 0) { this.metalHoldingsError = 'Enter the price paid per gram.'; this.cdr.markForCheck(); return; }
+    if (!date) { this.metalHoldingsError = 'Pick the purchase date.'; this.cdr.markForCheck(); return; }
+    // When the total was the figure typed, derive per-gram at full precision rather than
+    // reusing the 2dp value shown in the input: ₹3,59,000 / 35g rounds to ₹10,257.14, which
+    // multiplies back to ₹3,58,999.90 and would show an Invested total 10 paise off the bill.
+    const total = Number(this.newMetalTotalPaid);
+    const exactPaid = this.metalPriceAnchor === 'total' && Number.isFinite(total) && total > 0
+      ? total / grams
+      : paid;
+    this.metalHoldingSaving = true;
+    this.cdr.markForCheck();
+    this.dashboardService.addMetalHolding({
+      metal: this.newMetalKey, grams, pricePaidPerGram: exactPaid, buyDate: date, note: this.newMetalNote || '',
+    }).subscribe({
+      next: () => {
+        this.newMetalGrams = null;
+        this.newMetalPricePaid = null;
+        this.newMetalTotalPaid = null;
+        this.newMetalNote = '';
+        this.metalHoldingSaving = false;
+        this.loadMetalHoldings();
+      },
+      error: (err) => {
+        this.metalHoldingsError = err?.error?.error || err?.message || 'Could not save';
+        this.metalHoldingSaving = false;
+        this.cdr.markForCheck();
+      },
+    });
+  }
+
+  /** Lot open for editing, with its draft values. */
+  metalEditId: number | null = null;
+  metalEditKey: MetalKey = 'gold24k';
+  metalEditGrams: number | null = null;
+  metalEditPricePaid: number | null = null;
+  metalEditBuyDate = '';
+  metalEditNote = '';
+
+  startEditMetalHolding(h: MetalHolding): void {
+    this.metalEditId = h.id;
+    this.metalEditKey = h.metal;
+    this.metalEditGrams = h.grams;
+    this.metalEditPricePaid = h.pricePaidPerGram;
+    this.metalEditBuyDate = (h.buyDate || '').slice(0, 10);
+    this.metalEditNote = h.note || '';
+    this.metalHoldingsError = null;
+    this.cdr.markForCheck();
+  }
+
+  cancelEditMetalHolding(): void {
+    this.metalEditId = null;
+    this.metalHoldingsError = null;
+    this.cdr.markForCheck();
+  }
+
+  saveEditMetalHolding(): void {
+    const id = this.metalEditId;
+    if (id == null) return;
+    const grams = Number(this.metalEditGrams);
+    const paid = Number(this.metalEditPricePaid);
+    const date = (this.metalEditBuyDate || '').trim();
+    if (!Number.isFinite(grams) || grams <= 0) { this.metalHoldingsError = 'Enter the grams.'; this.cdr.markForCheck(); return; }
+    if (!Number.isFinite(paid) || paid <= 0) { this.metalHoldingsError = 'Enter the price paid per gram.'; this.cdr.markForCheck(); return; }
+    if (!date) { this.metalHoldingsError = 'Pick the purchase date.'; this.cdr.markForCheck(); return; }
+    this.metalHoldingSaving = true;
+    this.cdr.markForCheck();
+    this.dashboardService.updateMetalHolding(id, {
+      metal: this.metalEditKey, grams, pricePaidPerGram: paid, buyDate: date, note: this.metalEditNote || '',
+    }).subscribe({
+      next: () => {
+        this.metalHoldingSaving = false;
+        this.metalEditId = null;
+        this.loadMetalHoldings();
+      },
+      error: (err) => {
+        this.metalHoldingsError = err?.error?.error || err?.message || 'Could not update';
+        this.metalHoldingSaving = false;
+        this.cdr.markForCheck();
+      },
+    });
+  }
+
+  deleteMetalHolding(id: number): void {
+    this.dashboardService.deleteMetalHolding(id).subscribe({
+      next: () => this.loadMetalHoldings(),
+      error: (err) => {
+        this.metalHoldingsError = err?.error?.error || err?.message || 'Could not delete';
+        this.cdr.markForCheck();
+      },
+    });
+  }
+
+  /** Prefill the buy price with today's rate for the chosen metal, as a starting point. */
+  onNewMetalKeyChange(): void {
+    const rate = this.metals?.metals.find((m) => m.metal === this.newMetalKey);
+    if (rate?.pricePerGram && this.newMetalPricePaid == null) {
+      this.newMetalPricePaid = rate.pricePerGram;
+      this.onMetalPerGramChange();
+      return;
+    }
+    this.cdr.markForCheck();
+  }
+
+  // --- "What you'd actually pay": bare metal rate -> making charges -> GST ---
+
+  metalCalcKey: MetalKey = 'gold24k';
+  metalCalcGrams: number | null = 10;
+  /** Jewellers quote anywhere from about 1% to 12%, so this is the main variable. */
+  metalCalcMakingPct = 8;
+  metalCalcGstPct = 3;
+
+  private static readonly METAL_CALC_KEY = 'dashboard.metalCalcSettings';
+
+  /** Keep the GST and making-charge figures across reloads; they are per-jeweller habits. */
+  private loadMetalCalcSettings(): void {
+    try {
+      const raw = localStorage.getItem(DashboardComponent.METAL_CALC_KEY);
+      if (!raw) return;
+      const s = JSON.parse(raw) as { making?: number; gst?: number; grams?: number; metal?: MetalKey };
+      if (typeof s.making === 'number') this.metalCalcMakingPct = s.making;
+      if (typeof s.gst === 'number') this.metalCalcGstPct = s.gst;
+      if (typeof s.grams === 'number') this.metalCalcGrams = s.grams;
+      if (s.metal) this.metalCalcKey = s.metal;
+    } catch {
+      /* private browsing — defaults are fine */
+    }
+  }
+
+  saveMetalCalcSettings(): void {
+    try {
+      localStorage.setItem(DashboardComponent.METAL_CALC_KEY, JSON.stringify({
+        making: Number(this.metalCalcMakingPct) || 0,
+        gst: Number(this.metalCalcGstPct) || 0,
+        grams: Number(this.metalCalcGrams) || 0,
+        metal: this.metalCalcKey,
+      }));
+    } catch {
+      /* ignore */
+    }
+    this.cdr.markForCheck();
+  }
+
+  private get metalCalcRate(): number | null {
+    return this.metals?.metals.find((m) => m.metal === this.metalCalcKey)?.pricePerGram ?? null;
+  }
+
+  /**
+   * Breakdown from the bare metal rate to the counter price.
+   *
+   * GST is charged on metal value *plus* making charges, not on the metal alone — checked
+   * against the source's own calculator (₹1,41,350 + ₹16,962 making, GST ₹4,749 = 3% of the sum).
+   */
+  get metalCalc(): {
+    rate: number; grams: number; base: number; making: number; gst: number;
+    total: number; perGramAllIn: number; premiumPct: number;
+  } | null {
+    const rate = this.metalCalcRate;
+    const grams = Number(this.metalCalcGrams);
+    if (rate == null || !Number.isFinite(grams) || grams <= 0) return null;
+    const makingPct = Math.max(0, Number(this.metalCalcMakingPct) || 0);
+    const gstPct = Math.max(0, Number(this.metalCalcGstPct) || 0);
+    const base = rate * grams;
+    const making = base * (makingPct / 100);
+    const gst = (base + making) * (gstPct / 100);
+    const total = base + making + gst;
+    return {
+      rate, grams, base, making, gst, total,
+      perGramAllIn: total / grams,
+      premiumPct: base ? ((total - base) / base) * 100 : 0,
+    };
+  }
+
+  /** Rupee formatter that admits missing data instead of rendering a misleading ₹0. */
+  formatInrOrDash(v: number | null | undefined): string {
+    return v == null || !Number.isFinite(v) ? '—' : this.formatInr(v);
+  }
+
+  metalChangeClass(m: MetalRate): string {
+    if (m.change == null || m.change === 0) return '';
+    return m.change > 0 ? 'is-up' : 'is-down';
   }
 
   // ===== Sold tab: advance tax (Indian FY, ss. 208–211 + 234C) =====

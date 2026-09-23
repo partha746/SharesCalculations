@@ -26,8 +26,9 @@ def create_app():
     from routes.networth import bp as networth_bp
     from routes.income import bp as income_bp
     from routes.advance_tax import bp as advance_tax_bp
+    from routes.metals import bp as metals_bp
 
-    for bp in (tables_bp, market_bp, live_price_bp, portfolio_bp, tax_bp, breeze_bp, news_bp, mf_bp, earmarks_bp, finance_plan_bp, networth_bp, income_bp, advance_tax_bp):
+    for bp in (tables_bp, market_bp, live_price_bp, portfolio_bp, tax_bp, breeze_bp, news_bp, mf_bp, earmarks_bp, finance_plan_bp, networth_bp, income_bp, advance_tax_bp, metals_bp):
         app.register_blueprint(bp)
     return app
 
@@ -38,5 +39,35 @@ def start_recorder():
     from services.market import _live_price_recorder_loop
 
     rec = threading.Thread(target=_live_price_recorder_loop, daemon=True)
+    rec.start()
+    return rec
+
+
+def _metal_recorder_loop():
+    """Snapshot Pune gold/silver every 15 minutes.
+
+    Separate from the price recorder, which sleeps outside US market hours: bullion rates
+    are published on their own schedule. The service skips writes when nothing moved, so an
+    unchanged rate does not accumulate rows.
+    """
+    import time
+    from services.metals import record_rates
+
+    INTERVAL_SEC = 15 * 60
+    while True:
+        try:
+            written = record_rates()
+            if written:
+                print("[metal-recorder] recorded {} series".format(written), flush=True)
+        except Exception as e:
+            print("[metal-recorder] {}".format(e), flush=True)
+        time.sleep(INTERVAL_SEC)
+
+
+def start_metal_recorder():
+    """Launch the background gold/silver rate recorder thread."""
+    import threading
+
+    rec = threading.Thread(target=_metal_recorder_loop, daemon=True)
     rec.start()
     return rec

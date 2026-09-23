@@ -299,6 +299,71 @@ export interface MarketStatusResponse {
   nextPostMarketEnd?: number;
 }
 
+/** Series key for a tracked bullion rate. */
+export type MetalKey = 'gold24k' | 'gold22k' | 'gold18k' | 'silver';
+
+/** One metal's current Pune rate, with the day's range from locally recorded snapshots. */
+export interface MetalRate {
+  metal: MetalKey;
+  label: string;
+  pricePerGram: number | null;
+  pricePer10g: number | null;
+  pricePerKg: number | null;
+  /** Range across the last 24h of recorded snapshots; null until enough have accumulated. */
+  dayLow: number | null;
+  dayHigh: number | null;
+  samples: number;
+  /** Last snapshot from before the 24h window — the baseline for `change`. */
+  prevClose: number | null;
+  change: number | null;
+  changePct: number | null;
+}
+
+export interface MetalsResponse {
+  source: string | null;
+  city: string | null;
+  fetchedAt: number | null;
+  /** True when the live fetch failed and the last known rates are being served. */
+  stale: boolean;
+  /** The quoted rate is the bare metal value, before GST and making charges. */
+  excludesGst?: boolean;
+  excludesMakingCharges?: boolean;
+  basis?: string;
+  metals: MetalRate[];
+}
+
+export interface MetalHistoryPoint {
+  timestamp: number;
+  pricePerGram: number;
+}
+
+/** One purchase lot, valued against the current rate. */
+export interface MetalHolding {
+  id: number;
+  metal: MetalKey;
+  label: string;
+  grams: number;
+  pricePaidPerGram: number;
+  buyDate: string;
+  note: string;
+  investedInr: number;
+  currentPricePerGram: number | null;
+  valueInr: number | null;
+  gainInr: number | null;
+  gainPct: number | null;
+}
+
+export interface MetalHoldingsResponse {
+  holdings: MetalHolding[];
+  totals: {
+    investedInr: number;
+    valueInr: number;
+    gainInr: number;
+    gainPct: number | null;
+    grams: number;
+  };
+}
+
 /** An advance-tax amount actually paid, as recorded by the user. */
 export interface AdvanceTaxPayment {
   id: number;

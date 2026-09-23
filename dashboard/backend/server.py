@@ -21,7 +21,7 @@ if _BACKEND_DIR not in sys.path:
     sys.path.append(_BACKEND_DIR)
 
 from helpers import config  # noqa: E402  (after sys.path setup)
-from app import create_app, start_recorder  # noqa: E402
+from app import create_app, start_metal_recorder, start_recorder  # noqa: E402
 
 app = create_app()
 PORT = config.BACKEND_PORT
@@ -30,6 +30,7 @@ if __name__ == "__main__":
     if not os.path.isfile(config.DB_PATH):
         sys.exit(f"Database not found: {config.DB_PATH}")
     start_recorder()
+    start_metal_recorder()
     print(f"Backend API at http://127.0.0.1:{PORT} (configs at {REPO_ROOT})")
     print("Live price recorder: running in background (records every 14s when market open)")
     # use_reloader=False: pm2 manages restarts; the reloader would spawn duplicate recorder threads.
