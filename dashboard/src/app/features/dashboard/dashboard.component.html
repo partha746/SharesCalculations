@@ -73,6 +73,17 @@
             <span class="live-price-block__value live-price-block__value--muted">$ {{ formatUsd(data.openPriceUsd) }}</span>
           </div>
         }
+        @if (data.dayHighUsd != null && data.dayLowUsd != null) {
+          <div class="live-price-block__row">
+            <span class="live-price-block__label">High / Low</span>
+            <span class="live-price-block__value live-price-block__value--muted"
+                  [title]="marketOpen ? 'Regular session range so far today' : 'Range of the last completed regular session'">
+              $ {{ formatUsd(data.dayHighUsd) }}
+              <span class="live-price-block__range-sep">/</span>
+              $ {{ formatUsd(data.dayLowUsd) }}
+            </span>
+          </div>
+        }
         <div class="live-price-block__row">
           <span class="live-price-block__label">INR value</span>
           <span class="live-price-block__value">₹ {{ formatInr(liveInrPerShare())}}</span>

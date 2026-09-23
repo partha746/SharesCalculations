@@ -129,6 +129,11 @@ def _build_dashboard_response():
     }
     if open_price is not None:
         payload["openPriceUsd"] = round(open_price, 2)
+    # Regular-session range; while the market is shut these are the last session's.
+    if rupee_conv_obj.day_high is not None:
+        payload["dayHighUsd"] = rupee_conv_obj.day_high
+    if rupee_conv_obj.day_low is not None:
+        payload["dayLowUsd"] = rupee_conv_obj.day_low
     # Prefer Frankfurter historical (same family as live INR) for "yesterday's" rate, then the DB.
     # Resolved outside the prev_close block so the FX day-change shows even when the stock's
     # previous close is unavailable, and left absent when genuinely unknown rather than

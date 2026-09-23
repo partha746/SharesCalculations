@@ -68,6 +68,45 @@ export class OverviewTimeCardComponent implements OnInit, OnDestroy {
     return d.toLocaleTimeString('en-IN', { hour12: true, hour: 'numeric', minute: '2-digit', second: '2-digit' });
   }
 
+  /** Exchange-local (New York) clock, which is what the market's own hours are quoted in. */
+  formatClockEt(d: Date): string {
+    return d.toLocaleTimeString('en-US', {
+      hour12: true, hour: 'numeric', minute: '2-digit', second: '2-digit',
+      timeZone: 'America/New_York',
+    });
+  }
+
+  formatDateEt(d: Date): string {
+    return d.toLocaleDateString('en-US', {
+      weekday: 'short', day: 'numeric', month: 'short', timeZone: 'America/New_York',
+    });
+  }
+
+  /** Live exchange zone abbreviation: EDT while daylight saving is on, EST while off. */
+  get etZoneAbbr(): string {
+    const parts = new Intl.DateTimeFormat('en-US', {
+      timeZone: 'America/New_York', timeZoneName: 'short',
+    }).formatToParts(this.currentTime);
+    return parts.find((p) => p.type === 'timeZoneName')?.value ?? 'ET';
+  }
+
+  get etIsDst(): boolean {
+    return this.etZoneAbbr === 'EDT';
+  }
+
+  get etZoneTooltip(): string {
+    return this.etIsDst
+      ? 'Daylight saving is on in New York (EDT, UTC−4). India does not observe it, so ET is 9h 30m behind IST.'
+      : 'Daylight saving is off in New York (EST, UTC−5). India does not observe it, so ET is 10h 30m behind IST.';
+  }
+
+  /** ET is usually a day behind IST here, so the date is only worth showing when it differs. */
+  get etDateDiffers(): boolean {
+    const ist = this.currentTime.toLocaleDateString('en-CA');
+    const et = this.currentTime.toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
+    return ist !== et;
+  }
+
   get marketCountdownText(): string {
     const now = Date.now();
     if (this.marketOpen && this.marketNextCloseMs != null) {

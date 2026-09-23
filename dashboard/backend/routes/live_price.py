@@ -190,6 +190,11 @@ def get_live_price():
             payload["openPriceUsd"] = round(open_price, 2)
         if prev_close is not None:
             payload["previousCloseUsd"] = round(prev_close, 2)
+        # Regular-session range; while the market is shut these are the last session's.
+        if rupee_conv_obj.day_high is not None:
+            payload["dayHighUsd"] = rupee_conv_obj.day_high
+        if rupee_conv_obj.day_low is not None:
+            payload["dayLowUsd"] = rupee_conv_obj.day_low
         if _is_premarket_et():
             premarket = rupee_conv_obj.get_premarket_price("NVDA")
             if premarket is not None:

@@ -652,6 +652,9 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
           livePriceUsd: res.livePriceUsd,
           usdToInrRate: res.usdToInrRate,
           ...(res.openPriceUsd != null && { openPriceUsd: res.openPriceUsd }),
+          // Carry the session range through the poll; omitting it would blank the row.
+          ...(res.dayHighUsd != null && { dayHighUsd: res.dayHighUsd }),
+          ...(res.dayLowUsd != null && { dayLowUsd: res.dayLowUsd }),
           preMarketPriceUsd: res.preMarketPriceUsd ?? undefined,
           postMarketPriceUsd: res.postMarketPriceUsd ?? undefined,
           totalValueUsd: roundedUsd,

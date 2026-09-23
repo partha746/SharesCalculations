@@ -1,7 +1,27 @@
 <div class="time-strip">
   <div class="time-strip__group time-strip__group--clock">
     <span class="time-strip__clock">{{ formatClock(currentTime) }}</span>
+    <span class="time-strip__zone">IST</span>
     <span class="time-strip__date">{{ currentTime.toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short' }) }}</span>
+  </div>
+
+  <span class="time-strip__sep" aria-hidden="true"></span>
+
+  <div class="time-strip__group" title="Exchange-local time in New York; the market's hours are quoted in this zone">
+    <span class="time-strip__clock time-strip__clock--et">{{ formatClockEt(currentTime) }}</span>
+    <span class="time-strip__zone" [title]="etZoneTooltip">
+      <!-- Sun = daylight saving in effect; dimmed when the exchange is on standard time. -->
+      <svg class="time-strip__dst" [class.time-strip__dst--on]="etIsDst"
+           viewBox="0 0 16 16" width="11" height="11" aria-hidden="true" focusable="false">
+        <circle cx="8" cy="8" r="2.9" fill="currentColor" />
+        <circle cx="8" cy="8" r="5.5" fill="none" stroke="currentColor" stroke-width="2"
+                stroke-dasharray="1.1 2.7" stroke-linecap="round" />
+      </svg>
+      {{ etZoneAbbr }}
+    </span>
+    @if (etDateDiffers) {
+      <span class="time-strip__date">{{ formatDateEt(currentTime) }}</span>
+    }
   </div>
 
   <span class="time-strip__sep" aria-hidden="true"></span>

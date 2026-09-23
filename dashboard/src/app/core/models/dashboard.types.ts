@@ -121,6 +121,9 @@ export interface LivePriceResponse {
   lastUpdated: string;
   /** Today's market open (USD); when set, Overview and chart use it for "diff from open". */
   openPriceUsd?: number;
+  /** Regular-session high/low (USD). While the market is shut, the last session's. */
+  dayHighUsd?: number;
+  dayLowUsd?: number;
   /** Pre-market price (USD) from yfinance when in pre-market session (4–9:30 AM ET). */
   preMarketPriceUsd?: number;
   /** Post-market price (USD) from yfinance when in post-market session (4–8 PM ET). */
@@ -402,6 +405,9 @@ export interface DashboardResponse {
   usdToInrRate: number;
   /** Today's market open (USD); when set, Overview and chart use it for "diff from open". */
   openPriceUsd?: number;
+  /** Regular-session high/low (USD). While the market is shut, the last session's. */
+  dayHighUsd?: number;
+  dayLowUsd?: number;
   /** Pre-market price (USD) from yfinance when in pre-market session. */
   preMarketPriceUsd?: number;
   /** Post-market price (USD) from yfinance when in post-market session. */

@@ -129,6 +129,9 @@ class RupeeConv:
         self.db_obj = DB()
         self.todays_date = datetime.now()
         self.rupee_symbol = u'\u20B9'
+        # Regular-session high/low, filled in by get_live_price() from the same quote.
+        self.day_high = None
+        self.day_low = None
         
         self.pre_start_time = datetime.time(datetime(2022, 3, 21, 16, 30))
         self.pre_stop_time = datetime.time(datetime(2022, 3, 21, 19, 0))
@@ -529,21 +532,34 @@ class RupeeConv:
 
     @retry(wait_random_min=10, stop_max_attempt_number=3)
     def get_live_price(self):
-        """Returns (live_price_usd, todays_usd_inr_rate, open_price_usd or None, prev_close_usd or None)."""
+        """Returns (live_price_usd, todays_usd_inr_rate, open_price_usd or None, prev_close_usd or None).
+
+        The session high/low from the same quote are left on `day_high` / `day_low` rather than
+        widening this tuple, which several callers unpack positionally. get_quote() is not
+        cached, so reading them here avoids a second request for the same data.
+        """
         quote = self.get_quote(stock_code='nvda')
         live_price = None
         open_price = None
         prev_close = None
+        self.day_high = None
+        self.day_low = None
         if quote:
             c = quote.get("c")
             o = quote.get("o")
             pc = quote.get("pc")
+            h = quote.get("h")
+            l = quote.get("l")
             if c is not None:
                 live_price = round(float(c), 2)
             if o is not None and float(o) > 0:
                 open_price = round(float(o), 2)
             if pc is not None and float(pc) > 0:
                 prev_close = round(float(pc), 2)
+            if h is not None and float(h) > 0:
+                self.day_high = round(float(h), 2)
+            if l is not None and float(l) > 0:
+                self.day_low = round(float(l), 2)
         if live_price is None:
             live_price = self.get_stock_price(stock_code='nvda')
         todays_rp = self.get_usd_to_inr_open_er_api()
