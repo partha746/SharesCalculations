@@ -56,6 +56,10 @@ export class NetworthTabComponent implements OnInit, OnChanges {
   @Input() nvdaNetInr: number | null = null;
   /** Live mutual-fund value (sum of AMFI NAV × units). */
   @Input() mfValueInr: number | null = null;
+  /** Current value of gold/silver lots at today's Pune rate; null when none are recorded. */
+  @Input() metalsValueInr: number | null = null;
+  /** Total grams held, for the row hint. */
+  @Input() metalsGrams = 0;
   /** Live ICICI equity holdings value; null until the ICICI holdings have been fetched. */
   @Input() iciciEquityValueInr: number | null = null;
   /** True once ICICI equity holdings have actually been loaded (else we show a hint). */
@@ -415,6 +419,18 @@ export class NetworthTabComponent implements OnInit, OnChanges {
         hint: this.iciciEquityLoaded
           ? 'Live market value — from ICICI Direct'
           : 'Connect ICICI Direct and load holdings to include this',
+      },
+      {
+        key: 'metals',
+        label: 'Gold & silver',
+        // Matches the category the manual-asset form offers, so the breakdown does not
+        // split bullion across two buckets.
+        category: 'Gold / silver',
+        liquidity: 'liquid',
+        valueInr: this.metalsValueInr,
+        hint: this.metalsGrams
+          ? `${this.metalsGrams.toFixed(1)} g at today's Pune rate — from the Metal tab, making charges excluded`
+          : 'Add purchase lots in the Metal tab to include this',
       },
     ];
   }

@@ -2043,8 +2043,13 @@ input[type='month'] {
     box-shadow: 0 -1px 0 #30363d;
   }
 }
+/* The extra row is the sticky totals footer, which would otherwise eat a body row */
 .playground-table-scroll--tax {
-  max-height: calc(2.75rem + var(--playground-scroll-rows) * var(--playground-scroll-row));
+  max-height: calc(2.75rem + (var(--playground-scroll-rows) + 1) * var(--playground-scroll-row));
+}
+.playground-tax-table__totals td {
+  border-top: 2px solid #30363d;
+  white-space: nowrap;
 }
 .playground-table-scroll--multi {
   max-height: calc(8rem + var(--playground-scroll-rows) * var(--playground-scroll-row));

@@ -1309,6 +1309,18 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
 
   // ===== Net worth tab: values this app already tracks =====
 
+  /** Current value of the gold/silver lots; null when none are recorded so the Net worth
+   *  row reads "add lots" rather than a confident ₹0. */
+  get networthMetalsValueInr(): number | null {
+    const total = this.metalHoldings?.totals;
+    if (!total || !this.metalHoldings?.holdings.length) return null;
+    return total.valueInr ?? null;
+  }
+
+  get networthMetalsGrams(): number {
+    return this.metalHoldings?.totals?.grams ?? 0;
+  }
+
   /** Live mutual-fund value (null when nothing is loaded / no NAV available yet). */
   get networthMfValueInr(): number | null {
     if (this.mfHoldings.length === 0) return null;
@@ -1359,6 +1371,7 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
     this.networthTrackedLoading = true;
     this.cdr.markForCheck();
     this.loadMfHoldings();
+    this.loadMetalHoldings(); // values gold/silver lots at today's Pune rate
     this.loadBreezeStatus(); // fetches ICICI equity holdings when an account is connected
     this.fetchAndPushLivePrice(); // refreshes the NVDA net-if-sold figure
     setTimeout(() => {

@@ -497,6 +497,8 @@
       <app-networth-tab
         [nvdaNetInr]="data.netInBankIfSellNow"
         [mfValueInr]="networthMfValueInr"
+        [metalsValueInr]="networthMetalsValueInr"
+        [metalsGrams]="networthMetalsGrams"
         [iciciEquityValueInr]="networthIciciEquityValueInr"
         [iciciEquityLoaded]="networthIciciEquityLoaded"
         [trackedLoading]="networthTrackedLoading"
@@ -1247,11 +1249,16 @@
                 </tr>
               }
             </tbody>
+            @if (playTaxRecommendationTotalTaxInr != null) {
+              <tfoot>
+                <tr class="playground-tax-table__totals">
+                  <td colspan="6"><strong>Total tax at target price (for recommended lots)</strong></td>
+                  <td><strong>₹ {{ formatInr(playTaxRecommendationTotalTaxInr) }}</strong></td>
+                </tr>
+              </tfoot>
+            }
           </table>
         </div>
-        @if (playTaxRecommendationTotalTaxInr != null) {
-          <p class="playground-desc"><strong>Total tax at target price (for recommended lots): ₹ {{ formatInr(playTaxRecommendationTotalTaxInr) }}</strong></p>
-        }
       }
     </section>
 
