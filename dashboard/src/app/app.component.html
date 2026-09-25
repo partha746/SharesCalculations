@@ -1,5 +1,11 @@
 <header class="app-header">
   <h1>{{ title }}</h1>
+  @if (session().authenticated) {
+    <div class="app-header__account">
+      <span class="app-header__user" title="Signed in">{{ session().username }}</span>
+      <button type="button" class="app-header__signout" (click)="logout()">Sign out</button>
+    </div>
+  }
 </header>
 <main>
   <router-outlet></router-outlet>

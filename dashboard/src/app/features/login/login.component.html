@@ -1,0 +1,74 @@
+<div class="login">
+  <div class="login__card">
+    <div class="login__brand" aria-hidden="true">
+      <span class="login__coin">&#8377;</span>
+    </div>
+
+    @if (checking) {
+      <p class="login__checking">Checking session…</p>
+    } @else if (setupBlocked) {
+      <h1 class="login__title">Setup unavailable here</h1>
+      <p class="login__hint">
+        No password has been set yet, and first-time setup is only allowed from the local network.
+        Open the dashboard from your home network, or set it from the server:
+      </p>
+      <code class="login__code">docker compose exec backend python /app/set_password.py</code>
+    } @else {
+      <h1 class="login__title">{{ title }}</h1>
+      @if (setupMode) {
+        <p class="login__hint">
+          First run — pick the password you'll use from now on. It's stored only as a hash, on this machine.
+        </p>
+      }
+
+      <form class="login__form" (ngSubmit)="submit()">
+        <label class="login__field">
+          <span>Username</span>
+          <input
+            type="text"
+            name="username"
+            autocomplete="username"
+            autocapitalize="none"
+            spellcheck="false"
+            [(ngModel)]="username"
+            [disabled]="submitting" />
+        </label>
+
+        <label class="login__field">
+          <span>Password</span>
+          <input
+            type="password"
+            name="password"
+            [attr.autocomplete]="setupMode ? 'new-password' : 'current-password'"
+            [(ngModel)]="password"
+            [disabled]="submitting" />
+        </label>
+
+        @if (setupMode) {
+          <label class="login__field">
+            <span>Confirm password</span>
+            <input
+              type="password"
+              name="confirmPassword"
+              autocomplete="new-password"
+              [(ngModel)]="confirmPassword"
+              [disabled]="submitting" />
+          </label>
+          @if (password && password.length < minPasswordLength) {
+            <p class="login__note">At least {{ minPasswordLength }} characters.</p>
+          } @else if (confirmPassword && password !== confirmPassword) {
+            <p class="login__note">Passwords don't match.</p>
+          }
+        }
+
+        @if (error) {
+          <p class="login__error" role="alert">{{ error }}</p>
+        }
+
+        <button type="submit" class="login__submit" [disabled]="!canSubmit">
+          {{ submitting ? 'Please wait…' : setupMode ? 'Set password & continue' : 'Sign in' }}
+        </button>
+      </form>
+    }
+  </div>
+</div>

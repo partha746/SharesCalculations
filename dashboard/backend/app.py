@@ -3,8 +3,44 @@
 The route handlers live in routes/* (blueprints); business logic in services/*;
 shared DB access in db.py; secrets/paths in helpers/config.py.
 """
-from flask import Flask
+from flask import Flask, jsonify, request
 from werkzeug.middleware.proxy_fix import ProxyFix
+
+# Reachable while signed out: the container healthcheck, the session probe, first-run
+# setup, and login itself. Everything else under /api needs a live session.
+_PUBLIC_API_PATHS = frozenset(
+    {
+        "/api/health",
+        "/api/auth/session",
+        "/api/auth/setup",
+        "/api/auth/login",
+        "/api/auth/logout",
+    }
+)
+
+
+def _install_auth_guard(app):
+    """Deny every /api request without a session, including before a password is set.
+
+    Default-deny on purpose: a new route is protected the moment it is added, rather
+    than being open until someone remembers to decorate it.
+    """
+    from routes.auth import COOKIE_NAME
+    from services import auth as auth_svc
+
+    @app.before_request
+    def _require_session():
+        path = request.path or ""
+        if not path.startswith("/api/") or path in _PUBLIC_API_PATHS:
+            return None
+        # CORS preflight carries no cookies; the browser sends the real request after.
+        if request.method == "OPTIONS":
+            return None
+        if auth_svc.resolve_session(request.cookies.get(COOKIE_NAME)):
+            return None
+        if not auth_svc.password_is_set():
+            return jsonify({"error": "Set a password to unlock the dashboard.", "setupRequired": True}), 401
+        return jsonify({"error": "Not signed in."}), 401
 
 
 def create_app():
@@ -27,9 +63,18 @@ def create_app():
     from routes.income import bp as income_bp
     from routes.advance_tax import bp as advance_tax_bp
     from routes.metals import bp as metals_bp
+    from routes.auth import bp as auth_bp
 
-    for bp in (tables_bp, market_bp, live_price_bp, portfolio_bp, tax_bp, breeze_bp, news_bp, mf_bp, earmarks_bp, finance_plan_bp, networth_bp, income_bp, advance_tax_bp, metals_bp):
+    for bp in (tables_bp, market_bp, live_price_bp, portfolio_bp, tax_bp, breeze_bp, news_bp, mf_bp, earmarks_bp, finance_plan_bp, networth_bp, income_bp, advance_tax_bp, metals_bp, auth_bp):
         app.register_blueprint(bp)
+
+    @app.route("/api/health", methods=["GET"])
+    def health():
+        """Liveness only, deliberately free of any portfolio data: the container
+        healthcheck runs unauthenticated, so this must be safe to expose."""
+        return jsonify({"ok": True})
+
+    _install_auth_guard(app)
     return app
 
 

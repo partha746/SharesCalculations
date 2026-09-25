@@ -20,11 +20,13 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Application code (configs/ — incl. the SQLite DB — is provided via a volume at runtime).
 COPY helpers ./helpers
 COPY dashboard/backend ./dashboard/backend
+# Password reset CLI, so it can be run inside the container when locked out.
+COPY set_password.py ./set_password.py
 
 EXPOSE 8080
 
 # Lightweight healthcheck: hit a DB-only endpoint (no external API calls).
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
-  CMD python -c "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8080/api/tables', timeout=5).status==200 else 1)"
+  CMD python -c "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8080/api/health', timeout=5).status==200 else 1)"
 
 CMD ["python", "dashboard/backend/server.py"]
