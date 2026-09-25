@@ -1,4 +1,4 @@
-import { ChangeDetectionStrategy, ChangeDetectorRef, Component, Input, OnDestroy, OnInit } from '@angular/core';
+import { ChangeDetectionStrategy, ChangeDetectorRef, Component, HostListener, Input, OnDestroy, OnInit } from '@angular/core';
 
 import { formatCountdown, formatCountdownWithSeconds } from './countdown-utils';
 
@@ -92,6 +92,67 @@ export class OverviewTimeCardComponent implements OnInit, OnDestroy {
 
   get etIsDst(): boolean {
     return this.etZoneAbbr === 'EDT';
+  }
+
+  /** Tapped open on touch, where there is no hover to reveal the tooltip. */
+  dstTooltipOpen = false;
+
+  /** Tapping anywhere else dismisses it, which is what a touch user expects. */
+  @HostListener('document:click')
+  @HostListener('document:keydown.escape')
+  onDocumentDismiss(): void {
+    this.closeDstTooltip();
+  }
+
+  toggleDstTooltip(event: Event): void {
+    event.stopPropagation();
+    this.dstTooltipOpen = !this.dstTooltipOpen;
+    this.cdr.markForCheck();
+  }
+
+  closeDstTooltip(): void {
+    if (!this.dstTooltipOpen) return;
+    this.dstTooltipOpen = false;
+    this.cdr.markForCheck();
+  }
+
+  get dstHeadline(): string {
+    return this.etIsDst ? 'Daylight saving is ON' : 'Daylight saving is OFF';
+  }
+
+  get dstZoneLine(): string {
+    return this.etIsDst ? 'New York is on EDT (UTC−4)' : 'New York is on EST (UTC−5)';
+  }
+
+  get dstOffsetLine(): string {
+    // The practical consequence: how far behind IST the exchange clock runs.
+    return this.etIsDst ? 'ET is 9h 30m behind IST' : 'ET is 10h 30m behind IST';
+  }
+
+  /** Date the US next flips, so the shift in market hours is not a surprise. */
+  get dstChangeLine(): string {
+    const year = Number(
+      new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', year: 'numeric' }).format(this.currentTime),
+    );
+    const next = this.etIsDst
+      ? this.nthWeekdayUtcNoon(year, 10, 0, 1) // first Sunday in November: DST ends
+      : this.nextMarchStart(year);
+    const when = next.toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
+    return this.etIsDst ? `Ends ${when}` : `Starts ${when}`;
+  }
+
+  /** Second Sunday in March, rolling to next year once this year's has passed. */
+  private nextMarchStart(year: number): Date {
+    const thisYear = this.nthWeekdayUtcNoon(year, 2, 0, 2);
+    return thisYear >= this.currentTime ? thisYear : this.nthWeekdayUtcNoon(year + 1, 2, 0, 2);
+  }
+
+  /** nth (1-based) `weekday` of `month` in `year`. Noon UTC keeps the calendar date
+   *  stable regardless of the viewer's own zone. */
+  private nthWeekdayUtcNoon(year: number, month: number, weekday: number, nth: number): Date {
+    const first = new Date(Date.UTC(year, month, 1, 12));
+    const shift = (weekday - first.getUTCDay() + 7) % 7;
+    return new Date(Date.UTC(year, month, 1 + shift + (nth - 1) * 7, 12));
   }
 
   get etZoneTooltip(): string {

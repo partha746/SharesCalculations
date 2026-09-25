@@ -57,6 +57,97 @@
   color: #6e7681;
   cursor: help;
 }
+
+/* The ET zone badge is a button so the tooltip works on hover, keyboard and touch */
+.time-strip__zone--btn {
+  position: relative;
+  font-family: inherit;
+  padding: 0.1rem 0.25rem;
+  margin: -0.1rem -0.25rem;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  transition: border-color 0.12s ease, color 0.12s ease;
+
+  &:hover,
+  &:focus-visible,
+  &.time-strip__zone--open {
+    color: #c9d1d9;
+    border-color: #30363d;
+  }
+  &:focus-visible {
+    outline: 2px solid #58a6ff;
+    outline-offset: 1px;
+  }
+}
+
+.dst-pop {
+  position: absolute;
+  top: calc(100% + 0.45rem);
+  left: 50%;
+  transform: translate(-50%, -4px);
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  gap: 0.18rem;
+  width: max-content;
+  max-width: 15rem;
+  padding: 0.55rem 0.7rem;
+  text-align: left;
+  text-transform: none;
+  letter-spacing: normal;
+  font-weight: 400;
+  background: #1c2128;
+  border: 1px solid #30363d;
+  border-radius: 7px;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.45);
+  // Hidden but still laid out, so it can transition rather than pop
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition: opacity 0.14s ease, transform 0.14s ease, visibility 0.14s;
+}
+.time-strip__zone--btn:hover .dst-pop,
+.time-strip__zone--btn:focus-visible .dst-pop,
+.time-strip__zone--open .dst-pop {
+  opacity: 1;
+  visibility: visible;
+  transform: translate(-50%, 0);
+}
+
+.dst-pop__head {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: #e6edf3;
+}
+.dst-pop__dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex: 0 0 auto;
+  background: #484f58;
+}
+.dst-pop__dot--on {
+  background: #d4a72c;
+  box-shadow: 0 0 8px rgba(212, 167, 44, 0.6);
+}
+.dst-pop__line {
+  font-size: 0.74rem;
+  line-height: 1.4;
+  color: #c9d1d9;
+}
+.dst-pop__line--muted {
+  color: #8b949e;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dst-pop {
+    transition: none;
+  }
+}
 // Off by default; lit amber while the exchange is on daylight saving.
 .time-strip__dst {
   color: #484f58;

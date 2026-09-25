@@ -51,6 +51,7 @@
       <div
         class="live-price-block"
         [class.live-price-block--refreshing]="refreshLiveInProgress"
+        [class.live-price-block--flash]="livePriceJustRefreshed"
         role="button"
         tabindex="0"
         (click)="refreshLiveData()"
@@ -58,7 +59,12 @@
         (keydown.space)="refreshLiveData(); $event.preventDefault()"
         title="Click to refresh live price and rates"
         aria-label="Live price – click to refresh">
-        <div class="live-price-block__title">Live price {{ refreshLiveInProgress ? '…' : '' }}</div>
+        <!-- Indeterminate sweep along the top edge while the request is in flight -->
+        <span class="live-price-block__progress" aria-hidden="true"></span>
+        <div class="live-price-block__title">
+          Live price
+          <span class="live-price-block__refresh-icon" aria-hidden="true">↻</span>
+        </div>
         <div class="live-price-block__row live-price-block__row--main">
           <span class="live-price-block__label">NVDA</span>
           <span class="live-price-block__value">$ {{ formatUsd(data.livePriceUsd) }}</span>

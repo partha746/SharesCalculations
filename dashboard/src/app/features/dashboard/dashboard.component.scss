@@ -832,9 +832,89 @@
     outline: 2px solid #58a6ff;
     outline-offset: 2px;
   }
+  // Immediate tactile response on press, before the request has even gone out
+  &:active:not(.live-price-block--refreshing) {
+    transform: scale(0.994);
+  }
+  // Clip the sweep bar to the rounded corners
+  position: relative;
+  overflow: hidden;
+
   &.live-price-block--refreshing {
     pointer-events: none;
-    opacity: 0.85;
+    border-color: rgba(88, 166, 255, 0.5);
+  }
+  // Settle pulse once the new data is in, so an unchanged price still reads as refreshed
+  &.live-price-block--flash {
+    animation: lp-settle 0.9s ease-out;
+  }
+}
+
+/* Indeterminate progress sweep across the card's top edge */
+.live-price-block__progress {
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 2px;
+  width: 40%;
+  border-radius: 0 0 2px 0;
+  background: linear-gradient(90deg, transparent, #58a6ff, #7ee787, transparent);
+  opacity: 0;
+  pointer-events: none;
+}
+.live-price-block--refreshing .live-price-block__progress {
+  opacity: 1;
+  animation: lp-progress 1.1s ease-in-out infinite;
+}
+
+/* Rotates only while refreshing; otherwise a static affordance that the card is clickable */
+.live-price-block__refresh-icon {
+  display: inline-block;
+  margin-left: 0.3rem;
+  font-size: 0.95em;
+  line-height: 1;
+  color: #6e7681;
+  opacity: 0;
+  transition: opacity 0.15s ease, color 0.15s ease;
+}
+.live-price-block:hover .live-price-block__refresh-icon {
+  opacity: 1;
+}
+// Touch devices never hover, so the affordance would otherwise never appear there.
+@media (hover: none) {
+  .live-price-block__refresh-icon {
+    opacity: 1;
+  }
+}
+.live-price-block--refreshing .live-price-block__refresh-icon {
+  opacity: 1;
+  color: #58a6ff;
+  animation: lp-spin 0.75s linear infinite;
+}
+
+@keyframes lp-spin {
+  to { transform: rotate(360deg); }
+}
+@keyframes lp-progress {
+  // 250% puts the 40%-wide bar just past the right edge, so it never idles off-screen
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(250%); }
+}
+@keyframes lp-settle {
+  0% { background-color: rgba(88, 166, 255, 0.16); }
+  100% { background-color: #161b22; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .live-price-block__refresh-icon,
+  .live-price-block__progress,
+  .live-price-block--flash {
+    animation: none;
+  }
+  // Without the sweep, a static bar is what signals the request is still running
+  .live-price-block--refreshing .live-price-block__progress {
+    width: 100%;
+    opacity: 0.7;
   }
 }
 .live-price-block__title {

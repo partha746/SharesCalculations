@@ -7,9 +7,18 @@
 
   <span class="time-strip__sep" aria-hidden="true"></span>
 
-  <div class="time-strip__group" title="Exchange-local time in New York; the market's hours are quoted in this zone">
-    <span class="time-strip__clock time-strip__clock--et">{{ formatClockEt(currentTime) }}</span>
-    <span class="time-strip__zone" [title]="etZoneTooltip">
+  <!-- The title sits on the clock, not the group: on the group it also fired over the
+       zone button, stacking a native tooltip on top of the custom one. -->
+  <div class="time-strip__group">
+    <span class="time-strip__clock time-strip__clock--et"
+          title="Exchange-local time in New York; the market's hours are quoted in this zone">{{ formatClockEt(currentTime) }}</span>
+    <!-- Button, not a bare span: the sun alone does not say what it means, and a native
+         title never appears on touch. This opens on hover, keyboard focus, or tap. -->
+    <button type="button" class="time-strip__zone time-strip__zone--btn"
+            [class.time-strip__zone--open]="dstTooltipOpen"
+            [attr.aria-label]="dstHeadline + '. ' + dstZoneLine + '. ' + dstOffsetLine + '. ' + dstChangeLine"
+            [attr.aria-expanded]="dstTooltipOpen"
+            (click)="toggleDstTooltip($event)">
       <!-- Sun = daylight saving in effect; dimmed when the exchange is on standard time. -->
       <svg class="time-strip__dst" [class.time-strip__dst--on]="etIsDst"
            viewBox="0 0 16 16" width="11" height="11" aria-hidden="true" focusable="false">
@@ -18,7 +27,18 @@
                 stroke-dasharray="1.1 2.7" stroke-linecap="round" />
       </svg>
       {{ etZoneAbbr }}
-    </span>
+
+      <span class="dst-pop" role="tooltip">
+        <span class="dst-pop__head">
+          <span class="dst-pop__dot" [class.dst-pop__dot--on]="etIsDst"></span>
+          {{ dstHeadline }}
+        </span>
+        <span class="dst-pop__line">{{ dstZoneLine }}</span>
+        <span class="dst-pop__line">{{ dstOffsetLine }}</span>
+        <span class="dst-pop__line dst-pop__line--muted">{{ dstChangeLine }}</span>
+        <span class="dst-pop__line dst-pop__line--muted">India does not observe daylight saving</span>
+      </span>
+    </button>
     @if (etDateDiffers) {
       <span class="time-strip__date">{{ formatDateEt(currentTime) }}</span>
     }

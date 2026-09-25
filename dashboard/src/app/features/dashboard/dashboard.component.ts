@@ -159,6 +159,10 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
   error: string | null = null;
   /** True while refreshing live data (click on live price card). */
   refreshLiveInProgress = false;
+  /** Briefly true after a refresh lands, to flash the figures so the update is visible
+   *  even when the price came back unchanged. */
+  livePriceJustRefreshed = false;
+  private livePriceFlashTimer: ReturnType<typeof setTimeout> | null = null;
   /** Default: date bought descending (newest first). */
   holdingsSortKey: keyof HoldingRow | '' = 'buyDate';
   holdingsSortDir: 1 | -1 = -1;
@@ -3180,6 +3184,7 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
         this.data = res;
         this.lastRefreshedAt = new Date();
         this.refreshLiveInProgress = false;
+        this.flashLivePrice();
         this.loadHoldings();
         this.cdr.markForCheck();
       },
@@ -3188,6 +3193,18 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
         this.cdr.markForCheck();
       },
     });
+  }
+
+  /** Pulse the card once, so a refresh that returned the same price still looks like it
+   *  did something. Restarting the timer keeps rapid clicks from stacking flashes. */
+  private flashLivePrice(): void {
+    if (this.livePriceFlashTimer) clearTimeout(this.livePriceFlashTimer);
+    this.livePriceJustRefreshed = true;
+    this.livePriceFlashTimer = setTimeout(() => {
+      this.livePriceJustRefreshed = false;
+      this.livePriceFlashTimer = null;
+      this.cdr.markForCheck();
+    }, 900);
   }
 
   loadTaxConfig(): void {
