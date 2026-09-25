@@ -1,6 +1,7 @@
 /**
  * Zero-dependency static file server for the prebuilt Angular app (dist/dashboard),
  * with SPA fallback to index.html and a reverse proxy for /api -> backend.
+ * Text responses (static and /api) are brotli/gzip-compressed for clients that accept it.
  *
  * Usage: node serve-prod.js
  * Env:
@@ -14,7 +15,10 @@ const http = require('http');
 const https = require('https');
 const fs = require('fs');
 const path = require('path');
+const { pipeline } = require('stream');
 const { URL } = require('url');
+const { promisify } = require('util');
+const zlib = require('zlib');
 
 const PORT = parseInt(process.env.PORT || '4201', 10);
 const API_TARGET = new URL(process.env.API_TARGET || 'http://127.0.0.1:8080');
@@ -45,6 +49,65 @@ const MIME = {
   '.txt': 'text/plain; charset=utf-8',
 };
 
+// Images, fonts and archives are already compressed, and tiny bodies are not worth it.
+const COMPRESSIBLE_TYPE = /^(text\/|application\/(javascript|json)|image\/svg\+xml)/;
+const MIN_COMPRESS_BYTES = 1024;
+
+// In order of preference. Static files are compressed once per build and cached; API responses
+// on every request. Brotli quality 10+ takes seconds on the ~800 KB dashboard bundle, which would
+// stall the first page load after a deploy.
+const ENCODINGS = {
+  br: {
+    compress: promisify(zlib.brotliCompress),
+    createStream: zlib.createBrotliCompress,
+    staticOptions: { params: { [zlib.constants.BROTLI_PARAM_QUALITY]: 9 } },
+    apiOptions: { params: { [zlib.constants.BROTLI_PARAM_QUALITY]: 5 } },
+  },
+  gzip: {
+    compress: promisify(zlib.gzip),
+    createStream: zlib.createGzip,
+    staticOptions: { level: 9 },
+    apiOptions: { level: 6 },
+  },
+};
+
+function isCompressible(contentType, size) {
+  return size >= MIN_COMPRESS_BYTES && COMPRESSIBLE_TYPE.test(contentType || '');
+}
+
+/** Preferred encoding the client accepts (`q=0` is a refusal), or null to send it uncompressed. */
+function pickEncoding(req) {
+  const accepted = new Set();
+  for (const entry of String(req.headers['accept-encoding'] || '').toLowerCase().split(',')) {
+    const [name, ...params] = entry.split(';').map((s) => s.trim());
+    const q = params.find((p) => p.startsWith('q='));
+    if (name && !(q && Number(q.slice(2)) === 0)) accepted.add(name);
+  }
+  return Object.keys(ENCODINGS).find((name) => accepted.has(name)) || null;
+}
+
+// `${encoding}:${filePath}` -> { mtimeMs, size, body: Promise<Buffer> }. A rebuild changes the
+// mtime, so rewritten files refresh themselves; files it deleted are never requested again, so
+// the map is simply cleared once it outgrows a few builds' worth.
+const compressedFiles = new Map();
+const COMPRESSED_FILES_MAX = 200;
+
+function compressedFile(filePath, stat, encoding) {
+  const key = `${encoding}:${filePath}`;
+  const hit = compressedFiles.get(key);
+  if (hit && hit.mtimeMs === stat.mtimeMs && hit.size === stat.size) return hit.body;
+  if (compressedFiles.size >= COMPRESSED_FILES_MAX) compressedFiles.clear();
+  const { compress, staticOptions } = ENCODINGS[encoding];
+  const body = fs.promises.readFile(filePath).then((raw) => compress(raw, staticOptions));
+  const entry = { mtimeMs: stat.mtimeMs, size: stat.size, body };
+  compressedFiles.set(key, entry);
+  // Retry a failed read or compression on the next request rather than caching the failure.
+  body.catch(() => {
+    if (compressedFiles.get(key) === entry) compressedFiles.delete(key);
+  });
+  return body;
+}
+
 function proxyApi(req, res) {
   // Keep the browser's Host and add the standard X-Forwarded-* headers. The backend builds
   // absolute URLs (e.g. the ICICI OAuth callback) from these; overwriting Host with the internal
@@ -65,8 +128,27 @@ function proxyApi(req, res) {
     },
   };
   const upstream = http.request(options, (up) => {
-    res.writeHead(up.statusCode || 502, up.headers);
-    up.pipe(res);
+    const statusCode = up.statusCode || 502;
+    const headers = { ...up.headers };
+    // Requiring a Content-Length keeps streamed responses (e.g. event streams) unbuffered.
+    const compressible =
+      req.method !== 'HEAD' &&
+      statusCode !== 204 &&
+      statusCode !== 304 &&
+      !headers['content-encoding'] &&
+      isCompressible(headers['content-type'], Number(headers['content-length']));
+    if (compressible) headers.vary = headers.vary ? `${headers.vary}, Accept-Encoding` : 'Accept-Encoding';
+    const encoding = compressible ? pickEncoding(req) : null;
+    if (!encoding) {
+      res.writeHead(statusCode, headers);
+      up.pipe(res);
+      return;
+    }
+    delete headers['content-length'];
+    headers['content-encoding'] = encoding;
+    res.writeHead(statusCode, headers);
+    const { createStream, apiOptions } = ENCODINGS[encoding];
+    pipeline(up, createStream(apiOptions), res, () => {});
   });
   upstream.on('error', (err) => {
     res.writeHead(502, { 'Content-Type': 'application/json' });
@@ -81,7 +163,7 @@ function safeJoin(base, target) {
   return p;
 }
 
-function sendFile(res, filePath, statusCode = 200) {
+function sendFile(req, res, filePath, stat, statusCode = 200) {
   const ext = path.extname(filePath).toLowerCase();
   const type = MIME[ext] || 'application/octet-stream';
   // index.html must never be cached so new builds are picked up immediately; hashed assets cache forever.
@@ -90,8 +172,18 @@ function sendFile(res, filePath, statusCode = 200) {
     'Content-Type': type,
     'Cache-Control': isHtml ? 'no-cache, no-store, must-revalidate' : 'public, max-age=31536000, immutable',
   };
-  res.writeHead(statusCode, headers);
-  fs.createReadStream(filePath).pipe(res);
+  const compressible = isCompressible(type, stat.size);
+  if (compressible) headers['Vary'] = 'Accept-Encoding';
+  const encoding = compressible ? pickEncoding(req) : null;
+  const sendUncompressed = () => {
+    res.writeHead(statusCode, headers);
+    fs.createReadStream(filePath).pipe(res);
+  };
+  if (!encoding) return sendUncompressed();
+  compressedFile(filePath, stat, encoding).then((body) => {
+    res.writeHead(statusCode, { ...headers, 'Content-Encoding': encoding, 'Content-Length': body.length });
+    res.end(body);
+  }, sendUncompressed);
 }
 
 const requestHandler = (req, res) => {
@@ -114,11 +206,11 @@ const requestHandler = (req, res) => {
   }
 
   fs.stat(filePath, (err, stat) => {
-    if (!err && stat.isFile()) return sendFile(res, filePath);
+    if (!err && stat.isFile()) return sendFile(req, res, filePath, stat);
     // SPA fallback: serve index.html for client-side routes (GET/HEAD only).
     if (req.method === 'GET' || req.method === 'HEAD') {
       return fs.stat(INDEX_HTML, (e2, s2) => {
-        if (!e2 && s2.isFile()) return sendFile(res, INDEX_HTML);
+        if (!e2 && s2.isFile()) return sendFile(req, res, INDEX_HTML, s2);
         res.writeHead(404);
         res.end('Not found (build the app with `ng build`)');
       });

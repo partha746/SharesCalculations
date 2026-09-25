@@ -609,7 +609,7 @@ class RupeeConv:
 
         if len(rs_rate_null_df) > 0:
             rs_rate_null_df[rs_column_name] = self.get_rupee_rate(
-                rs_rate_null_df[date_column_name][0])
+                rs_rate_null_df[date_column_name])
 
             for _, row in rs_rate_null_df.iterrows():
                 cmd = 'UPDATE ' + table_name + ' SET ' + rs_column_name + ' = \'' + \

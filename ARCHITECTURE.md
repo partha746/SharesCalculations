@@ -34,7 +34,7 @@ helpers/                 # shared data layer (importable by backend + scripts)
   eks.py                 # EksHelper (legacy ELK push; needs `pip install elasticsearch pytz`)
   gather_data.py         # back-compat facade re-exporting the above (EksHelper resolved lazily)
 dashboard/
-  serve-prod.js          # static file server + /api reverse proxy (zero deps, optional TLS)
+  serve-prod.js          # static file server + /api reverse proxy (zero deps, optional TLS, brotli/gzip)
   backend/               # Flask API (entrypoint dir; on sys.path when server.py runs)
     server.py            # thin entrypoint: sys.path + create_app() + start_recorder()
     app.py               # application factory (registers blueprints) + recorder startup
@@ -135,6 +135,9 @@ Two containers via [`docker-compose.yml`](docker-compose.yml):
   (proxies `/api`). BuildKit cache mounts persist the npm and Angular caches across builds.
   `serve-prod.js` forwards the browser's `Host` plus `X-Forwarded-*`, and Flask is wrapped in
   `ProxyFix`, so absolute URLs (e.g. the ICICI OAuth callback) use the origin the browser used.
+  It also compresses text responses with brotli or gzip, whichever the browser accepts: static files
+  once per build (kept in memory), `/api` responses over 1 KB on each request. Binary downloads,
+  small bodies and streamed responses (no `Content-Length`) pass through untouched.
 
 ```bash
 docker compose up -d --build      # build + run

@@ -1,4 +1,6 @@
 """/api/tables CRUD blueprint."""
+import os
+
 from flask import Blueprint, jsonify, request
 
 from db import TABLE_COLUMNS, get_db

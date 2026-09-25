@@ -90,11 +90,13 @@
 
     <div class="news-list">
       @for (a of filteredArticles; track a.url || a.headline) {
-        <a class="news-card" [href]="a.url" target="_blank" rel="noopener noreferrer">
+        <!-- The card is an article, not one big link: the summary needs its own
+             expand control, and a button inside an anchor would navigate instead. -->
+        <article class="news-card">
           <div class="news-card__main">
-            <div class="news-card__headline">{{ a.headline }}</div>
+            <a class="news-card__headline" [href]="a.url" target="_blank" rel="noopener noreferrer">{{ a.headline }}</a>
             @if (a.summary) {
-              <div class="news-card__summary">{{ a.summary }}</div>
+              <p class="news-card__summary">{{ a.summary }}</p>
             }
             <div class="news-card__meta">
               <span class="news-card__source">{{ a.source }}</span>
@@ -115,7 +117,7 @@
             <span class="news-card__sentiment-label">{{ a.sentiment }}</span>
             <span class="news-card__sentiment-score">{{ a.sentimentScore > 0 ? '+' : '' }}{{ a.sentimentScore | number:'1.2-2' }}</span>
           </div>
-        </a>
+        </article>
       } @empty {
         <p class="news-tab__hint">No articles for this filter.</p>
       }
