@@ -2,12 +2,13 @@ import { ChangeDetectionStrategy, ChangeDetectorRef, Component, OnInit } from '@
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { DashboardService } from '../../../core/services/dashboard.service';
-import { NewsArticle, NewsSummary } from '../../../core/models/dashboard.types';
+import { NewsArticle, NewsCloudWord, NewsSummary } from '../../../core/models/dashboard.types';
+import { SentimentCloudComponent } from './sentiment-cloud.component';
 
 /** News tab: latest NVIDIA headlines (Finnhub) with VADER sentiment. */
 @Component({
     selector: 'app-news-tab',
-    imports: [CommonModule, FormsModule],
+    imports: [CommonModule, FormsModule, SentimentCloudComponent],
     templateUrl: './news-tab.component.html',
     styleUrl: './news-tab.component.scss',
     changeDetection: ChangeDetectionStrategy.OnPush
@@ -21,6 +22,11 @@ export class NewsTabComponent implements OnInit {
   rangeDays = 7;
   /** Filter chips: all | positive | negative | neutral */
   filter: 'all' | 'positive' | 'negative' | 'neutral' = 'all';
+  words: NewsCloudWord[] = [];
+  /** Off by default: the raw NVDA feed is mostly about other companies. */
+  showEverything = false;
+  /** Narrows the list to one subject, e.g. "China / export". */
+  topicFilter = '';
 
   constructor(private dashboardService: DashboardService, private cdr: ChangeDetectorRef) {}
 
@@ -32,10 +38,11 @@ export class NewsTabComponent implements OnInit {
     this.loading = true;
     this.error = null;
     this.cdr.markForCheck();
-    this.dashboardService.getNews(this.rangeDays).subscribe({
+    this.dashboardService.getNews(this.rangeDays, this.showEverything ? 0 : undefined).subscribe({
       next: (res) => {
         this.articles = res.articles ?? [];
         this.summary = res.summary ?? null;
+        this.words = res.wordCloud ?? [];
         this.fetchedAt = res.fetchedAt ?? null;
         this.loading = false;
         this.cdr.markForCheck();
@@ -58,9 +65,39 @@ export class NewsTabComponent implements OnInit {
     this.filter = f;
   }
 
+  toggleEverything(): void {
+    this.showEverything = !this.showEverything;
+    this.topicFilter = '';
+    this.load(); // the relevance floor is applied server-side, so this needs a refetch
+  }
+
+  setTopic(topic: string): void {
+    this.topicFilter = this.topicFilter === topic ? '' : topic;
+  }
+
+  /** Subjects present in the current set, most common first, for the chip row. */
+  get topics(): Array<{ name: string; count: number }> {
+    const counts = new Map<string, number>();
+    for (const a of this.articles) {
+      for (const t of a.topics ?? []) counts.set(t, (counts.get(t) ?? 0) + 1);
+    }
+    return [...counts.entries()]
+      .map(([name, count]) => ({ name, count }))
+      .sort((a, b) => b.count - a.count);
+  }
+
   get filteredArticles(): NewsArticle[] {
-    if (this.filter === 'all') return this.articles;
-    return this.articles.filter((a) => a.sentiment === this.filter);
+    let rows = this.articles;
+    if (this.filter !== 'all') rows = rows.filter((a) => a.sentiment === this.filter);
+    if (this.topicFilter) rows = rows.filter((a) => (a.topics ?? []).includes(this.topicFilter));
+    return rows;
+  }
+
+  /** Coarse band for the badge: a 0.9 headline is squarely about NVIDIA, 0.5 is a mention. */
+  relevanceLabel(r: number): string {
+    if (r >= 0.8) return 'High';
+    if (r >= 0.6) return 'Medium';
+    return 'Low';
   }
 
   /** Gauge needle position 0-100 from score. */

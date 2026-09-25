@@ -1,0 +1,25 @@
+<div class="cloud">
+  <div class="cloud__band cloud__band--positive">positive</div>
+
+  <div #stage class="cloud__stage" [style.height.px]="renderedHeight || height">
+    @for (w of placed; track w.text) {
+      <span
+        class="cloud__word"
+        [class.cloud__word--negative]="w.sentiment === 'negative'"
+        [style.left.px]="w.x"
+        [style.top.px]="w.y + offsetY"
+        [style.font-size.px]="w.size"
+        [style.font-weight]="w.size >= 26 ? 700 : (w.size >= 17 ? 600 : 500)"
+        [title]="title(w)">{{ w.text }}</span>
+    }
+    @if (!hasWords) {
+      <p class="cloud__empty">No sentiment-bearing words in this range.</p>
+    }
+  </div>
+
+  <div class="cloud__band cloud__band--negative">negative</div>
+
+  @if (dropped > 0) {
+    <p class="cloud__note">{{ dropped }} less frequent {{ dropped === 1 ? 'word' : 'words' }} didn't fit</p>
+  }
+</div>

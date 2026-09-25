@@ -1,0 +1,76 @@
+.cloud {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+/* Band labels name the two halves, so the colour split needs no separate legend */
+.cloud__band {
+  padding: 0.1rem 0.9rem;
+  border-radius: 4px;
+  font-size: 0.95rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  background: #1c2128;
+}
+.cloud__band--positive {
+  color: #2ea9a0;
+}
+.cloud__band--negative {
+  color: #d9822b;
+}
+
+.cloud__stage {
+  position: relative;
+  width: 100%;
+  // Words are absolutely positioned from a measured layout; anything that could not be
+  // fitted is reported below rather than spilling out.
+  overflow: hidden;
+}
+
+.cloud__word {
+  position: absolute;
+  white-space: nowrap;
+  line-height: 1;
+  color: #2ea9a0;
+  cursor: default;
+  transition: color 0.12s ease, transform 0.12s ease;
+
+  &:hover {
+    color: #7ee787;
+    transform: scale(1.06);
+  }
+}
+.cloud__word--negative {
+  color: #d9822b;
+
+  &:hover {
+    color: #f0883e;
+  }
+}
+
+.cloud__empty {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  margin: 0;
+  font-size: 0.85rem;
+  color: #8b949e;
+}
+
+.cloud__note {
+  margin: 0;
+  font-size: 0.72rem;
+  color: #6e7681;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cloud__word {
+    transition: none;
+    &:hover {
+      transform: none;
+    }
+  }
+}

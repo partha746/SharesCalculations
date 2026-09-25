@@ -182,3 +182,86 @@
 .news-card__sentiment--positive .news-card__sentiment-label { color: #3fb950; background: rgba(63, 185, 80, 0.12); }
 .news-card__sentiment--negative .news-card__sentiment-label { color: #f85149; background: rgba(248, 81, 73, 0.12); }
 .news-card__sentiment--neutral .news-card__sentiment-label { color: #8b949e; background: rgba(139, 148, 158, 0.12); }
+
+/* --- Curation controls --- */
+.news-curation {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 0.5rem 1rem;
+  margin: 0.85rem 0;
+  padding: 0.55rem 0.8rem;
+  background: #12171e;
+  border: 1px solid #21262d;
+  border-radius: 8px;
+}
+.news-curation__text {
+  margin: 0;
+  font-size: 0.82rem;
+  color: #8b949e;
+  strong { color: #c9d1d9; }
+}
+
+/* --- Sentiment cloud panel --- */
+.news-cloud-card {
+  margin: 0.85rem 0 1.1rem;
+  padding: 1rem 1.1rem 1.15rem;
+  background: #161b22;
+  border: 1px solid #30363d;
+  border-radius: 10px;
+}
+.news-cloud-card__title {
+  margin: 0 0 0.2rem;
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: #e6edf3;
+}
+.news-cloud-card__hint {
+  margin: 0 0 0.6rem;
+  font-size: 0.78rem;
+  color: #8b949e;
+}
+
+/* --- Topic chips --- */
+.news-topics {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin-bottom: 0.85rem;
+}
+.news-topics__label {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #6e7681;
+  margin-right: 0.15rem;
+}
+.chip-btn--topic .chip-btn__n {
+  margin-left: 0.3rem;
+  opacity: 0.65;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Relevance + topic tags inside a card's meta line */
+.news-card__rel {
+  color: #6e7681;
+}
+.news-card__topic {
+  padding: 0.05rem 0.4rem;
+  font-size: 0.68rem;
+  color: #8b949e;
+  background: #1c2128;
+  border: 1px solid #30363d;
+  border-radius: 999px;
+}
+
+@media (max-width: 768px) {
+  .news-cloud-card {
+    padding: 0.75rem 0.7rem 0.9rem;
+  }
+  .news-curation {
+    padding: 0.5rem 0.6rem;
+  }
+}

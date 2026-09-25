@@ -100,8 +100,10 @@ export class DashboardService {
   }
 
   /** Latest NVIDIA news + sentiment. */
-  getNews(days = 7): Observable<NewsResponse> {
-    return this.http.get<NewsResponse>(`${this.apiUrl}/news?days=${days}&t=${Date.now()}`);
+  /** `minRelevance` 0 disables curation, which is how the UI offers "show everything". */
+  getNews(days = 7, minRelevance?: number): Observable<NewsResponse> {
+    const rel = minRelevance == null ? '' : `&minRelevance=${minRelevance}`;
+    return this.http.get<NewsResponse>(`${this.apiUrl}/news?days=${days}${rel}&t=${Date.now()}`);
   }
 
   /** Mutual funds: scheme search (AMFI), holdings list (live NAV), add, delete. */

@@ -105,6 +105,20 @@ def set_password(username, password):
         conn.execute("DELETE FROM auth_session")
 
 
+def log_failed_attempt(username, password):
+    """Diagnostic for a rejected login: says which half was wrong, without ever
+    recording the password. Length only, which is enough to spot an empty field."""
+    acct = account()
+    stored = acct["username"] if acct else None
+    submitted = (username or "").strip()
+    matched = bool(stored) and submitted.lower() == stored.lower()
+    print(
+        "[auth] failed login: submitted_username={!r} stored_username={!r} "
+        "username_match={} password_len={}".format(submitted, stored, matched, len(password or "")),
+        flush=True,
+    )
+
+
 def verify_password(username, password):
     ensure_tables()
     with get_db() as conn:

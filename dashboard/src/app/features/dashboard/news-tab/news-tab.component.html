@@ -47,8 +47,45 @@
     @if (!summary.analyzerAvailable) {
       <p class="news-tab__hint news-tab__hint--warn">Sentiment analyzer unavailable on the server; scores default to neutral.</p>
     }
+    <div class="news-curation">
+      <p class="news-curation__text">
+        @if (summary.filteredOut > 0 && !showEverything) {
+          Showing <strong>{{ summary.count }}</strong> of {{ summary.considered }} articles —
+          {{ summary.filteredOut }} were about other companies or were retail listicles.
+        } @else if (showEverything) {
+          Showing the raw feed, including articles that only mention NVIDIA in passing.
+        } @else {
+          Showing all {{ summary.count }} articles from the feed.
+        }
+      </p>
+      <button type="button" class="chip-btn" (click)="toggleEverything()">
+        {{ showEverything ? 'Curated only' : 'Show everything' }}
+      </button>
+    </div>
+
+    @if (words.length > 0) {
+      <section class="news-cloud-card">
+        <h3 class="news-cloud-card__title">What the coverage is saying</h3>
+        <p class="news-cloud-card__hint">
+          Sentiment-bearing words across the curated articles. Size is how many articles used the word.
+        </p>
+        <app-sentiment-cloud [words]="words" [height]="400" />
+      </section>
+    }
+
+    @if (topics.length > 0) {
+      <div class="news-topics">
+        <span class="news-topics__label">Topics</span>
+        @for (t of topics; track t.name) {
+          <button type="button" class="chip-btn chip-btn--topic"
+                  [class.chip-btn--active]="topicFilter === t.name"
+                  (click)="setTopic(t.name)">{{ t.name }} <span class="chip-btn__n">{{ t.count }}</span></button>
+        }
+      </div>
+    }
+
     @if (fetchedAt) {
-      <p class="news-tab__meta">Source: Finnhub company news · sentiment: VADER · updated {{ relativeTime(fetchedAt) }}</p>
+      <p class="news-tab__meta">Source: Finnhub company news · sentiment: VADER with a finance lexicon · updated {{ relativeTime(fetchedAt) }}</p>
     }
 
     <div class="news-list">
@@ -63,6 +100,15 @@
               <span class="news-card__source">{{ a.source }}</span>
               <span class="news-card__dot">·</span>
               <span class="news-card__time">{{ relativeTime(a.datetime) }}</span>
+              @if (a.relevance != null) {
+                <span class="news-card__dot">·</span>
+                <span class="news-card__rel" [title]="'Relevance to NVIDIA: ' + (a.relevance * 100 | number:'1.0-0') + '%'">
+                  {{ relevanceLabel(a.relevance) }} relevance
+                </span>
+              }
+              @for (t of a.topics; track t) {
+                <span class="news-card__topic">{{ t }}</span>
+              }
             </div>
           </div>
           <div class="news-card__sentiment news-card__sentiment--{{ a.sentiment }}">

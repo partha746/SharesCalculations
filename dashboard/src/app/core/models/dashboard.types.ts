@@ -249,6 +249,10 @@ export interface NewsArticle {
   datetime: number; // ms
   sentiment: 'positive' | 'negative' | 'neutral';
   sentimentScore: number; // VADER compound, -1..1
+  /** 0–1 estimate of how much the article is actually about NVIDIA. */
+  relevance: number;
+  /** Subjects matched, e.g. "Earnings", "China / export". */
+  topics: string[];
 }
 
 export interface NewsSummary {
@@ -260,11 +264,27 @@ export interface NewsSummary {
   score100: number;
   overall: 'positive' | 'negative' | 'neutral';
   analyzerAvailable: boolean;
+  /** Articles the feed returned before curation. */
+  considered: number;
+  /** How many the relevance filter removed. */
+  filteredOut: number;
+  minRelevance: number;
+}
+
+/** One term in the sentiment cloud. */
+export interface NewsCloudWord {
+  text: string;
+  /** Articles the word appeared in (counted once per article). */
+  count: number;
+  /** VADER valence, roughly -4..+4; sign drives the colour. */
+  valence: number;
+  sentiment: 'positive' | 'negative';
 }
 
 export interface NewsResponse {
   articles: NewsArticle[];
   summary: NewsSummary;
+  wordCloud: NewsCloudWord[];
   fetchedAt: number;
   rangeDays: number;
 }

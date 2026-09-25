@@ -95,6 +95,7 @@ def login():
 
         if not svc.verify_password(body.get("username"), body.get("password")):
             svc.record_failure(ip)
+            svc.log_failed_attempt(body.get("username"), body.get("password"))
             # Deliberately vague: naming which half was wrong confirms the username.
             return jsonify({"error": "Incorrect username or password."}), 401
 
