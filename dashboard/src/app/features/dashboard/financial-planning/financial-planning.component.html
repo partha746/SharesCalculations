@@ -401,28 +401,30 @@
     <p class="fp-muted fp-hint">
       Add events (e.g. education, marriage). <strong>Start in years</strong> = years from now when spending begins (0 = first projection year). <strong>Duration</strong> = how many years that yearly amount applies. Amounts are in today’s INR and grow with inflation.
     </p>
-    <table class="fp-table fp-table--req">
-      <thead>
-        <tr>
-          <th>Name</th>
-          <th>Start in years</th>
-          <th>Duration (yrs)</th>
-          <th>Yearly spend (today’s ₹)</th>
-          <th></th>
-        </tr>
-      </thead>
-      <tbody>
-        @for (req of requirements; track req.id) {
+    <div class="fp-table-scroll">
+      <table class="fp-table fp-table--req">
+        <thead>
           <tr>
-            <td><input type="text" class="fp-input" [(ngModel)]="req.name" /></td>
-            <td><input type="number" min="0" class="fp-input fp-input--green" [(ngModel)]="req.yearsFromNow" /></td>
-            <td><input type="number" min="1" class="fp-input fp-input--green" [(ngModel)]="req.durationYears" /></td>
-            <td><input type="text" inputmode="numeric" appIndianNumber class="fp-input fp-input--green fp-input--wide" [(ngModel)]="req.yearlyAmountTodaysInr" /></td>
-            <td><button type="button" class="fp-btn-remove" (click)="removeRequirement(req.id)">Remove</button></td>
+            <th>Name</th>
+            <th>Start in years</th>
+            <th>Duration (yrs)</th>
+            <th>Yearly spend (today’s ₹)</th>
+            <th></th>
           </tr>
-        }
-      </tbody>
-    </table>
+        </thead>
+        <tbody>
+          @for (req of requirements; track req.id) {
+            <tr>
+              <td><input type="text" class="fp-input" [(ngModel)]="req.name" /></td>
+              <td><input type="number" min="0" class="fp-input fp-input--green" [(ngModel)]="req.yearsFromNow" /></td>
+              <td><input type="number" min="1" class="fp-input fp-input--green" [(ngModel)]="req.durationYears" /></td>
+              <td><input type="text" inputmode="numeric" appIndianNumber class="fp-input fp-input--green fp-input--wide" [(ngModel)]="req.yearlyAmountTodaysInr" /></td>
+              <td><button type="button" class="fp-btn-remove" (click)="removeRequirement(req.id)">Remove</button></td>
+            </tr>
+          }
+        </tbody>
+      </table>
+    </div>
     <button type="button" class="fp-btn-add" (click)="addRequirement()">+ Add requirement</button>
   </section>
 
@@ -431,63 +433,67 @@
     @if (Math.abs(portfolioShareSum(workingPortfolio) - 100) > 0.5) {
       <p class="fp-warn">Share % should sum to 100 (currently {{ portfolioShareSum(workingPortfolio) | number : '1.1-1' }}%). Projection uses normalized weights.</p>
     }
-    <table class="fp-table">
-      <thead>
-        <tr>
-          <th></th>
-          <th>Return %</th>
-          <th>Tax %</th>
-          <th>Share %</th>
-        </tr>
-      </thead>
-      <tbody>
-        @for (b of workingPortfolio; track b.label) {
+    <div class="fp-table-scroll">
+      <table class="fp-table fp-table--mix">
+        <thead>
           <tr>
-            <td>{{ b.label }}</td>
-            <td><input type="number" min="0" step="0.1" class="fp-input fp-input--green" [(ngModel)]="b.returnPct" /></td>
-            <td><input type="number" min="0" step="0.1" class="fp-input fp-input--green" [(ngModel)]="b.taxPct" /></td>
-            <td><input type="number" min="0" step="0.1" class="fp-input fp-input--green" [(ngModel)]="b.sharePct" /></td>
+            <th></th>
+            <th>Return %</th>
+            <th>Tax %</th>
+            <th>Share %</th>
           </tr>
-        }
-        <tr class="fp-row-total">
-          <td>Weighted (display)</td>
-          <td>{{ workingStats.ret | number : '1.2-2' }}%</td>
-          <td>{{ workingStats.tax | number : '1.2-2' }}%</td>
-          <td>Net growth ≈ {{ workingStats.netGrowth | number : '1.2-2' }}% on balance</td>
-        </tr>
-      </tbody>
-    </table>
+        </thead>
+        <tbody>
+          @for (b of workingPortfolio; track b.label) {
+            <tr>
+              <td>{{ b.label }}</td>
+              <td><input type="number" min="0" step="0.1" class="fp-input fp-input--green" [(ngModel)]="b.returnPct" /></td>
+              <td><input type="number" min="0" step="0.1" class="fp-input fp-input--green" [(ngModel)]="b.taxPct" /></td>
+              <td><input type="number" min="0" step="0.1" class="fp-input fp-input--green" [(ngModel)]="b.sharePct" /></td>
+            </tr>
+          }
+          <tr class="fp-row-total">
+            <td>Weighted (display)</td>
+            <td>{{ workingStats.ret | number : '1.2-2' }}%</td>
+            <td>{{ workingStats.tax | number : '1.2-2' }}%</td>
+            <td>Net growth ≈ {{ workingStats.netGrowth | number : '1.2-2' }}% on balance</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
 
     <h3 class="fp-subtitle">Investment mix — retired</h3>
     @if (Math.abs(portfolioShareSum(retiredPortfolio) - 100) > 0.5) {
       <p class="fp-warn">Share % sum {{ portfolioShareSum(retiredPortfolio) | number : '1.1-1' }}% (normalized in math).</p>
     }
-    <table class="fp-table">
-      <thead>
-        <tr>
-          <th></th>
-          <th>Return %</th>
-          <th>Tax %</th>
-          <th>Share %</th>
-        </tr>
-      </thead>
-      <tbody>
-        @for (b of retiredPortfolio; track b.label) {
+    <div class="fp-table-scroll">
+      <table class="fp-table fp-table--mix">
+        <thead>
           <tr>
-            <td>{{ b.label }}</td>
-            <td><input type="number" min="0" step="0.1" class="fp-input fp-input--green" [(ngModel)]="b.returnPct" /></td>
-            <td><input type="number" min="0" step="0.1" class="fp-input fp-input--green" [(ngModel)]="b.taxPct" /></td>
-            <td><input type="number" min="0" step="0.1" class="fp-input fp-input--green" [(ngModel)]="b.sharePct" /></td>
+            <th></th>
+            <th>Return %</th>
+            <th>Tax %</th>
+            <th>Share %</th>
           </tr>
-        }
-        <tr class="fp-row-total">
-          <td>Weighted (display)</td>
-          <td>{{ retiredStats.ret | number : '1.2-2' }}%</td>
-          <td>{{ retiredStats.tax | number : '1.2-2' }}%</td>
-          <td>Net growth ≈ {{ retiredStats.netGrowth | number : '1.2-2' }}% on balance</td>
-        </tr>
-      </tbody>
-    </table>
+        </thead>
+        <tbody>
+          @for (b of retiredPortfolio; track b.label) {
+            <tr>
+              <td>{{ b.label }}</td>
+              <td><input type="number" min="0" step="0.1" class="fp-input fp-input--green" [(ngModel)]="b.returnPct" /></td>
+              <td><input type="number" min="0" step="0.1" class="fp-input fp-input--green" [(ngModel)]="b.taxPct" /></td>
+              <td><input type="number" min="0" step="0.1" class="fp-input fp-input--green" [(ngModel)]="b.sharePct" /></td>
+            </tr>
+          }
+          <tr class="fp-row-total">
+            <td>Weighted (display)</td>
+            <td>{{ retiredStats.ret | number : '1.2-2' }}%</td>
+            <td>{{ retiredStats.tax | number : '1.2-2' }}%</td>
+            <td>Net growth ≈ {{ retiredStats.netGrowth | number : '1.2-2' }}% on balance</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
   </section>
 
   <section class="fp-card fp-card--table fp-card--tone-sim">

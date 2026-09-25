@@ -1,15 +1,20 @@
 <div class="stat-card">
   <div class="stat-card__title">{{ title }}</div>
-  <div class="stat-card__value">
-    @if (currency === 'USD' && value !== '') {
-      $ {{ value }}
-    } @else if (currency === 'INR' && value !== '') {
-      ₹ {{ value }}
-    } @else {
-      {{ value }}
-    }
-  </div>
+  <!-- Skipped entirely for title-only cards, which carry their figures in projected rows -->
+  @if (value !== '') {
+    <div class="stat-card__value">
+      @if (currency === 'USD') {
+        $ {{ value }}
+      } @else if (currency === 'INR') {
+        ₹ {{ value }}
+      } @else {
+        {{ value }}
+      }
+    </div>
+  }
   @if (sublabel) {
     <div class="stat-card__sublabel">{{ sublabel }}</div>
   }
+  <!-- Optional detail rows, so related figures can share a card instead of each taking one -->
+  <ng-content></ng-content>
 </div>

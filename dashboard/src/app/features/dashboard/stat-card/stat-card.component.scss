@@ -25,3 +25,19 @@
   color: #8b949e;
   margin-top: 0.25rem;
 }
+
+/* On a phone the grid collapses to one column, so there is no neighbouring card to
+   match heights with — the min-height only leaves dead space under the numbers. */
+@media (max-width: 768px) {
+  .stat-card {
+    min-width: 0;
+    min-height: 0;
+    padding: 0.7rem 0.85rem;
+  }
+  .stat-card__value {
+    font-size: 1.15rem;
+  }
+  .stat-card__sublabel {
+    font-size: 0.75rem;
+  }
+}

@@ -1,99 +1,168 @@
-/* --- Loading state: a dollar and a rupee orbiting each other, which is the USD->INR
-       conversion this dashboard is built around. --- */
+/* --- Loading state: a coin flipping between the two currencies this dashboard
+       converts across, over a ticker-style bar wave. --- */
 .dashboard-loading {
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 1.15rem;
-  padding: 4rem 2rem;
+  gap: 1.5rem;
+  padding: 4.5rem 2rem;
   text-align: center;
   color: #8b949e;
 }
+
+.fx-loader {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1.1rem;
+  /* Depth for the coin's rotateY; without it the flip reads as a flat squash. */
+  perspective: 620px;
+}
+
+.fx-loader__coin {
+  position: relative;
+  width: 62px;
+  height: 62px;
+  transform-style: preserve-3d;
+  animation: fx-flip 3.4s cubic-bezier(0.62, 0, 0.38, 1) infinite;
+}
+.fx-loader__face {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  border: 1px solid;
+  font-size: 1.55rem;
+  font-weight: 700;
+  line-height: 1;
+  backface-visibility: hidden;
+}
+.fx-loader__face--usd {
+  color: #3fb950;
+  border-color: rgba(63, 185, 80, 0.45);
+  background: radial-gradient(circle at 32% 26%, rgba(63, 185, 80, 0.3), rgba(63, 185, 80, 0.06) 72%);
+  box-shadow: 0 0 26px rgba(63, 185, 80, 0.2), inset 0 0 14px rgba(63, 185, 80, 0.12);
+}
+.fx-loader__face--inr {
+  color: #58a6ff;
+  border-color: rgba(88, 166, 255, 0.45);
+  background: radial-gradient(circle at 32% 26%, rgba(88, 166, 255, 0.3), rgba(88, 166, 255, 0.06) 72%);
+  box-shadow: 0 0 26px rgba(88, 166, 255, 0.2), inset 0 0 14px rgba(88, 166, 255, 0.12);
+  /* Pre-turned, so it faces the viewer at the halfway point of the flip */
+  transform: rotateY(180deg);
+}
+
+.fx-loader__bars {
+  display: flex;
+  align-items: flex-end;
+  gap: 4px;
+  height: 32px;
+
+  span {
+    width: 6px;
+    height: 100%;
+    border-radius: 2px;
+    transform-origin: bottom;
+    background: linear-gradient(180deg, #58a6ff 0%, #3fb950 100%);
+    animation: fx-bar 1.5s ease-in-out infinite;
+  }
+  /* Staggered so the peak travels across, like a ticker rather than a pulse */
+  span:nth-child(1) { animation-delay: 0s; }
+  span:nth-child(2) { animation-delay: 0.1s; }
+  span:nth-child(3) { animation-delay: 0.2s; }
+  span:nth-child(4) { animation-delay: 0.3s; }
+  span:nth-child(5) { animation-delay: 0.4s; }
+  span:nth-child(6) { animation-delay: 0.5s; }
+  span:nth-child(7) { animation-delay: 0.6s; }
+}
+
+.fx-loader__track {
+  position: relative;
+  width: 200px;
+  height: 3px;
+  border-radius: 999px;
+  background: #21262d;
+  overflow: hidden;
+
+  span {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 38%;
+    height: 100%;
+    border-radius: inherit;
+    background: linear-gradient(90deg, transparent, #58a6ff, #3fb950, transparent);
+    animation: fx-sweep 1.7s ease-in-out infinite;
+  }
+}
+
 .dashboard-loading__text {
+  position: relative;
+  /* Fixed height: the lines are stacked, so the block must not resize as they swap */
+  height: 1.4em;
+  width: 100%;
   margin: 0;
   font-size: 0.92rem;
   letter-spacing: 0.01em;
 }
-
-.fx-loader {
-  position: relative;
-  width: 86px;
-  height: 86px;
-}
-.fx-loader__ring {
+.fx-loader__stage {
   position: absolute;
   inset: 0;
-  border-radius: 50%;
-  border: 1px solid #21262d;
-  animation: fx-ring 2.4s ease-in-out infinite;
+  opacity: 0;
+  animation: fx-stage 6s ease-in-out infinite;
+
+  &:nth-child(2) { animation-delay: 2s; }
+  &:nth-child(3) { animation-delay: 4s; }
 }
-.fx-loader__orbit {
+
+.fx-loader__sr {
   position: absolute;
-  inset: 0;
-  animation: fx-orbit 2.2s linear infinite;
-}
-.fx-loader__coin {
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  width: 34px;
-  height: 34px;
-  margin: -17px 0 0 -17px;
-  display: grid;
-  place-items: center;
-  border-radius: 50%;
-  font-size: 1.05rem;
-  font-weight: 600;
-  line-height: 1;
-
-  /* The orbit rotates the pair; counter-rotating the glyph keeps it upright. */
-  > span {
-    display: block;
-    animation: fx-orbit-counter 2.2s linear infinite;
-  }
-}
-.fx-loader__coin--usd {
-  transform: translateX(-26px);
-  color: #3fb950;
-  background: rgba(63, 185, 80, 0.12);
-  border: 1px solid rgba(63, 185, 80, 0.35);
-}
-.fx-loader__coin--inr {
-  transform: translateX(26px);
-  color: #58a6ff;
-  background: rgba(56, 139, 253, 0.12);
-  border: 1px solid rgba(56, 139, 253, 0.35);
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
 }
 
-.fx-loader__dots span {
-  animation: fx-dot 1.4s ease-in-out infinite;
-
-  &:nth-child(2) { animation-delay: 0.2s; }
-  &:nth-child(3) { animation-delay: 0.4s; }
+@keyframes fx-flip {
+  0%, 34% { transform: rotateY(0deg); }
+  50%, 84% { transform: rotateY(180deg); }
+  100% { transform: rotateY(360deg); }
 }
-
-@keyframes fx-orbit {
-  to { transform: rotate(360deg); }
+@keyframes fx-bar {
+  0%, 100% { transform: scaleY(0.22); opacity: 0.45; }
+  50% { transform: scaleY(1); opacity: 1; }
 }
-@keyframes fx-orbit-counter {
-  to { transform: rotate(-360deg); }
+/* Track is 200px and the sweep 38% of it (76px), so 264% lands it exactly off the
+   right edge — any further and it idles out of sight. */
+@keyframes fx-sweep {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(264%); }
 }
-@keyframes fx-ring {
-  0%, 100% { transform: scale(1); opacity: 0.45; }
-  50% { transform: scale(1.09); opacity: 1; }
-}
-@keyframes fx-dot {
-  0%, 60%, 100% { opacity: 0.25; }
-  30% { opacity: 1; }
+@keyframes fx-stage {
+  0%, 2% { opacity: 0; transform: translateY(6px); }
+  8%, 28% { opacity: 1; transform: translateY(0); }
+  34%, 100% { opacity: 0; transform: translateY(-6px); }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .fx-loader__ring,
-  .fx-loader__orbit,
-  .fx-loader__coin > span,
-  .fx-loader__dots span {
+  .fx-loader__coin,
+  .fx-loader__bars span,
+  .fx-loader__track span,
+  .fx-loader__stage {
     animation: none;
+  }
+  /* The stages start transparent, so pin the first one rather than showing nothing */
+  .fx-loader__stage {
+    opacity: 0;
+    &:first-child { opacity: 1; }
+  }
+  .fx-loader__bars span {
+    transform: scaleY(0.6);
   }
 }
 
@@ -999,73 +1068,49 @@
   // third track a wide screen has room for, stranding dead space on the right.
   grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
 }
-.realised-profit-block {
+// Every track is 1fr, so the three cards are always equal width whether the viewport
+// fits three across, two, or one.
+.stat-grid--profits {
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+}
+
+/* Secondary figures sharing a stat card with the headline number */
+.stat-rows {
+  margin: 0.75rem 0 0;
+  padding-top: 0.6rem;
+  border-top: 1px solid #21262d;
   display: flex;
   flex-direction: column;
-  gap: 1rem;
-  background: #161b22;
-  border: 1px solid #30363d;
-  border-radius: 8px;
-  padding: 1rem 1.25rem;
-  min-width: 280px;
-  app-stat-card {
-    flex: 0 0 auto;
+  gap: 0.3rem;
+  font-size: 0.82rem;
+}
+.stat-rows__row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.75rem;
+  dt {
+    color: #8b949e;
   }
-  app-stat-card::ng-deep .stat-card {
-    background: transparent;
-    border: none;
-    border-radius: 0;
-    padding: 0;
-    min-height: 0;
-    height: auto;
-  }
-  app-stat-card::ng-deep .stat-card__value {
-    word-break: break-word;
-  }
-  app-stat-card::ng-deep .stat-card__sublabel {
-    white-space: pre-line;
+  dd {
+    margin: 0;
+    color: #c9d1d9;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
   }
 }
-.sold-pie-wrap {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 0.5rem;
-  padding-top: 0.25rem;
+.stat-rows__neg {
+  color: #f0883e;
+}
+/* Separates the sale maths (value less tax) from the profit figures below it */
+.stat-rows__row--sep {
+  margin-top: 0.3rem;
+  padding-top: 0.45rem;
   border-top: 1px solid #21262d;
 }
-.sold-pie {
-  width: 80px;
-  height: 80px;
-  border-radius: 50%;
-  flex-shrink: 0;
-}
-.sold-pie-legend {
-  display: flex;
-  justify-content: center;
-  gap: 1rem;
-  font-size: 0.75rem;
-  color: #8b949e;
-}
-.sold-pie-legend__item {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.35rem;
-}
-.sold-pie-legend__dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  flex-shrink: 0;
-}
-.sold-pie-legend__dot--rsu {
-  background: #388bfd;
-}
-.sold-pie-legend__dot--espp {
-  background: #7ee787;
-}
-.sold-pie-no-data {
-  font-size: 0.75rem;
+/* Share-of-total that trails a rupee figure, muted so the money still leads */
+.stat-rows__pct {
+  margin-left: 0.4rem;
   color: #8b949e;
 }
 .holdings-chart-section {
@@ -1111,71 +1156,49 @@
 .holdings-chart {
   display: block;
 }
-.breakdown-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
-  gap: 1rem;
-}
-.breakdown-card {
-  background: #161b22;
-  border: 1px solid #30363d;
-  border-radius: 8px;
-  padding: 1rem 1.25rem;
-  h3 {
-    margin: 0 0 0.5rem;
-    font-size: 1rem;
+/* RSU-vs-ESPP comparison, filling its stat card the way stat-rows fill theirs */
+.breakdown-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.82rem;
+  margin-top: 0.75rem;
+  th,
+  td {
+    padding: 0.3rem 0 0.3rem 1.1rem;
+    text-align: right;
+    white-space: nowrap;
+    font-variant-numeric: tabular-nums;
   }
-  ul {
-    margin: 0;
-    padding-left: 1.25rem;
-    line-height: 1.6;
+  // 1% lets auto table layout shrink the value columns to their content, which sends
+  // all the slack to the label column — figures stay grouped at the right edge
+  // instead of drifting apart as the card widens.
+  thead th:not(:first-child),
+  tbody td {
+    width: 1%;
+  }
+  thead th {
+    font-size: 0.72rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
     color: #8b949e;
-    font-size: 0.9rem;
+    border-bottom: 1px solid #30363d;
   }
-}
-.breakdown-card--pie {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  .breakdown-pie-title {
-    margin-bottom: 0.75rem;
+  // Row labels read as prose, so they stay left-aligned while the figures line up right.
+  // They may wrap; the numbers never do.
+  thead th:first-child,
+  tbody th {
+    padding-left: 0;
+    white-space: normal;
   }
-}
-.breakdown-pie-wrap {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 0.5rem;
-}
-.breakdown-pie {
-  width: 100px;
-  height: 100px;
-  border-radius: 50%;
-  flex-shrink: 0;
-}
-.breakdown-pie-legend {
-  display: flex;
-  gap: 0.75rem;
-  font-size: 0.8rem;
-  color: #8b949e;
-}
-.breakdown-pie-legend__item {
-  display: flex;
-  align-items: center;
-  gap: 0.35rem;
-}
-.breakdown-pie-legend__dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  flex-shrink: 0;
-}
-.breakdown-pie-legend__dot--nsu {
-  background: #388bfd;
-}
-.breakdown-pie-legend__dot--espp {
-  background: #7ee787;
+  tbody th {
+    text-align: left;
+    font-weight: 400;
+    color: #8b949e;
+  }
+  tbody tr + tr th,
+  tbody tr + tr td {
+    border-top: 1px solid #21262d;
+  }
 }
 
 .tab-section {
@@ -2043,13 +2066,18 @@ input[type='month'] {
     box-shadow: 0 -1px 0 #30363d;
   }
 }
-/* The extra row is the sticky totals footer, which would otherwise eat a body row */
+/* The two extra rows are the sticky totals footer, which would otherwise eat body rows */
 .playground-table-scroll--tax {
-  max-height: calc(2.75rem + (var(--playground-scroll-rows) + 1) * var(--playground-scroll-row));
+  max-height: calc(2.75rem + (var(--playground-scroll-rows) + 2) * var(--playground-scroll-row));
 }
 .playground-tax-table__totals td {
   border-top: 2px solid #30363d;
   white-space: nowrap;
+}
+/* Second footer line: a thin rule keeps it reading as part of the same totals block */
+.playground-tax-table__totals--net td {
+  border-top: 1px solid #21262d;
+  color: #7ee787;
 }
 .playground-table-scroll--multi {
   max-height: calc(8rem + var(--playground-scroll-rows) * var(--playground-scroll-row));
@@ -3414,14 +3442,34 @@ input[type='month'] {
    Mobile / responsive (phones, e.g. iPhone Pro Max ~430px)
    ============================================================ */
 @media (max-width: 768px) {
+  /* Sections sit closer together; a phone screen has no room for desktop breathing space */
+  .dashboard-section {
+    margin-bottom: 1rem;
+  }
+
   /* Overview cards: single column, drop desktop min-widths so nothing overflows the screen */
-  .stat-grid--primary {
+  .stat-grid--primary,
+  .stat-grid--profits {
     grid-template-columns: 1fr;
   }
+  .stat-grid {
+    gap: 0.6rem;
+  }
+  /* Same reasoning as the min-height drop in stat-card: one column needs no height floor */
   .live-price-block,
   .total-holdings-block {
     min-width: 0;
+    min-height: 0;
+    padding: 0.7rem 0.85rem;
   }
+
+  /* Detail rows tuck under their headline instead of floating away from it */
+  .stat-rows {
+    margin-top: 0.5rem;
+    padding-top: 0.45rem;
+    font-size: 0.78rem;
+  }
+
   .live-price-block__row--main,
   .total-holdings-block__row--main {
     font-size: 1.25rem;
@@ -3471,9 +3519,13 @@ input[type='month'] {
     -webkit-overflow-scrolling: touch;
   }
 
-  /* Breakdown + summaries stack */
-  .breakdown-grid {
-    grid-template-columns: 1fr;
+  /* Tighter cells so both RSU and ESPP columns fit a phone width */
+  .breakdown-table {
+    font-size: 0.78rem;
+    th,
+    td {
+      padding: 0.3rem 0 0.3rem 0.6rem;
+    }
   }
   .holdings-summary {
     gap: 0.5rem 1rem;

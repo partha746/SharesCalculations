@@ -73,6 +73,7 @@ import {
   MfOverlapAccount,
   MfOverlapPair,
   MfOverlapResponse,
+  NsuEsppStats,
   SoldRow,
 } from '../../core/models/dashboard.types';
 
@@ -80,6 +81,8 @@ import {
 export interface PlayTaxRecommendationRow extends HoldingRow {
   /** Tax to pay (INR) for the recommended qty at simulation target price */
   taxToPayAtTargetInr: number;
+  /** Gross sale proceeds (INR) for the recommended qty at simulation target price, before tax */
+  amountAtTargetInr: number;
   /** Number of shares to sell from this lot (≤ row.qty when capped by simulation) */
   qtyToSell: number;
 }
@@ -3707,22 +3710,27 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
     let holdingsFiltered = this.holdings;
     if (termFilter === 'long') holdingsFiltered = this.holdings.filter(isLongTerm);
     else if (termFilter === 'short') holdingsFiltered = this.holdings.filter((r) => !isLongTerm(r));
-    const list = holdingsFiltered.map((row): HoldingRow & { taxToPayAtTargetInr: number } => {
+    type ScoredLot = HoldingRow & { taxToPayAtTargetInr: number; amountAtTargetInr: number };
+    const list = holdingsFiltered.map((row): ScoredLot => {
       const taxPct = (row.taxPercent ?? 0) / 100;
       let taxToPayAtTargetInr: number;
+      let amountAtTargetInr: number;
       if (targetPrice != null && targetPrice > 0 && rate > 0) {
         const gainPerShareUsd = targetPrice - row.buyPriceUsd;
         const gainInr = gainPerShareUsd * row.qty * rate;
         taxToPayAtTargetInr = Math.max(0, gainInr) * taxPct;
+        amountAtTargetInr = targetPrice * row.qty * rate;
       } else {
         taxToPayAtTargetInr = row.taxToPayInr ?? 0;
+        // No target set, so value the lot at today's price: the net in hand plus the tax on it.
+        amountAtTargetInr = (row.netIfSellTodayInr ?? 0) + (row.taxToPayInr ?? 0);
       }
-      return { ...row, taxToPayAtTargetInr };
+      return { ...row, taxToPayAtTargetInr, amountAtTargetInr };
     });
     // Sort by tax per share at target (lowest first) so total tax is minimized, not just tax rate
     list.sort((a, b) => {
-      const perShareA = a.qty > 0 ? (a as { taxToPayAtTargetInr: number }).taxToPayAtTargetInr / a.qty : 0;
-      const perShareB = b.qty > 0 ? (b as { taxToPayAtTargetInr: number }).taxToPayAtTargetInr / b.qty : 0;
+      const perShareA = a.qty > 0 ? a.taxToPayAtTargetInr / a.qty : 0;
+      const perShareB = b.qty > 0 ? b.taxToPayAtTargetInr / b.qty : 0;
       return perShareA - perShareB;
     });
 
@@ -3735,7 +3743,8 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
       const ratio = row.qty > 0 ? qtyToSell / row.qty : 0;
       out.push({
         ...row,
-        taxToPayAtTargetInr: Math.round((row as { taxToPayAtTargetInr: number }).taxToPayAtTargetInr * ratio * 100) / 100,
+        taxToPayAtTargetInr: Math.round(row.taxToPayAtTargetInr * ratio * 100) / 100,
+        amountAtTargetInr: Math.round(row.amountAtTargetInr * ratio * 100) / 100,
         qtyToSell,
       });
     }
@@ -3750,6 +3759,19 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
   /** Playground: total shares in the recommendation (sum of qtyToSell) */
   get playTaxRecommendationTotalShares(): number {
     return this.playTaxRecommendations.reduce((sum, r) => sum + r.qtyToSell, 0);
+  }
+  /** Playground: gross sale amount (INR) for recommended lots at simulation target price */
+  get playTaxRecommendationTotalAmountInr(): number | null {
+    const rec = this.playTaxRecommendations;
+    if (rec.length === 0) return null;
+    return Math.round(rec.reduce((sum, r) => sum + r.amountAtTargetInr, 0) * 100) / 100;
+  }
+  /** Playground: what actually reaches the bank — gross sale amount less tax. */
+  get playTaxRecommendationTotalNetInr(): number | null {
+    const amount = this.playTaxRecommendationTotalAmountInr;
+    const tax = this.playTaxRecommendationTotalTaxInr;
+    if (amount == null || tax == null) return null;
+    return Math.round((amount - tax) * 100) / 100;
   }
   /** Playground: when simulation has a target and filtered lots don't cover it, shares short; null otherwise */
   get playTaxRecommendationShortfall(): number | null {
@@ -5025,38 +5047,20 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
     return total === 0 ? 100 : 100 - this.soldRsuPercent;
   }
 
-  /** True when we have a valid RSU+ESPP breakdown for the realised profit pie (so we don't show misleading 50/50). */
+  /** Columns for the RSU/ESPP comparison table; only the grant types we actually hold. */
+  get breakdownColumns(): Array<{ label: string; stats: NsuEsppStats; profitSharePct: number | null }> {
+    const cols: Array<{ label: string; stats: NsuEsppStats }> = [];
+    if (this.data?.nsu) cols.push({ label: 'RSU', stats: this.data.nsu });
+    if (this.data?.espp) cols.push({ label: 'ESPP', stats: this.data.espp });
+    const total = cols.reduce((s, c) => s + (c.stats.profitAfterTax || 0), 0);
+    // null rather than a 50/50 guess when there is no profit to divide up
+    return cols.map((c) => ({ ...c, profitSharePct: total > 0 ? (c.stats.profitAfterTax / total) * 100 : null }));
+  }
+
+  /** True when we have a real RSU/ESPP split of the sale value (so we don't show a misleading 50/50). */
   get hasSoldBreakdown(): boolean {
     const total = (this.data?.soldValueRsuInr ?? 0) + (this.data?.soldValueEsppInr ?? 0);
     return total > 0;
-  }
-
-  /** CSS conic-gradient for RSU vs ESPP pie (RSU from 12 o'clock). */
-  get soldPieConicGradient(): string {
-    const rsu = this.soldRsuPercent;
-    return `conic-gradient(#388bfd 0% ${rsu}%, #7ee787 ${rsu}% 100%)`;
-  }
-
-  /** RSU (nsu) share of total profit after tax (0–100) for breakdown pie; when both nsu and espp exist. */
-  get breakdownNsuPercent(): number {
-    if (!this.data?.nsu || !this.data?.espp) return 50;
-    const nsu = this.data.nsu.profitAfterTax ?? 0;
-    const espp = this.data.espp.profitAfterTax ?? 0;
-    const total = nsu + espp;
-    return total === 0 ? 50 : (nsu / total) * 100;
-  }
-
-  /** ESPP share of total profit after tax (0–100) for breakdown pie. */
-  get breakdownEsppPercent(): number {
-    if (!this.data?.nsu || !this.data?.espp) return 50;
-    const total = (this.data.nsu?.profitAfterTax ?? 0) + (this.data.espp?.profitAfterTax ?? 0);
-    return total === 0 ? 50 : 100 - this.breakdownNsuPercent;
-  }
-
-  /** CSS conic-gradient for RSU vs ESPP breakdown pie (profit after tax). */
-  get breakdownPieConicGradient(): string {
-    const nsu = this.breakdownNsuPercent;
-    return `conic-gradient(#388bfd 0% ${nsu}%, #7ee787 ${nsu}% 100%)`;
   }
 
   formatInr(n: number): string {

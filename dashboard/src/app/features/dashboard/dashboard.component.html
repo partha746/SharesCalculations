@@ -1,15 +1,22 @@
 @if (loading && !data) {
   <div class="dashboard-loading" role="status" aria-live="polite">
     <div class="fx-loader" aria-hidden="true">
-      <span class="fx-loader__ring"></span>
-      <span class="fx-loader__orbit">
-        <span class="fx-loader__coin fx-loader__coin--usd"><span>$</span></span>
-        <span class="fx-loader__coin fx-loader__coin--inr"><span>&#8377;</span></span>
-      </span>
+      <div class="fx-loader__coin">
+        <span class="fx-loader__face fx-loader__face--usd">$</span>
+        <span class="fx-loader__face fx-loader__face--inr">&#8377;</span>
+      </div>
+      <div class="fx-loader__bars">
+        <span></span><span></span><span></span><span></span><span></span><span></span><span></span>
+      </div>
+      <div class="fx-loader__track"><span></span></div>
     </div>
-    <p class="dashboard-loading__text">
-      Loading dashboard<span class="fx-loader__dots" aria-hidden="true"><span>.</span><span>.</span><span>.</span></span>
+    <!-- Cycles through the work the dashboard call actually does, so the wait reads as progress -->
+    <p class="dashboard-loading__text" aria-hidden="true">
+      <span class="fx-loader__stage">Fetching the live NVDA price</span>
+      <span class="fx-loader__stage">Converting USD to INR</span>
+      <span class="fx-loader__stage">Working out tax on every lot</span>
     </p>
+    <span class="fx-loader__sr">Loading dashboard</span>
   </div>
 } @else if (error && !data) {
   <div class="dashboard-error">
@@ -318,75 +325,105 @@
 
   <section class="dashboard-section">
     <h2 class="section-title">Profits & tax</h2>
-    <div class="stat-grid">
-      <app-stat-card title="In bank if you sell now" [value]="formatInr(data.netInBankIfSellNow)" sublabel="Total value − tax (proceeds in hand)" currency="INR"></app-stat-card>
-      <app-stat-card title="Unrealised profit (after tax)" [value]="formatInr(data.unrealisedProfitAfterTax)" sublabel="Gain − estimated tax when sold" currency="INR"></app-stat-card>
-      <app-stat-card title="Unrealised profit (before tax)" [value]="formatInr(data.unrealisedProfitBeforeTax)" sublabel="Gain before tax" currency="INR"></app-stat-card>
-      <app-stat-card title="Total tax to pay" [value]="formatInr(data.totalTaxToPay)" currency="INR"></app-stat-card>
-      @if (data.realisedProfit != null) {
-        <div class="realised-profit-block">
-          <app-stat-card
-            title="Realised profit"
-            [value]="formatInr(data.realisedProfit)"
-            [sublabel]="(data.soldTotalQty != null && data.soldTotalValueInr != null) ? (data.soldTotalQty + ' shares sold\n₹ ' + formatInr(data.soldTotalValueInr) + ' total') : ''"
-            currency="INR"></app-stat-card>
-          <div class="sold-pie-wrap">
-            @if (hasSoldBreakdown) {
-              <div class="sold-pie" [style.background]="soldPieConicGradient" title="RSU {{ soldRsuPercent | number:'1.1-1' }}% · ESPP {{ soldEsppPercent | number:'1.1-1' }}%"></div>
-              <div class="sold-pie-legend">
-                <span class="sold-pie-legend__item"><span class="sold-pie-legend__dot sold-pie-legend__dot--rsu"></span> RSU {{ soldRsuPercent | number:'1.1-1' }}%</span>
-                <span class="sold-pie-legend__item"><span class="sold-pie-legend__dot sold-pie-legend__dot--espp"></span> ESPP {{ soldEsppPercent | number:'1.1-1' }}%</span>
-              </div>
-            } @else {
-              <span class="sold-pie-no-data">No RSU/ESPP breakdown</span>
-            }
+    <div class="stat-grid stat-grid--profits">
+      <app-stat-card title="In bank if you sell now" [value]="formatInr(data.netInBankIfSellNow)" sublabel="Proceeds in hand after tax" currency="INR">
+        <dl class="stat-rows">
+          <div class="stat-rows__row">
+            <dt>Position value</dt>
+            <dd>₹ {{ formatInr(data.totalValueInr) }}</dd>
           </div>
-        </div>
+          <div class="stat-rows__row">
+            <dt>Tax to pay</dt>
+            <dd class="stat-rows__neg">− ₹ {{ formatInr(data.totalTaxToPay) }}</dd>
+          </div>
+          <div class="stat-rows__row stat-rows__row--sep">
+            <dt>Unrealised profit (before tax)</dt>
+            <dd>₹ {{ formatInr(data.unrealisedProfitBeforeTax) }}</dd>
+          </div>
+          <div class="stat-rows__row">
+            <dt>Unrealised profit (after tax)</dt>
+            <dd>₹ {{ formatInr(data.unrealisedProfitAfterTax) }}</dd>
+          </div>
+        </dl>
+      </app-stat-card>
+      @if (data.realisedProfit != null) {
+        <app-stat-card title="Realised profit" [value]="formatInr(data.realisedProfit)" sublabel="Booked on shares already sold" currency="INR">
+          <dl class="stat-rows">
+            @if (data.soldTotalQty != null) {
+              <div class="stat-rows__row">
+                <dt>Shares sold</dt>
+                <dd>{{ data.soldTotalQty }}</dd>
+              </div>
+            }
+            @if (data.soldTotalValueInr != null) {
+              <div class="stat-rows__row">
+                <dt>Sale value</dt>
+                <dd>₹ {{ formatInr(data.soldTotalValueInr) }}</dd>
+              </div>
+            }
+            @if (hasSoldBreakdown) {
+              <div class="stat-rows__row stat-rows__row--sep">
+                <dt>From RSU</dt>
+                <dd>₹ {{ formatInrOrDash(data.soldValueRsuInr) }} <span class="stat-rows__pct">{{ soldRsuPercent | number:'1.1-1' }}%</span></dd>
+              </div>
+              <div class="stat-rows__row">
+                <dt>From ESPP</dt>
+                <dd>₹ {{ formatInrOrDash(data.soldValueEsppInr) }} <span class="stat-rows__pct">{{ soldEsppPercent | number:'1.1-1' }}%</span></dd>
+              </div>
+            }
+          </dl>
+        </app-stat-card>
+      }
+      @if (data.nsu || data.espp) {
+        <app-stat-card title="Breakdown (RSU / ESPP)">
+          <table class="breakdown-table">
+            <thead>
+              <tr>
+                <th scope="col"></th>
+                @for (c of breakdownColumns; track c.label) {
+                  <th scope="col">{{ c.label }}</th>
+                }
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <th scope="row">Quantity</th>
+                @for (c of breakdownColumns; track c.label) {
+                  <td>{{ c.stats.qty }}</td>
+                }
+              </tr>
+              <tr>
+                <th scope="row">Profit after tax</th>
+                @for (c of breakdownColumns; track c.label) {
+                  <td>₹ {{ formatInr(c.stats.profitAfterTax) }}</td>
+                }
+              </tr>
+              @if (breakdownColumns.length > 1) {
+                <tr>
+                  <th scope="row">Share of profit</th>
+                  @for (c of breakdownColumns; track c.label) {
+                    <td>{{ c.profitSharePct == null ? '—' : (c.profitSharePct | number:'1.1-1') + '%' }}</td>
+                  }
+                </tr>
+              }
+              <tr>
+                <th scope="row">Avg buy price</th>
+                @for (c of breakdownColumns; track c.label) {
+                  <td>$ {{ formatUsd(c.stats.avgBuyPrice) }}</td>
+                }
+              </tr>
+              <tr>
+                <th scope="row">Avg profit</th>
+                @for (c of breakdownColumns; track c.label) {
+                  <td>{{ c.stats.avgProfitPercent | number:'1.1-1' }}%</td>
+                }
+              </tr>
+            </tbody>
+          </table>
+        </app-stat-card>
       }
     </div>
   </section>
-
-  @if (data.nsu || data.espp) {
-    <section class="dashboard-section">
-      <h2 class="section-title">Breakdown (RSU / ESPP)</h2>
-      <div class="breakdown-grid">
-        @if (data.nsu) {
-          <div class="breakdown-card">
-            <h3>RSU</h3>
-            <ul>
-              <li>Quantity: {{ data.nsu.qty }}</li>
-              <li>Profit after tax: ₹ {{ formatInr(data.nsu.profitAfterTax) }}</li>
-              <li>Avg buy price: $ {{ formatUsd(data.nsu.avgBuyPrice) }}</li>
-              <li>Avg profit: {{ data.nsu.avgProfitPercent | number:'1.1-1' }}%</li>
-            </ul>
-          </div>
-        }
-        @if (data.espp) {
-          <div class="breakdown-card">
-            <h3>ESPP</h3>
-            <ul>
-              <li>Quantity: {{ data.espp.qty }}</li>
-              <li>Profit after tax: ₹ {{ formatInr(data.espp.profitAfterTax) }}</li>
-              <li>Avg buy price: $ {{ formatUsd(data.espp.avgBuyPrice) }}</li>
-              <li>Avg profit: {{ data.espp.avgProfitPercent | number:'1.1-1' }}%</li>
-            </ul>
-          </div>
-        }
-        @if (data.nsu && data.espp) {
-          <div class="breakdown-card breakdown-card--pie">
-            <h3 class="breakdown-pie-title">Profit after tax</h3>
-            <div class="breakdown-pie-wrap">
-              <div class="breakdown-pie" [style.background]="breakdownPieConicGradient" title="RSU {{ breakdownNsuPercent | number:'1.1-1' }}% · ESPP {{ breakdownEsppPercent | number:'1.1-1' }}%"></div>
-              <div class="breakdown-pie-legend">
-                <span class="breakdown-pie-legend__item"><span class="breakdown-pie-legend__dot breakdown-pie-legend__dot--nsu"></span> RSU {{ breakdownNsuPercent | number:'1.1-1' }}%</span>
-                <span class="breakdown-pie-legend__item"><span class="breakdown-pie-legend__dot breakdown-pie-legend__dot--espp"></span> ESPP {{ breakdownEsppPercent | number:'1.1-1' }}%</span>
-              </div>
-            </div>
-          </div>
-        }
-      </div>
-    </section>
-  }
 
   <section class="dashboard-section tab-section">
     <div class="tab-bar">
@@ -1232,6 +1269,7 @@
                 <th>Buy date</th>
                 <th>Buy price (USD)</th>
                 <th>Qty</th>
+                <th>Amount at target (INR)</th>
                 <th>Tax %</th>
                 <th>Tax to pay at target (INR)</th>
               </tr>
@@ -1244,6 +1282,7 @@
                   <td>{{ formatDate(row.buyDate) }}</td>
                   <td>{{ formatCell(row, 'buyPriceUsd') }}</td>
                   <td>{{ row.qtyToSell }}{{ row.qtyToSell < row.qty ? ' of ' + row.qty : '' }}</td>
+                  <td>₹ {{ formatInr(row.amountAtTargetInr) }}</td>
                   <td>{{ row.taxPercent | number:'1.1-1' }}%</td>
                   <td>₹ {{ formatInr(row.taxToPayAtTargetInr) }}</td>
                 </tr>
@@ -1252,9 +1291,19 @@
             @if (playTaxRecommendationTotalTaxInr != null) {
               <tfoot>
                 <tr class="playground-tax-table__totals">
-                  <td colspan="6"><strong>Total tax at target price (for recommended lots)</strong></td>
+                  <td colspan="4"><strong>Total at target price (for recommended lots)</strong></td>
+                  <td><strong>{{ playTaxRecommendationTotalShares }}</strong></td>
+                  <td><strong>₹ {{ formatInrOrDash(playTaxRecommendationTotalAmountInr) }}</strong></td>
+                  <td></td>
                   <td><strong>₹ {{ formatInr(playTaxRecommendationTotalTaxInr) }}</strong></td>
                 </tr>
+                @if (playTaxRecommendationTotalNetInr != null) {
+                  <tr class="playground-tax-table__totals playground-tax-table__totals--net">
+                    <td colspan="5"><strong>In bank after tax</strong></td>
+                    <td><strong>₹ {{ formatInrOrDash(playTaxRecommendationTotalNetInr) }}</strong></td>
+                    <td colspan="2"></td>
+                  </tr>
+                }
               </tfoot>
             }
           </table>
