@@ -268,7 +268,9 @@ def _record_extended_price(session):
 
     try:
         rupee_conv_obj = gather_data.RupeeConv()
-        quote = rupee_conv_obj.nasdaq_quote("NVDA")
+        # Fresh every tick (a cached quote would be recorded twice); this also keeps the
+        # shared quote cache warm for request handlers during extended hours.
+        quote = rupee_conv_obj.nasdaq_quote("NVDA", max_age=0)
         if not quote or not quote.get("price"):
             return
         status = (quote.get("status") or "").lower()

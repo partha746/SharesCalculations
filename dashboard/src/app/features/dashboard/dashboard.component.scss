@@ -1137,6 +1137,107 @@
   font-size: 0.85em;
   opacity: 0.85;
 }
+
+/* Full-screen view of one overview card; fitFullscreenCard() sets the body's width and zoom. */
+.overview-card__body {
+  // A column like the card itself, so the rows' margins still add up instead of collapsing.
+  display: flex;
+  flex-direction: column;
+}
+.live-price-block__title,
+.total-holdings-block__title {
+  display: flex;
+  align-items: center;
+}
+.overview-card__fs-btn {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.6rem;
+  height: 1.6rem;
+  // Negative margins keep the button from making the title row taller.
+  margin: -0.4rem -0.5rem -0.4rem auto;
+  padding: 0;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  color: #6e7681;
+  cursor: pointer;
+  // The live card ignores clicks while refreshing; exiting full screen must still work then.
+  pointer-events: auto;
+  transition: color 0.15s ease, background-color 0.15s ease, border-color 0.15s ease;
+  &:hover {
+    color: #e6edf3;
+    background: #21262d;
+    border-color: #30363d;
+  }
+  &:focus-visible {
+    outline: 2px solid #58a6ff;
+    outline-offset: 1px;
+  }
+  svg {
+    width: 1rem;
+    height: 1rem;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 2;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+}
+.overview-card.overview-card--fullscreen {
+  position: fixed;
+  inset: 0;
+  z-index: 2000;
+  width: auto;
+  height: auto;
+  min-width: 0;
+  min-height: 0;
+  margin: 0;
+  padding: clamp(1rem, 4vmin, 3rem);
+  border: 0;
+  border-radius: 0;
+  overflow: auto;
+  // The body's auto margins centre it. Centring through the flex box instead would put the
+  // top of a body taller than the screen out of reach of scrolling.
+  justify-content: flex-start;
+  .overview-card__body {
+    margin: auto;
+  }
+  // Elsewhere it reaches into the card's padding; here that would poke past the zoomed box
+  // and let the screen scroll sideways.
+  .overview-card__fs-btn {
+    margin-right: 0;
+  }
+  // Lets a phone fit the long value rows by wrapping them rather than shrinking the text.
+  .total-holdings-block__row,
+  .total-holdings-block__breakdown-row {
+    flex-wrap: wrap;
+  }
+  .total-holdings-block__breakdown-row {
+    row-gap: 0.1rem;
+  }
+  // A wrapped amount stays at the right edge, under the label it belongs to.
+  .total-holdings-block__breakdown-value {
+    margin-left: auto;
+  }
+}
+// The press effect would shrink the whole screen.
+.live-price-block.overview-card--fullscreen:active:not(.live-price-block--refreshing) {
+  transform: none;
+}
+// The card's hover shade and refresh pulse would wash over the whole screen; the progress sweep
+// and spinning icon still show a refresh.
+.live-price-block.overview-card--fullscreen {
+  &,
+  &:hover:not(.live-price-block--refreshing) {
+    background: #161b22;
+  }
+  &.live-price-block--flash {
+    animation: none;
+  }
+}
 .stat-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));

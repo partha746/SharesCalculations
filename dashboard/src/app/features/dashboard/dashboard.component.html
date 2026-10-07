@@ -49,7 +49,8 @@
     <h2 class="section-title">Overview</h2>
     <div class="stat-grid stat-grid--primary">
       <div
-        class="live-price-block"
+        class="live-price-block overview-card"
+        [class.overview-card--fullscreen]="fullscreenCard === 'live'"
         [class.live-price-block--refreshing]="refreshLiveInProgress"
         [class.live-price-block--flash]="livePriceJustRefreshed"
         role="button"
@@ -61,134 +62,154 @@
         aria-label="Live price – click to refresh">
         <!-- Indeterminate sweep along the top edge while the request is in flight -->
         <span class="live-price-block__progress" aria-hidden="true"></span>
-        <div class="live-price-block__title">
-          Live price
-          <span class="live-price-block__refresh-icon" aria-hidden="true">↻</span>
-        </div>
-        <div class="live-price-block__row live-price-block__row--main">
-          <span class="live-price-block__label">NVDA</span>
-          <span class="live-price-block__value">$ {{ formatUsd(data.livePriceUsd) }}</span>
-          @if (livePriceMovement) {
-            <span
-              class="live-price-block__diff"
-              [class.live-price-block__diff--up]="livePriceMovement.diffUsd > 0"
-              [class.live-price-block__diff--down]="livePriceMovement.diffUsd < 0"
-              [attr.title]="livePriceMovementTooltip">
-              <span class="live-price-block__diff-prefix">{{ livePriceMovementDiffPrefix }}</span>
-              <span class="live-price-block__diff-sep">·</span>
-              ({{ livePriceMovement.diffUsd > 0 ? '↑' : (livePriceMovement.diffUsd < 0 ? '↓' : '—') }} $ {{ formatUsd(Math.abs(livePriceMovement.diffUsd)) }} ({{ livePriceMovement.diffPct >= 0 ? '+' : '' }}{{ livePriceMovement.diffPct | number:'1.2-2' }}%))
-            </span>
-          }
-        </div>
-        @if (data.openPriceUsd != null && data.openPriceUsd > 0) {
-          <div class="live-price-block__row live-price-block__row--open">
-            <span class="live-price-block__label">Open today</span>
-            <span class="live-price-block__value live-price-block__value--muted">$ {{ formatUsd(data.openPriceUsd) }}</span>
+        <div class="overview-card__body">
+          <div class="live-price-block__title">
+            Live price
+            <span class="live-price-block__refresh-icon" aria-hidden="true">↻</span>
+            <button type="button" class="overview-card__fs-btn"
+                    (click)="toggleCardFullscreen('live', $event)"
+                    (keydown.enter)="$event.stopPropagation()"
+                    (keydown.space)="$event.stopPropagation()"
+                    [attr.aria-label]="fullscreenCard === 'live' ? 'Exit full screen' : 'Show live price full screen'"
+                    [title]="fullscreenCard === 'live' ? 'Exit full screen (Esc)' : 'Full screen'">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path [attr.d]="fullscreenCard === 'live' ? fullscreenExitIcon : fullscreenEnterIcon" /></svg>
+            </button>
           </div>
-        }
-        @if (data.dayHighUsd != null && data.dayLowUsd != null) {
+          <div class="live-price-block__row live-price-block__row--main">
+            <span class="live-price-block__label">NVDA</span>
+            <span class="live-price-block__value">$ {{ formatUsd(data.livePriceUsd) }}</span>
+            @if (livePriceMovement) {
+              <span
+                class="live-price-block__diff"
+                [class.live-price-block__diff--up]="livePriceMovement.diffUsd > 0"
+                [class.live-price-block__diff--down]="livePriceMovement.diffUsd < 0"
+                [attr.title]="livePriceMovementTooltip">
+                <span class="live-price-block__diff-prefix">{{ livePriceMovementDiffPrefix }}</span>
+                <span class="live-price-block__diff-sep">·</span>
+                ({{ livePriceMovement.diffUsd > 0 ? '↑' : (livePriceMovement.diffUsd < 0 ? '↓' : '—') }} $ {{ formatUsd(Math.abs(livePriceMovement.diffUsd)) }} ({{ livePriceMovement.diffPct >= 0 ? '+' : '' }}{{ livePriceMovement.diffPct | number:'1.2-2' }}%))
+              </span>
+            }
+          </div>
+          @if (data.openPriceUsd != null && data.openPriceUsd > 0) {
+            <div class="live-price-block__row live-price-block__row--open">
+              <span class="live-price-block__label">Open today</span>
+              <span class="live-price-block__value live-price-block__value--muted">$ {{ formatUsd(data.openPriceUsd) }}</span>
+            </div>
+          }
+          @if (data.dayHighUsd != null && data.dayLowUsd != null) {
+            <div class="live-price-block__row">
+              <span class="live-price-block__label">High / Low</span>
+              <span class="live-price-block__value live-price-block__value--muted"
+                    [title]="marketOpen ? 'Regular session range so far today' : 'Range of the last completed regular session'">
+                $ {{ formatUsd(data.dayHighUsd) }}
+                <span class="live-price-block__range-sep">/</span>
+                $ {{ formatUsd(data.dayLowUsd) }}
+              </span>
+            </div>
+          }
           <div class="live-price-block__row">
-            <span class="live-price-block__label">High / Low</span>
-            <span class="live-price-block__value live-price-block__value--muted"
-                  [title]="marketOpen ? 'Regular session range so far today' : 'Range of the last completed regular session'">
-              $ {{ formatUsd(data.dayHighUsd) }}
-              <span class="live-price-block__range-sep">/</span>
-              $ {{ formatUsd(data.dayLowUsd) }}
-            </span>
+            <span class="live-price-block__label">INR value</span>
+            <span class="live-price-block__value">₹ {{ formatInr(liveInrPerShare())}}</span>
+            <span class="live-price-block__hint">/ share</span>
           </div>
-        }
-        <div class="live-price-block__row">
-          <span class="live-price-block__label">INR value</span>
-          <span class="live-price-block__value">₹ {{ formatInr(liveInrPerShare())}}</span>
-          <span class="live-price-block__hint">/ share</span>
-        </div>
-        <div class="live-price-block__row">
-          <span class="live-price-block__label">USD → INR</span>
-          <span class="live-price-block__value" title="Live FX feed (not ECB daily only); refreshes with the live price poll.">{{ formatUsdInrRate(data.usdToInrRate) }}</span>
-          @if (usdInrMovement) {
-            <span
-              class="live-price-block__diff live-price-block__diff--fx"
-              [class.live-price-block__diff--up]="usdInrMovement.diff > 0"
-              [class.live-price-block__diff--down]="usdInrMovement.diff < 0"
-              [attr.title]="usdInrMovementTooltip">
-              {{ usdInrMovement.diff > 0 ? '↑' : '↓' }} {{ Math.abs(usdInrMovement.diff) | number:'1.3-3' }}
-              ({{ usdInrMovement.diffPct >= 0 ? '+' : '' }}{{ usdInrMovement.diffPct | number:'1.2-2' }}%)
-            </span>
-          }
-        </div>
-        <div class="live-price-block__premarket">
-          <app-live-price-extended-hint
-            [marketOpen]="marketOpen"
-            [isPreMarketSession]="isPreMarketSession"
-            [isPostMarketSession]="isPostMarketSession"
-            [marketNextPreMarketStartMs]="marketNextPreMarketStartMs"
-            [preSession]="preSessionStats"
-            [postSession]="postSessionStats"
-            [fallbackPreUsd]="data.preMarketPriceUsd ?? null"
-            [fallbackPostUsd]="data.postMarketPriceUsd ?? null" />
+          <div class="live-price-block__row">
+            <span class="live-price-block__label">USD → INR</span>
+            <span class="live-price-block__value" title="Live FX feed (not ECB daily only); refreshes with the live price poll.">{{ formatUsdInrRate(data.usdToInrRate) }}</span>
+            @if (usdInrMovement) {
+              <span
+                class="live-price-block__diff live-price-block__diff--fx"
+                [class.live-price-block__diff--up]="usdInrMovement.diff > 0"
+                [class.live-price-block__diff--down]="usdInrMovement.diff < 0"
+                [attr.title]="usdInrMovementTooltip">
+                {{ usdInrMovement.diff > 0 ? '↑' : '↓' }} {{ Math.abs(usdInrMovement.diff) | number:'1.3-3' }}
+                ({{ usdInrMovement.diffPct >= 0 ? '+' : '' }}{{ usdInrMovement.diffPct | number:'1.2-2' }}%)
+              </span>
+            }
+          </div>
+          <div class="live-price-block__premarket">
+            <app-live-price-extended-hint
+              [marketOpen]="marketOpen"
+              [isPreMarketSession]="isPreMarketSession"
+              [isPostMarketSession]="isPostMarketSession"
+              [marketNextPreMarketStartMs]="marketNextPreMarketStartMs"
+              [preSession]="preSessionStats"
+              [postSession]="postSessionStats"
+              [fallbackPreUsd]="data.preMarketPriceUsd ?? null"
+              [fallbackPostUsd]="data.postMarketPriceUsd ?? null" />
+          </div>
         </div>
       </div>
-      <div class="total-holdings-block">
-        <div class="total-holdings-block__title">Total holdings</div>
-        <div class="total-holdings-block__row total-holdings-block__row--main">
-          <span class="total-holdings-block__label">Shares</span>
-          <span class="total-holdings-block__value">{{ data.totalShares }}</span>
-          @if (totalSharesMovement) {
-            <span class="total-holdings-block__diff" [class.total-holdings-block__diff--up]="totalSharesMovement.diff > 0" [class.total-holdings-block__diff--down]="totalSharesMovement.diff < 0">
-              ({{ totalSharesMovement.diff > 0 ? '↑' : (totalSharesMovement.diff < 0 ? '↓' : '—') }} {{ Math.abs(totalSharesMovement.diff) }} ({{ totalSharesMovement.diffPct >= 0 ? '+' : '' }}{{ totalSharesMovement.diffPct | number:'1.2-2' }}%))
-            </span>
-          }
-        </div>
-        <div class="total-holdings-block__row">
-          <span class="total-holdings-block__label">Total value (USD)</span>
-          <span class="total-holdings-block__value">$ {{ formatUsd(data.totalValueUsd) }}</span>
-          @if (totalValueUsdMovement) {
-            <span class="total-holdings-block__diff" [class.total-holdings-block__diff--up]="totalValueUsdMovement.diffUsd > 0" [class.total-holdings-block__diff--down]="totalValueUsdMovement.diffUsd < 0">
-              ({{ totalValueUsdMovement.diffUsd > 0 ? '↑' : (totalValueUsdMovement.diffUsd < 0 ? '↓' : '—') }} $ {{ formatUsd(Math.abs(totalValueUsdMovement.diffUsd)) }} ({{ totalValueUsdMovement.diffPct >= 0 ? '+' : '' }}{{ totalValueUsdMovement.diffPct | number:'1.2-2' }}%))
-            </span>
-          }
-        </div>
-        <div class="total-holdings-block__row">
-          <span class="total-holdings-block__label">Total value (INR)</span>
-          <span class="total-holdings-block__value">₹ {{ formatInr(data.totalValueInr) }}</span>
-          @if (totalValueInrMovement) {
-            <span class="total-holdings-block__diff" [class.total-holdings-block__diff--up]="totalValueInrMovement.diffInr > 0" [class.total-holdings-block__diff--down]="totalValueInrMovement.diffInr < 0">
-              ({{ totalValueInrMovement.diffInr > 0 ? '↑' : (totalValueInrMovement.diffInr < 0 ? '↓' : '—') }} ₹ {{ formatInr(Math.abs(totalValueInrMovement.diffInr)) }} ({{ totalValueInrMovement.diffPct >= 0 ? '+' : '' }}{{ totalValueInrMovement.diffPct | number:'1.2-2' }}%))
-            </span>
-          }
-        </div>
-        @if (totalValueInrChangeBreakdown) {
-          @let bd = totalValueInrChangeBreakdown;
-          <div class="total-holdings-block__breakdown">
-            <div class="total-holdings-block__breakdown-row">
-              <span class="total-holdings-block__breakdown-label">Share price effect</span>
-              <span class="total-holdings-block__breakdown-value"
-                [class.total-holdings-block__value--up]="bd.priceEffectInr > 0"
-                [class.total-holdings-block__value--down]="bd.priceEffectInr < 0">
-                {{ bd.priceEffectInr >= 0 ? '+' : '−' }}₹ {{ formatInr(Math.abs(bd.priceEffectInr)) }}
-              </span>
-            </div>
-            <div class="total-holdings-block__breakdown-row">
-              <span class="total-holdings-block__breakdown-label">USD→INR rate effect <span class="total-holdings-block__rate-hint">({{ bd.prevRate | number:'1.2-2' }} → {{ bd.curRate | number:'1.2-2' }})</span></span>
-              <span class="total-holdings-block__breakdown-value"
-                [class.total-holdings-block__value--up]="bd.fxEffectInr > 0"
-                [class.total-holdings-block__value--down]="bd.fxEffectInr < 0">
-                {{ bd.fxEffectInr >= 0 ? '+' : '−' }}₹ {{ formatInr(Math.abs(bd.fxEffectInr)) }}
-              </span>
-            </div>
+      <div class="total-holdings-block overview-card" [class.overview-card--fullscreen]="fullscreenCard === 'holdings'">
+        <div class="overview-card__body">
+          <div class="total-holdings-block__title">
+            Total holdings
+            <button type="button" class="overview-card__fs-btn"
+                    (click)="toggleCardFullscreen('holdings', $event)"
+                    [attr.aria-label]="fullscreenCard === 'holdings' ? 'Exit full screen' : 'Show total holdings full screen'"
+                    [title]="fullscreenCard === 'holdings' ? 'Exit full screen (Esc)' : 'Full screen'">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path [attr.d]="fullscreenCard === 'holdings' ? fullscreenExitIcon : fullscreenEnterIcon" /></svg>
+            </button>
           </div>
-        }
-        <div class="total-holdings-block__divider"></div>
-        <div class="total-holdings-block__row">
-          <span class="total-holdings-block__label">INR contributed (cost basis)</span>
-          <span class="total-holdings-block__value">₹ {{ formatInr(totalCostBasisInr) }}</span>
-        </div>
-        <div class="total-holdings-block__row">
-          <span class="total-holdings-block__label">Unrealised gain / loss</span>
-          <span class="total-holdings-block__value" [class.total-holdings-block__value--up]="totalGainLossInr > 0" [class.total-holdings-block__value--down]="totalGainLossInr < 0">
-            {{ totalGainLossInr >= 0 ? '+' : '' }}₹ {{ formatInr(Math.abs(totalGainLossInr)) }}
-            <span class="total-holdings-block__pct">({{ totalGainLossPct >= 0 ? '+' : '' }}{{ totalGainLossPct | number:'1.2-2' }}%)</span>
-          </span>
+          <div class="total-holdings-block__row total-holdings-block__row--main">
+            <span class="total-holdings-block__label">Shares</span>
+            <span class="total-holdings-block__value">{{ data.totalShares }}</span>
+            @if (totalSharesMovement) {
+              <span class="total-holdings-block__diff" [class.total-holdings-block__diff--up]="totalSharesMovement.diff > 0" [class.total-holdings-block__diff--down]="totalSharesMovement.diff < 0">
+                ({{ totalSharesMovement.diff > 0 ? '↑' : (totalSharesMovement.diff < 0 ? '↓' : '—') }} {{ Math.abs(totalSharesMovement.diff) }} ({{ totalSharesMovement.diffPct >= 0 ? '+' : '' }}{{ totalSharesMovement.diffPct | number:'1.2-2' }}%))
+              </span>
+            }
+          </div>
+          <div class="total-holdings-block__row">
+            <span class="total-holdings-block__label">Total value (USD)</span>
+            <span class="total-holdings-block__value">$ {{ formatUsd(data.totalValueUsd) }}</span>
+            @if (totalValueUsdMovement) {
+              <span class="total-holdings-block__diff" [class.total-holdings-block__diff--up]="totalValueUsdMovement.diffUsd > 0" [class.total-holdings-block__diff--down]="totalValueUsdMovement.diffUsd < 0">
+                ({{ totalValueUsdMovement.diffUsd > 0 ? '↑' : (totalValueUsdMovement.diffUsd < 0 ? '↓' : '—') }} $ {{ formatUsd(Math.abs(totalValueUsdMovement.diffUsd)) }} ({{ totalValueUsdMovement.diffPct >= 0 ? '+' : '' }}{{ totalValueUsdMovement.diffPct | number:'1.2-2' }}%))
+              </span>
+            }
+          </div>
+          <div class="total-holdings-block__row">
+            <span class="total-holdings-block__label">Total value (INR)</span>
+            <span class="total-holdings-block__value">₹ {{ formatInr(data.totalValueInr) }}</span>
+            @if (totalValueInrMovement) {
+              <span class="total-holdings-block__diff" [class.total-holdings-block__diff--up]="totalValueInrMovement.diffInr > 0" [class.total-holdings-block__diff--down]="totalValueInrMovement.diffInr < 0">
+                ({{ totalValueInrMovement.diffInr > 0 ? '↑' : (totalValueInrMovement.diffInr < 0 ? '↓' : '—') }} ₹ {{ formatInr(Math.abs(totalValueInrMovement.diffInr)) }} ({{ totalValueInrMovement.diffPct >= 0 ? '+' : '' }}{{ totalValueInrMovement.diffPct | number:'1.2-2' }}%))
+              </span>
+            }
+          </div>
+          @if (totalValueInrChangeBreakdown) {
+            @let bd = totalValueInrChangeBreakdown;
+            <div class="total-holdings-block__breakdown">
+              <div class="total-holdings-block__breakdown-row">
+                <span class="total-holdings-block__breakdown-label">Share price effect</span>
+                <span class="total-holdings-block__breakdown-value"
+                  [class.total-holdings-block__value--up]="bd.priceEffectInr > 0"
+                  [class.total-holdings-block__value--down]="bd.priceEffectInr < 0">
+                  {{ bd.priceEffectInr >= 0 ? '+' : '−' }}₹ {{ formatInr(Math.abs(bd.priceEffectInr)) }}
+                </span>
+              </div>
+              <div class="total-holdings-block__breakdown-row">
+                <span class="total-holdings-block__breakdown-label">USD→INR rate effect <span class="total-holdings-block__rate-hint">({{ bd.prevRate | number:'1.2-2' }} → {{ bd.curRate | number:'1.2-2' }})</span></span>
+                <span class="total-holdings-block__breakdown-value"
+                  [class.total-holdings-block__value--up]="bd.fxEffectInr > 0"
+                  [class.total-holdings-block__value--down]="bd.fxEffectInr < 0">
+                  {{ bd.fxEffectInr >= 0 ? '+' : '−' }}₹ {{ formatInr(Math.abs(bd.fxEffectInr)) }}
+                </span>
+              </div>
+            </div>
+          }
+          <div class="total-holdings-block__divider"></div>
+          <div class="total-holdings-block__row">
+            <span class="total-holdings-block__label">INR contributed (cost basis)</span>
+            <span class="total-holdings-block__value">₹ {{ formatInr(totalCostBasisInr) }}</span>
+          </div>
+          <div class="total-holdings-block__row">
+            <span class="total-holdings-block__label">Unrealised gain / loss</span>
+            <span class="total-holdings-block__value" [class.total-holdings-block__value--up]="totalGainLossInr > 0" [class.total-holdings-block__value--down]="totalGainLossInr < 0">
+              {{ totalGainLossInr >= 0 ? '+' : '' }}₹ {{ formatInr(Math.abs(totalGainLossInr)) }}
+              <span class="total-holdings-block__pct">({{ totalGainLossPct >= 0 ? '+' : '' }}{{ totalGainLossPct | number:'1.2-2' }}%)</span>
+            </span>
+          </div>
         </div>
       </div>
     </div>
@@ -1046,9 +1067,8 @@
                                (ngModelChange)="metalEditGrams = $event === '' || $event == null ? null : $event" />
                       </td>
                       <td>
-                        <input type="number" min="0" step="1" class="adv-tax__edit-input adv-tax__edit-input--num"
-                               [ngModel]="metalEditPricePaid"
-                               (ngModelChange)="metalEditPricePaid = $event === '' || $event == null ? null : $event" />
+                        <input type="text" inputmode="decimal" appIndianNumber class="adv-tax__edit-input adv-tax__edit-input--num"
+                               [(ngModel)]="metalEditPricePaid" aria-label="Paid per gram (₹)" />
                       </td>
                       <td colspan="4" class="adv-tax__cell-note">Saving recalculates value and gain</td>
                       <td><input type="text" class="adv-tax__edit-input" [(ngModel)]="metalEditNote" placeholder="note" /></td>
@@ -1088,6 +1108,9 @@
               </tbody>
             </table>
           </div>
+          @if (metalHoldingsError && metalEditId != null) {
+            <p class="playground-desc playground-desc--warning">{{ metalHoldingsError }}</p>
+          }
         } @else {
           <p class="holdings-table__hint">No lots recorded yet. Add one below.</p>
         }
@@ -1115,18 +1138,18 @@
           </label>
           <label class="playground-label">
             Total paid (₹)
-            <input type="number" min="0" step="1" class="playground-input"
+            <input type="text" inputmode="decimal" appIndianNumber class="playground-input"
                    [ngModel]="newMetalTotalPaid"
-                   (ngModelChange)="newMetalTotalPaid = $event === '' || $event == null ? null : $event; onMetalTotalPaidChange()"
-                   placeholder="e.g. 125000"
+                   (ngModelChange)="newMetalTotalPaid = $event; onMetalTotalPaidChange()"
+                   placeholder="e.g. 1,25,000"
                    title="Enter the bill total; the per-gram figure is worked out from it" />
           </label>
           <label class="playground-label">
             <span>or per gram (₹)</span>
-            <input type="number" min="0" step="1" class="playground-input"
+            <input type="text" inputmode="decimal" appIndianNumber class="playground-input"
                    [ngModel]="newMetalPricePaid"
-                   (ngModelChange)="newMetalPricePaid = $event === '' || $event == null ? null : $event; onMetalPerGramChange()"
-                   placeholder="e.g. 12500"
+                   (ngModelChange)="newMetalPricePaid = $event; onMetalPerGramChange()"
+                   placeholder="e.g. 12,500"
                    title="Either field fills the other; edit whichever you know" />
           </label>
           <label class="playground-label">
@@ -1141,7 +1164,7 @@
             {{ metalHoldingSaving ? 'Saving…' : 'Add lot' }}
           </button>
         </div>
-        @if (metalHoldingsError) {
+        @if (metalHoldingsError && metalEditId == null) {
           <p class="playground-desc playground-desc--warning">{{ metalHoldingsError }}</p>
         }
 

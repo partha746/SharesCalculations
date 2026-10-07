@@ -3,6 +3,7 @@ import datetime as dt
 import locale
 import re
 import sqlite3
+import threading
 import time
 from datetime import date, datetime, timedelta
 
@@ -32,6 +33,19 @@ _NASDAQ_HEADERS = {
     "Accept-Language": "en-US,en;q=0.9",
 }
 _NASDAQ_TIMEOUT_SEC = 12
+
+# Last Nasdaq quote attempt per symbol: symbol -> (finished_at monotonic, quote or None). The
+# recorder refreshes it every ~14s during extended hours; request handlers reuse it rather than
+# wait 1-3s on Nasdaq.
+_nasdaq_quote_cache = {}
+_nasdaq_quote_lock = threading.Lock()
+_NASDAQ_QUOTE_MAX_AGE_SEC = 30
+
+# requests has no default timeout, so a stalled provider would hang its caller indefinitely.
+_PROVIDER_TIMEOUT_SEC = 10
+
+# (today, max_days_back) -> USD/INR fix for the latest earlier day; a past day's fix is final.
+_prior_day_inr_cache = {}
 
 
 def _parse_money(value):
@@ -146,7 +160,7 @@ class RupeeConv:
                 "from": "USD",
                 "to": "INR"
             }
-            response = requests.get(url, params=params)
+            response = requests.get(url, params=params, timeout=_PROVIDER_TIMEOUT_SEC)
             data = response.json()
             rate = data.get("rates", {}).get("INR")
             if rate:
@@ -199,7 +213,7 @@ class RupeeConv:
         url = config.FRANKFURTER_LATEST_URL
         params = {"base": "USD", "symbols": "INR"}
         try:
-            response = requests.get(url, params=params)
+            response = requests.get(url, params=params, timeout=_PROVIDER_TIMEOUT_SEC)
             data = response.json()
             rate = data.get("rates", {}).get("INR")
             if rate is not None:
@@ -216,11 +230,17 @@ class RupeeConv:
         from datetime import date, timedelta
 
         today = date.today()
+        key = (today, max_days_back)
+        if key in _prior_day_inr_cache:
+            return _prior_day_inr_cache[key]
         for days_back in range(1, max_days_back + 1):
             d = today - timedelta(days=days_back)
             r = self.get_rupee_rate(d)
             if r is not None:
-                return round(float(r), 2)
+                rate = round(float(r), 2)
+                _prior_day_inr_cache.clear()
+                _prior_day_inr_cache[key] = rate
+                return rate
         return None
 
     def get_stock_price(self, stock_code='NVDA', api_key=None):
@@ -247,7 +267,7 @@ class RupeeConv:
         url = "https://finnhub.io/api/v1/quote"
         params = {"symbol": stock_code.upper(), "token": api_key or config.FINNHUB_TOKEN}
         try:
-            response = requests.get(url, params=params)
+            response = requests.get(url, params=params, timeout=_PROVIDER_TIMEOUT_SEC)
             data = response.json()
             if isinstance(data, dict) and data.get("c") is not None:
                 return data
@@ -267,14 +287,33 @@ class RupeeConv:
         s.verify = False
         return s
 
-    def nasdaq_quote(self, symbol="NVDA"):
+    def nasdaq_quote(self, symbol="NVDA", max_age=_NASDAQ_QUOTE_MAX_AGE_SEC):
         """Nasdaq's live quote: {status, price, prevClose, timestamp, realTime} or None.
 
         During extended hours `primaryData` carries the pre/post-market print and
         `secondaryData` the last regular close; `marketStatus` says which session we are in
         ('Pre-Market', 'After Hours', 'Market Open', 'Closed'), so callers do not have to
         infer the window from the clock.
+
+        A quote fetched less than `max_age` seconds ago is reused; 0 forces a fresh fetch.
         """
+        sym = symbol.upper()
+        asked_at = time.monotonic()
+        entry = _nasdaq_quote_cache.get(sym)
+        if entry is not None and entry[1] is not None and asked_at - entry[0] < max_age:
+            return dict(entry[1])
+        # One request at a time; a caller that queued behind one takes its outcome, failure
+        # included, so a stalled Nasdaq costs each caller at most one timeout.
+        with _nasdaq_quote_lock:
+            entry = _nasdaq_quote_cache.get(sym)
+            if entry is None or entry[0] < asked_at:
+                quote = self._fetch_nasdaq_quote(sym)
+                entry = (time.monotonic(), quote)
+                _nasdaq_quote_cache[sym] = entry
+        quote = entry[1]
+        return dict(quote) if quote is not None else None
+
+    def _fetch_nasdaq_quote(self, symbol):
         try:
             session = self._yf_session()  # shares the relaxed-TLS session used elsewhere
             resp = session.get(

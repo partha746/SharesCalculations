@@ -29,6 +29,9 @@ PORT = config.BACKEND_PORT
 if __name__ == "__main__":
     if not os.path.isfile(config.DB_PATH):
         sys.exit(f"Database not found: {config.DB_PATH}")
+    # Imported up front: it pulls in pandas (~2s on this board), which would otherwise land on
+    # the first page load whenever the recorder is asleep because the market is closed.
+    from helpers import gather_data  # noqa: F401
     start_recorder()
     start_metal_recorder()
     print(f"Backend API at http://127.0.0.1:{PORT} (configs at {REPO_ROOT})")

@@ -95,7 +95,8 @@ Price history:
 - Raw live ticks (every 14s when market open) -> `live_price_history` (capped at 5 GB; oldest pruned).
 - Pre/post-market ticks (every 14s during those sessions) -> `extended_price_history`, kept separate so
   the regular-hours chart and rollups are untouched. Its first row per session is the only source for
-  that session's open, which Nasdaq does not publish.
+  that session's open, which Nasdaq does not publish. Each tick's Nasdaq quote is also kept for 30s
+  (`helpers/market.py:nasdaq_quote`), so requests during extended hours rarely wait on Nasdaq.
   The backend recorder is the only writer; the frontend does not POST ticks.
 - Continuous OHLC rollups -> `live_price_ohlc_1m` / `_1h` / `_1d`, maintained incrementally and backfilled from raw on first run.
 - The chart endpoint (`/api/live-price-history`) aggregates the smallest suitable rollup into <= `maxPoints` buckets so any range stays fast.

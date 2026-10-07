@@ -14,12 +14,15 @@ from helpers.tax import Tax
 
 
 class OwnStockData:
-    def __init__(self) -> None:
+    def __init__(self, live_price=None, todays_rp=None) -> None:
+        """Pass live_price/todays_rp when the caller already has them; otherwise they are fetched."""
         self.db_obj = DB()
         self.rupeeconv_obj = RupeeConv()
         self.tax_obj = Tax()
-        
-        self.livePrice, self.todaysRP, *_ = self.rupeeconv_obj.get_live_price()
+
+        if live_price is None or todays_rp is None:
+            live_price, todays_rp, *_ = self.rupeeconv_obj.get_live_price()
+        self.livePrice, self.todaysRP = live_price, todays_rp
         self.max_closing_json = {}
         # Windows the price provider could not supply. A zero here would silently drop the
         # lot from the Schedule FA export, so callers must check this before exporting.
@@ -61,12 +64,20 @@ class OwnStockData:
         else:
             # Not current year: don't update if already cached
             if cached_entry:
-                return round(cached_entry["max_price"], 0), round(cached_entry["closing_price"], 0)
+                return cached_entry["max_price"], cached_entry["closing_price"]
             else:
                 should_update = True
 
         if not should_update and cached_entry:
-            return round(cached_entry["max_price"], 0), round(cached_entry["closing_price"], 0)
+            return cached_entry["max_price"], cached_entry["closing_price"]
+
+        # Every lot in a window asks for it, so a refusal would otherwise be re-requested per lot.
+        window = f"{start_date}..{end_date}"
+        if any(f["window"] == window for f in self.price_fetch_failures):
+            return 0, 0
+        if datetime.strptime(start_date, "%Y-%m-%d").date() > datetime.now().date():
+            self._record_price_failure(start_date, end_date, "window has not started yet", pending=True)
+            return 0, 0
 
         # Fetch from API
         url = "https://api.twelvedata.com/time_series"
@@ -104,7 +115,7 @@ class OwnStockData:
             with open(json_file, "w") as f:
                 json.dump(self.max_closing_json, f, indent=4)
 
-            return round(max_high, 0), round(latest_close, 0)
+            return max_high, latest_close
 
         except Exception:
             # The provider returns 200 with an error body (e.g. {"code":401,...}), so surface
@@ -113,15 +124,22 @@ class OwnStockData:
             self._record_price_failure(start_date, end_date, detail)
             return 0, 0
 
-    def _record_price_failure(self, start_date, end_date, detail):
-        """Log loudly and remember the gap: 0 would look like a fully-sold lot downstream."""
+    def _record_price_failure(self, start_date, end_date, detail, pending=False):
+        """Log loudly and remember the gap: 0 would look like a fully-sold lot downstream.
+
+        pending: the window has not started, so the price will exist later; the provider is fine.
+        """
         window = f"{start_date}..{end_date}"
         print(f"[price-history] NO DATA for {window}: {detail}", flush=True)
         if window not in [f["window"] for f in self.price_fetch_failures]:
-            self.price_fetch_failures.append({"window": window, "detail": str(detail)[:200]})
+            self.price_fetch_failures.append({"window": window, "detail": str(detail)[:200], "pending": pending})
 
-    def generate_display_data(self, type):
-        """_summary_
+    def generate_display_data(self, type, fy_prices=True):
+        """Lots of one type ('NSU' / 'ESPP') with today's value, gain and tax.
+
+        fy_prices=False leaves out the per-FY peak and closing price columns (Max_Price,
+        FY_Closing_Price, Price_Data_Missing/Pending, Max_Value_FY*, FY_Closing_Value*). Those need a
+        price-provider request per uncached FY window, and only the Schedule FA export reads them.
         """
         df = self.db_obj.get_table_data(type)
         df.rename(columns = {'TDS_Price':'TDS_Price_raw', 'Price_Bought':'Price_Bought_raw'}, inplace = True)
@@ -162,59 +180,63 @@ class OwnStockData:
         df['Buy_Year'] = buy_dates_parsed.dt.strftime("%Y")
         df['Buy_Month'] = buy_dates_parsed.dt.strftime("%m")
 
-        Max_Price = []
-        FY_Closing_Price = []
-        Price_Missing = []
-        
-        for cnt in range(len(df['Buy_Year'])):
-            try:
-                yv, mv = df['Buy_Year'].iloc[cnt], df['Buy_Month'].iloc[cnt]
-                year = int(float(yv)) if pd.notna(yv) and str(yv).replace('.', '').isdigit() else 2000
-                month = int(float(mv)) if pd.notna(mv) and str(mv).replace('.', '').isdigit() else 1
-            except (ValueError, TypeError):
-                year, month = 2000, 1
+        if fy_prices:
+            Max_Price = []
+            FY_Closing_Price = []
+            Price_Missing = []
+            Price_Pending = []
 
-            if month > 3:
-                start = f"{year}-04-01"
-                end = f"{year + 1}-03-31"
-                closing_month = f"{year + 1}-03-01"
-                closing_end = f"{year + 1}-03-31"
-            else:
-                start = f"{year - 1}-04-01"
-                end = f"{year}-03-31"
-                closing_month = f"{year}-03-01"
-                closing_end = f"{year}-03-31"
+            for cnt in range(len(df['Buy_Year'])):
+                try:
+                    yv, mv = df['Buy_Year'].iloc[cnt], df['Buy_Month'].iloc[cnt]
+                    year = int(float(yv)) if pd.notna(yv) and str(yv).replace('.', '').isdigit() else 2000
+                    month = int(float(mv)) if pd.notna(mv) and str(mv).replace('.', '').isdigit() else 1
+                except (ValueError, TypeError):
+                    year, month = 2000, 1
 
-            if f"{str(start)}{str(end)}" in self.max_closing_json.keys():
-                max_price = self.max_closing_json[f"{str(start)}{str(end)}"]["max_price"]
-            else:
-                max_price, _ = self.fetch_max_high_and_closing("NVDA", start, end)
+                if month > 3:
+                    start = f"{year}-04-01"
+                    end = f"{year + 1}-03-31"
+                    closing_month = f"{year + 1}-03-01"
+                    closing_end = f"{year + 1}-03-31"
+                else:
+                    start = f"{year - 1}-04-01"
+                    end = f"{year}-03-31"
+                    closing_month = f"{year}-03-01"
+                    closing_end = f"{year}-03-31"
 
-            if f"{str(closing_month)}{str(closing_end)}" in self.max_closing_json.keys():
-                closing_price = self.max_closing_json[f"{str(closing_month)}{str(closing_end)}"]["closing_price"]
-            else:
-                _, closing_price = self.fetch_max_high_and_closing("NVDA", closing_month, closing_end)
+                if f"{str(start)}{str(end)}" in self.max_closing_json.keys():
+                    max_price = self.max_closing_json[f"{str(start)}{str(end)}"]["max_price"]
+                else:
+                    max_price, _ = self.fetch_max_high_and_closing("NVDA", start, end)
 
-            Max_Price.append(max_price)
-            FY_Closing_Price.append(closing_price)
-            # Flag this lot when either window came back empty: a resulting zero is
-            # indistinguishable from a fully-sold lot once it reaches the FA export.
-            failed = {f["window"] for f in self.price_fetch_failures}
-            Price_Missing.append(
-                f"{start}..{end}" in failed or f"{closing_month}..{closing_end}" in failed
-            )
+                if f"{str(closing_month)}{str(closing_end)}" in self.max_closing_json.keys():
+                    closing_price = self.max_closing_json[f"{str(closing_month)}{str(closing_end)}"]["closing_price"]
+                else:
+                    _, closing_price = self.fetch_max_high_and_closing("NVDA", closing_month, closing_end)
 
-        df['Max_Price'] = Max_Price
-        df['FY_Closing_Price'] = FY_Closing_Price
-        df['Price_Data_Missing'] = Price_Missing
-        df['Max_Value_FY_raw'] = (df['Available_Sell'].mul(df['RupeeRate'])).mul(df['Max_Price'])
-        df['FY_Closing_Value_raw'] = (df['Available_Sell'].mul(df['RupeeRate'])).mul(df['FY_Closing_Price'])
+                Max_Price.append(max_price)
+                FY_Closing_Price.append(closing_price)
+                # Flag this lot when either window came back empty: a resulting zero is
+                # indistinguishable from a fully-sold lot once it reaches the FA export.
+                failed = {f["window"]: f for f in self.price_fetch_failures}
+                missing = [failed[w] for w in (f"{start}..{end}", f"{closing_month}..{closing_end}") if w in failed]
+                Price_Missing.append(bool(missing))
+                Price_Pending.append(bool(missing) and all(f["pending"] for f in missing))
+
+            df['Max_Price'] = Max_Price
+            df['FY_Closing_Price'] = FY_Closing_Price
+            df['Price_Data_Missing'] = Price_Missing
+            df['Price_Data_Pending'] = Price_Pending
+            df['Max_Value_FY_raw'] = (df['Available_Sell'].mul(df['RupeeRate'])).mul(df['Max_Price'])
+            df['FY_Closing_Value_raw'] = (df['Available_Sell'].mul(df['RupeeRate'])).mul(df['FY_Closing_Price'])
         df['Buy_Date'] = buy_dates_parsed.dt.date
 
         df['PerShare_INR'] = self.rupeeconv_obj.print_rupees(df['PerShare_INR_raw'])
         df['TaxNeedtoPay'] = self.rupeeconv_obj.print_rupees(df['TaxNeedtoPay_raw'])
-        df['FY_Closing_Value'] = self.rupeeconv_obj.print_rupees(df['FY_Closing_Value_raw'])
-        df['Max_Value_FY'] = self.rupeeconv_obj.print_rupees(df['Max_Value_FY_raw'])
+        if fy_prices:
+            df['FY_Closing_Value'] = self.rupeeconv_obj.print_rupees(df['FY_Closing_Value_raw'])
+            df['Max_Value_FY'] = self.rupeeconv_obj.print_rupees(df['Max_Value_FY_raw'])
         df['TodaysValue'] = self.rupeeconv_obj.print_rupees(df['TodaysValue_raw'])
         df['InitialValue'] = self.rupeeconv_obj.print_rupees(df['InitialValue_raw'])
         df['Price_Bought'] = self.rupeeconv_obj.print_rupees(df['Price_Bought_raw'], cur='USD')
@@ -248,7 +270,8 @@ class OwnStockData:
 
         return df, currentValue, tds_paid_on, total_qty, total_capital_gain, total_tds, avg_buy_price, avg_profit_percent
 
-    def generate_sellout_display_data(self):
+    def generate_sellout_display_data(self, fy_prices=True):
+        """Sold lots with realised gain and tax; fy_prices as for generate_display_data."""
         dfSellOut = self.db_obj.get_table_data('SellOut')
 
         buy_dates_parsed_so = pd.to_datetime(dfSellOut['Buy_Date'], errors='coerce')
@@ -256,45 +279,46 @@ class OwnStockData:
         dfSellOut['Buy_Year'] = buy_dates_parsed_so.dt.strftime("%Y")
         dfSellOut['Buy_Month'] = buy_dates_parsed_so.dt.strftime("%m")
 
-        Max_Price = []
-        FY_Closing_Price = []
+        if fy_prices:
+            Max_Price = []
+            FY_Closing_Price = []
 
-        for cnt in range(len(dfSellOut['Buy_Year'])):
-            try:
-                yv, mv = dfSellOut['Buy_Year'].iloc[cnt], dfSellOut['Buy_Month'].iloc[cnt]
-                buy_year = int(float(yv)) if pd.notna(yv) and str(yv).replace('.', '').isdigit() else 2000
-                buy_month = int(float(mv)) if pd.notna(mv) and str(mv).replace('.', '').isdigit() else 1
-            except (ValueError, TypeError):
-                buy_year, buy_month = 2000, 1
-            
-            if buy_month > 3:
-                fy_start = f"{buy_year}-04-01"
-                fy_end = f"{buy_year+1}-03-31"
-                closing_start = f"{buy_year+1}-03-01"
-                closing_end = f"{buy_year+1}-03-31"
-            else:
-                fy_start = f"{buy_year-1}-04-01"
-                fy_end = f"{buy_year}-03-31"
-                closing_start = f"{buy_year}-03-01"
-                closing_end = f"{buy_year}-03-31"
+            for cnt in range(len(dfSellOut['Buy_Year'])):
+                try:
+                    yv, mv = dfSellOut['Buy_Year'].iloc[cnt], dfSellOut['Buy_Month'].iloc[cnt]
+                    buy_year = int(float(yv)) if pd.notna(yv) and str(yv).replace('.', '').isdigit() else 2000
+                    buy_month = int(float(mv)) if pd.notna(mv) and str(mv).replace('.', '').isdigit() else 1
+                except (ValueError, TypeError):
+                    buy_year, buy_month = 2000, 1
 
-            if f"{str(fy_start)}{str(fy_end)}" in self.max_closing_json.keys():
-                max_price = self.max_closing_json[f"{str(fy_start)}{str(fy_end)}"]["max_price"]
-            else:
-                max_price, _ = self.fetch_max_high_and_closing("NVDA", fy_start, fy_end)
+                if buy_month > 3:
+                    fy_start = f"{buy_year}-04-01"
+                    fy_end = f"{buy_year+1}-03-31"
+                    closing_start = f"{buy_year+1}-03-01"
+                    closing_end = f"{buy_year+1}-03-31"
+                else:
+                    fy_start = f"{buy_year-1}-04-01"
+                    fy_end = f"{buy_year}-03-31"
+                    closing_start = f"{buy_year}-03-01"
+                    closing_end = f"{buy_year}-03-31"
 
-            if f"{str(closing_start)}{str(closing_end)}" in self.max_closing_json.keys():
-                closing_price = self.max_closing_json[f"{str(closing_start)}{str(closing_end)}"]["closing_price"]
-            else:
-                _, closing_price = self.fetch_max_high_and_closing("NVDA", closing_start, closing_end)
+                if f"{str(fy_start)}{str(fy_end)}" in self.max_closing_json.keys():
+                    max_price = self.max_closing_json[f"{str(fy_start)}{str(fy_end)}"]["max_price"]
+                else:
+                    max_price, _ = self.fetch_max_high_and_closing("NVDA", fy_start, fy_end)
 
-            Max_Price.append(round(max_price, 0))
-            FY_Closing_Price.append(round(closing_price, 0))
+                if f"{str(closing_start)}{str(closing_end)}" in self.max_closing_json.keys():
+                    closing_price = self.max_closing_json[f"{str(closing_start)}{str(closing_end)}"]["closing_price"]
+                else:
+                    _, closing_price = self.fetch_max_high_and_closing("NVDA", closing_start, closing_end)
 
-        dfSellOut['Max_Price'] = Max_Price
-        dfSellOut['FY_Closing_Price'] = FY_Closing_Price
-        dfSellOut['Max_Value_FY'] = ((dfSellOut['Qty_Sold'].mul(dfSellOut['BuyRupeeRate'])).mul(dfSellOut['Max_Price']))
-        dfSellOut['FY_Closing_Value'] = ((dfSellOut['Qty_Sold'].mul(dfSellOut['BuyRupeeRate'])).mul(dfSellOut['FY_Closing_Price']))
+                Max_Price.append(max_price)
+                FY_Closing_Price.append(closing_price)
+
+            dfSellOut['Max_Price'] = Max_Price
+            dfSellOut['FY_Closing_Price'] = FY_Closing_Price
+            dfSellOut['Max_Value_FY'] = ((dfSellOut['Qty_Sold'].mul(dfSellOut['BuyRupeeRate'])).mul(dfSellOut['Max_Price']))
+            dfSellOut['FY_Closing_Value'] = ((dfSellOut['Qty_Sold'].mul(dfSellOut['BuyRupeeRate'])).mul(dfSellOut['FY_Closing_Price']))
         dfSellOut['InitialValue'] = (dfSellOut['Qty_Sold'].mul(dfSellOut['Price_Bought'])).mul(dfSellOut['BuyRupeeRate'])
 
         dfSellOut['Buy_Date'] = buy_dates_parsed_so.dt.date
@@ -342,8 +366,9 @@ class OwnStockData:
         dfSellOut['ProfitNSU'] = self.rupeeconv_obj.print_rupees(dfSellOut['ProfitNSU'])
         dfSellOut['TaxNeedToBePaid'] = self.rupeeconv_obj.print_rupees(dfSellOut['TaxNeedToBePaid'])
         dfSellOut['InitialValue'] = self.rupeeconv_obj.print_rupees(dfSellOut['InitialValue'])
-        dfSellOut['Max_Value_FY'] = self.rupeeconv_obj.print_rupees(dfSellOut['Max_Value_FY'])
-        dfSellOut['FY_Closing_Value'] = self.rupeeconv_obj.print_rupees(dfSellOut['FY_Closing_Value'])
-        
+        if fy_prices:
+            dfSellOut['Max_Value_FY'] = self.rupeeconv_obj.print_rupees(dfSellOut['Max_Value_FY'])
+            dfSellOut['FY_Closing_Value'] = self.rupeeconv_obj.print_rupees(dfSellOut['FY_Closing_Value'])
+
         return dfSellOut, sell_profit, total_qty_sold, total_sell_inr, total_sell_rsu_inr, total_sell_espp_inr
 

@@ -80,6 +80,7 @@ def _build_foreign_asset_rows(fy_year, selected_keys=None):
     shares_list = []
 
     unpriced = []
+    not_yet_priced = []
     for stock_type in ("NSU", "ESPP"):
         if not db_status.get(stock_type):
             continue
@@ -93,7 +94,8 @@ def _build_foreign_asset_rows(fy_year, selected_keys=None):
                 if _lot_export_key(row, stock_type, invest_date) not in selected_keys:
                     continue
             if bool(row.get("Price_Data_Missing")):
-                unpriced.append(f"{stock_type} {invest_date.strftime('%Y-%m-%d')}")
+                lot = f"{stock_type} {invest_date.strftime('%Y-%m-%d')}"
+                (not_yet_priced if bool(row.get("Price_Data_Pending")) else unpriced).append(lot)
                 continue
             entry = dict(template)
             entry["InterestAcquiringDate"] = invest_date.strftime("%Y-%m-%d")
@@ -114,6 +116,14 @@ def _build_foreign_asset_rows(fy_year, selected_keys=None):
             "those lots would be silently dropped, so the export was blocked. The provider "
             "rejected the request — check FMV_API_KEY in dashboard/.env.".format(", ".join(unpriced)),
             503,
+        )
+    if not_yet_priced:
+        return None, None, (
+            "FY {}–{} isn't over until 31 March {}, so there is no closing price yet for {}. "
+            "Generate this export after the year ends, or pick an earlier year.".format(
+                fy_year - 1, str(fy_year)[-2:], fy_year, ", ".join(not_yet_priced)
+            ),
+            409,
         )
 
     # Order rows by acquisition date ascending (oldest first).

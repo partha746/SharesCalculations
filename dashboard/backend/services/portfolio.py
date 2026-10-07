@@ -65,11 +65,13 @@ def _build_dashboard_response():
     nsu = None
     espp = None
 
+    # Built from the quote above so the profit figures and livePriceUsd come from one price.
+    stock_data = gather_data.OwnStockData(live_price, todays_rp)
     for stock_type in ("NSU", "ESPP"):
         if not db_status[stock_type]:
             continue
         (_, _, _, total_qty, total_capital_gain, total_tds, avg_buy_price, avg_profit_percent) = (
-            gather_data.OwnStockData().generate_display_data(type=stock_type)
+            stock_data.generate_display_data(type=stock_type, fy_prices=False)
         )
         all_qty += total_qty
         all_profit_after_tax += total_capital_gain
@@ -100,7 +102,7 @@ def _build_dashboard_response():
     sold_value_espp_inr = None
     if db_status["SellOut"]:
         (_, sell_profit, total_qty_sold, total_sell_inr, total_sell_rsu_inr, total_sell_espp_inr) = (
-            gather_data.OwnStockData().generate_sellout_display_data()
+            stock_data.generate_sellout_display_data(fy_prices=False)
         )
         realised_profit = round(sell_profit, 2)
         sold_total_qty = int(total_qty_sold)
@@ -175,10 +177,11 @@ def _build_holdings_response():
         rupee_conv_obj.update_null_rupees_rate("ESPP", "Buy_Date", "RupeeRate")
 
     rows = []
+    stock_data = gather_data.OwnStockData()
     for stock_type in ("NSU", "ESPP"):
         if not db_status[stock_type]:
             continue
-        df, *_ = gather_data.OwnStockData().generate_display_data(type=stock_type)
+        df, *_ = stock_data.generate_display_data(type=stock_type, fy_prices=False)
         price_col = "TDS_Price_raw" if stock_type == "ESPP" else "Price_Bought_raw"
         for _, r in df.iterrows():
             try:

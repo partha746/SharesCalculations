@@ -38,6 +38,35 @@ export function currentAssessmentYear(now: Date = new Date()): number {
   return now.getMonth() >= 3 ? now.getFullYear() + 1 : now.getFullYear();
 }
 
+/** Assessment year of the last Indian FY that has ended. The tax exports need prices from the end of the FY, so a running FY has nothing to export yet. */
+export function lastFinishedAssessmentYear(now: Date = new Date()): number {
+  return currentAssessmentYear(now) - 1;
+}
+
+/** Error text from a request made with responseType 'blob': the server's JSON error body arrives as a Blob too. */
+async function blobErrorMessage(err: any, fallback: string): Promise<string> {
+  if (err?.error instanceof Blob) {
+    try {
+      const msg = JSON.parse(await err.error.text())?.error;
+      if (msg) return msg;
+    } catch {
+      // Not a JSON body; fall through to the HTTP status text.
+    }
+  }
+  return err?.error?.error || err?.message || fallback;
+}
+
+function isAppleTouchDevice(): boolean {
+  // iPadOS Safari reports itself as a Mac; touch support tells the two apart.
+  return /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+}
+
+/** WebKit's Audio Session API (Safari 16.4+), which the TS DOM types don't include yet. */
+function setAudioSessionType(type: 'ambient' | 'auto'): void {
+  const session = (navigator as Navigator & { audioSession?: { type: string } }).audioSession;
+  if (session) session.type = type;
+}
+
 /** Start year of the current Indian financial year: Sep 2026 -> 2026 (FY 2026–27). */
 export function currentFyStartYear(now: Date = new Date()): number {
   return now.getMonth() >= 3 ? now.getFullYear() : now.getFullYear() - 1;
@@ -111,6 +140,8 @@ import { DataTabComponent } from './data-tab/data-tab.component';
 import { NewsTabComponent } from './news-tab/news-tab.component';
 import { MfTabComponent } from './mf-tab/mf-tab.component';
 import { NetworthTabComponent } from './networth-tab/networth-tab.component';
+import { IndianNumberDirective } from '../../core/directives/indian-number.directive';
+import { NO_SLEEP_MP4 } from '../../core/utils/no-sleep-video';
 
 /** Categorical palette for the fund-overlap sector doughnut (ordered, largest slice first). */
 const MF_SECTOR_COLORS = [
@@ -135,7 +166,7 @@ const HOLDINGS_COLUMN_ORDER_STORAGE_KEY = 'dashboard.holdingsColumnOrder';
 
 @Component({
     selector: 'app-dashboard',
-    imports: [CommonModule, FormsModule, StatCardComponent, OverviewTimeCardComponent, LivePriceExtendedHintComponent, FinancialPlanningComponent, DataTabComponent, NewsTabComponent, MfTabComponent, NetworthTabComponent],
+    imports: [CommonModule, FormsModule, StatCardComponent, OverviewTimeCardComponent, LivePriceExtendedHintComponent, FinancialPlanningComponent, DataTabComponent, NewsTabComponent, MfTabComponent, NetworthTabComponent, IndianNumberDirective],
     templateUrl: './dashboard.component.html',
     styleUrl: './dashboard.component.scss',
     changeDetection: ChangeDetectionStrategy.OnPush
@@ -155,6 +186,7 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
   private lastShownTotalSharesMovement: { diff: number; diffPct: number } | null = null;
   private lastShownInrChangeBreakdown: { priceEffectInr: number; fxEffectInr: number; prevRate: number; curRate: number } | null = null;
   holdings: HoldingRow[] = [];
+  private holdingsInFlight = false;
   loading = true;
   error: string | null = null;
   /** True while refreshing live data (click on live price card). */
@@ -163,6 +195,14 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
    *  even when the price came back unchanged. */
   livePriceJustRefreshed = false;
   private livePriceFlashTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Overview card covering the screen, if any. */
+  fullscreenCard: 'live' | 'holdings' | null = null;
+  private fullscreenCardEl: HTMLElement | null = null;
+  private fullscreenCardResize: ResizeObserver | null = null;
+  private screenWakeLock: WakeLockSentinel | null = null;
+  private noSleepVideo: HTMLVideoElement | null = null;
+  readonly fullscreenEnterIcon = 'M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5';
+  readonly fullscreenExitIcon = 'M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5';
   /** Default: date bought descending (newest first). */
   holdingsSortKey: keyof HoldingRow | '' = 'buyDate';
   holdingsSortDir: 1 | -1 = -1;
@@ -244,7 +284,7 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
   taxDocFyLabel = '';
   taxDocLoading = false;
   taxDocError: string | null = null;
-  taxDocSelectedFy: number = currentAssessmentYear();
+  taxDocSelectedFy: number = lastFinishedAssessmentYear();
   readonly taxDocFyOptions: number[] = (() => {
     const cur = currentAssessmentYear();
     const opts: number[] = [];
@@ -252,7 +292,7 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
     return opts;
   })();
   /** FA-A3 export (Holdings section): selected assessment year + in-progress flag. */
-  faExportFy: number = currentAssessmentYear();
+  faExportFy: number = lastFinishedAssessmentYear();
   faExportInProgress = false;
   faExportError: string | null = null;
   soldRows: SoldRow[] = [];
@@ -496,7 +536,8 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
         }
         this.lastRefreshedAt = new Date();
         this.loading = false;
-        this.loadHoldings();
+        // Opening the holdings tab requests these too; a plain first load should not ask twice.
+        if (refresh || (!this.holdingsInFlight && this.holdings.length === 0)) this.loadHoldings();
         if (this.soldLoaded) this.loadSold();
         this.updateCanUndoMarkSold();
         this.loadLivePriceHistoryFromDb();
@@ -1845,13 +1886,15 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
   }
 
   loadHoldings(): void {
+    this.holdingsInFlight = true;
     this.dashboardService.getHoldings().subscribe({
       next: (rows) => {
+        this.holdingsInFlight = false;
         this.holdings = rows;
         this.cdr.markForCheck();
         if (this.activeTab === 'holdings') setTimeout(() => this.initOrUpdateHoldingsChart(), 0);
       },
-      error: () => { this.holdings = []; this.cdr.markForCheck(); },
+      error: () => { this.holdingsInFlight = false; this.holdings = []; this.cdr.markForCheck(); },
     });
   }
 
@@ -1883,6 +1926,9 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
     }
     this.destroyMfOverlapCharts();
     this.destroyMetalChart();
+    this.exitCardFullscreen();
+    this.noSleepVideo?.remove();
+    this.noSleepVideo = null;
   }
 
   private initOrUpdateLivePriceChart(): void {
@@ -3195,6 +3241,142 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
     });
   }
 
+  toggleCardFullscreen(card: 'live' | 'holdings', event: Event): void {
+    // A click anywhere on the live price card refreshes it.
+    event.stopPropagation();
+    if (this.fullscreenCard) {
+      this.exitCardFullscreen();
+      return;
+    }
+    const el = (event.currentTarget as HTMLElement).closest<HTMLElement>('.overview-card');
+    const body = el?.querySelector<HTMLElement>('.overview-card__body');
+    if (!el || !body) return;
+    this.fullscreenCard = card;
+    this.fullscreenCardEl = el;
+    document.documentElement.style.overflow = 'hidden';
+    // Refit when the screen changes (rotation, the browser entering full screen) or the figures
+    // change length. A frame later, so resizing the contents can't re-trigger it in the same frame.
+    this.fullscreenCardResize = new ResizeObserver(() => requestAnimationFrame(() => this.fitFullscreenCard()));
+    this.fullscreenCardResize.observe(el);
+    this.fullscreenCardResize.observe(body);
+    // Browser full screen also hides the address bar and tabs. iPhone Safari only grants it to
+    // video, so there the fixed overlay alone covers the page.
+    if (typeof el.requestFullscreen === 'function') el.requestFullscreen().catch(() => {});
+    this.keepScreenOn();
+    this.cdr.markForCheck();
+  }
+
+  exitCardFullscreen(): void {
+    if (!this.fullscreenCard) return;
+    this.allowScreenOff();
+    this.fullscreenCardResize?.disconnect();
+    this.fullscreenCardResize = null;
+    const body = this.fullscreenCardEl?.querySelector<HTMLElement>('.overview-card__body');
+    body?.style.removeProperty('width');
+    body?.style.removeProperty('zoom');
+    this.fullscreenCard = null;
+    this.fullscreenCardEl = null;
+    document.documentElement.style.overflow = '';
+    if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+    this.cdr.markForCheck();
+  }
+
+  /** Esc or the browser's own control can end full screen; close the card with it. */
+  @HostListener('document:fullscreenchange')
+  onDocumentFullscreenChange(): void {
+    if (!document.fullscreenElement) this.exitCardFullscreen();
+  }
+
+  @HostListener('document:keydown.escape')
+  onEscapeKey(): void {
+    this.exitCardFullscreen();
+  }
+
+  /** The browser drops the wake lock, and pauses the video, while the page is hidden. */
+  @HostListener('document:visibilitychange')
+  onDocumentVisibilityChange(): void {
+    if (document.visibilityState !== 'visible' || !this.fullscreenCard) return;
+    if ('wakeLock' in navigator) this.keepScreenOn();
+    else this.noSleepVideo?.play().catch(() => {});
+  }
+
+  /** Stops the phone dimming and locking while a card is full screen. Runs inside the click,
+   *  because iOS only lets the fallback video start from a user gesture. */
+  private keepScreenOn(): void {
+    if ('wakeLock' in navigator) {
+      navigator.wakeLock.request('screen').then(
+        (lock) => {
+          if (this.fullscreenCard) this.screenWakeLock = lock;
+          else lock.release().catch(() => {});
+        },
+        () => {},
+      );
+    } else if (isAppleTouchDevice()) {
+      // Safari offers no wake lock on plain-HTTP pages. A playing video with sound keeps the
+      // display on instead; WebKit only counts one that is in the document, unmuted and not
+      // looping, so seeking back stands in for `loop`.
+      let video = this.noSleepVideo;
+      if (!video) {
+        const v = document.createElement('video');
+        v.setAttribute('playsinline', '');
+        v.setAttribute('aria-hidden', 'true');
+        v.src = NO_SLEEP_MP4;
+        Object.assign(v.style, { position: 'fixed', left: '-100%', top: '-100%' });
+        v.addEventListener('timeupdate', () => {
+          if (v.currentTime > 0.5) v.currentTime = Math.random();
+        });
+        document.body.appendChild(v);
+        video = this.noSleepVideo = v;
+      }
+      // Mix with music already playing on the phone rather than pausing it.
+      setAudioSessionType('ambient');
+      video.play().catch(() => {});
+    }
+  }
+
+  private allowScreenOff(): void {
+    this.screenWakeLock?.release().catch(() => {});
+    this.screenWakeLock = null;
+    if (this.noSleepVideo) {
+      this.noSleepVideo.pause();
+      setAudioSessionType('auto');
+    }
+  }
+
+  /** Zooms the full-screen card's contents to the largest size that still reads cleanly. The
+   *  widest box that fits breaks the fewest rows; a narrower one zooms larger, but only counts
+   *  while every row breaks as it does there and no figure spills out of its box. On a phone in
+   *  portrait that keeps the text near its normal size. */
+  private fitFullscreenCard(): void {
+    const card = this.fullscreenCardEl;
+    const body = card?.querySelector<HTMLElement>('.overview-card__body');
+    if (!card || !body) return;
+    const style = getComputedStyle(card);
+    const availW = card.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
+    const availH = card.clientHeight - parseFloat(style.paddingTop) - parseFloat(style.paddingBottom);
+    body.style.setProperty('zoom', '1');
+    const measure = (width: number) => {
+      body.style.width = `${width}px`;
+      // Figures marked nowrap can push a row wider than the box.
+      return { width: Math.max(width, body.scrollWidth), height: body.offsetHeight };
+    };
+    const zoomToFit = (m: { width: number; height: number }) => Math.min(availW / m.width, availH / m.height, 6);
+    const nowrap = Array.from(body.querySelectorAll<HTMLElement>('*')).filter((el) => getComputedStyle(el).whiteSpace === 'nowrap');
+    const spills = () => nowrap.some((el) => el.clientWidth > 0 && el.scrollWidth > el.clientWidth + 1);
+    const widest = measure(Math.min(availW, 1200));
+    // Shrinks to fit the width, but a block taller than the screen stays at 1 and scrolls.
+    let best = { width: widest.width, zoom: Math.min(availW / widest.width, Math.max(1, zoomToFit(widest))) };
+    for (const candidate of [280, 340, 420, 520, 640, 780, 960]) {
+      if (candidate >= widest.width) break;
+      const m = measure(candidate);
+      if (m.height > widest.height + 2 || spills()) continue;
+      const zoom = zoomToFit(m);
+      if (zoom > best.zoom) best = { width: m.width, zoom };
+    }
+    body.style.width = `${best.width}px`;
+    body.style.setProperty('zoom', String(Math.floor(best.zoom * 100) / 100));
+  }
+
   /** Pulse the card once, so a refresh that returned the same price still looks like it
    *  did something. Restarting the timer keeps rapid clicks from stacking flashes. */
   private flashLivePrice(): void {
@@ -3341,9 +3523,11 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
         this.cdr.markForCheck();
       },
       error: (err) => {
-        this.faExportError = err?.error?.error || err?.message || 'Export failed.';
-        this.faExportInProgress = false;
-        this.cdr.markForCheck();
+        void blobErrorMessage(err, 'Export failed.').then((msg) => {
+          this.faExportError = msg;
+          this.faExportInProgress = false;
+          this.cdr.markForCheck();
+        });
       },
     });
   }
@@ -4373,12 +4557,15 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
   metalEditPricePaid: number | null = null;
   metalEditBuyDate = '';
   metalEditNote = '';
+  /** Exact stored per-gram of the lot being edited; the draft above is its 2dp display figure. */
+  private metalEditStoredPricePaid: number | null = null;
 
   startEditMetalHolding(h: MetalHolding): void {
     this.metalEditId = h.id;
     this.metalEditKey = h.metal;
     this.metalEditGrams = h.grams;
-    this.metalEditPricePaid = h.pricePaidPerGram;
+    this.metalEditPricePaid = Math.round(h.pricePaidPerGram * 100) / 100;
+    this.metalEditStoredPricePaid = h.pricePaidPerGram;
     this.metalEditBuyDate = (h.buyDate || '').slice(0, 10);
     this.metalEditNote = h.note || '';
     this.metalHoldingsError = null;
@@ -4400,10 +4587,14 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
     if (!Number.isFinite(grams) || grams <= 0) { this.metalHoldingsError = 'Enter the grams.'; this.cdr.markForCheck(); return; }
     if (!Number.isFinite(paid) || paid <= 0) { this.metalHoldingsError = 'Enter the price paid per gram.'; this.cdr.markForCheck(); return; }
     if (!date) { this.metalHoldingsError = 'Pick the purchase date.'; this.cdr.markForCheck(); return; }
+    // Lots entered by bill total store per-gram at full precision; resaving the rounded draft
+    // unchanged would move Invested off the bill by paise.
+    const stored = this.metalEditStoredPricePaid;
+    const pricePaidPerGram = stored != null && paid === Math.round(stored * 100) / 100 ? stored : paid;
     this.metalHoldingSaving = true;
     this.cdr.markForCheck();
     this.dashboardService.updateMetalHolding(id, {
-      metal: this.metalEditKey, grams, pricePaidPerGram: paid, buyDate: date, note: this.metalEditNote || '',
+      metal: this.metalEditKey, grams, pricePaidPerGram, buyDate: date, note: this.metalEditNote || '',
     }).subscribe({
       next: () => {
         this.metalHoldingSaving = false;

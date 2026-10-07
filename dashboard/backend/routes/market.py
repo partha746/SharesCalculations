@@ -1,4 +1,7 @@
 """/api/market-status + /api/extended-session blueprint."""
+import time
+from concurrent.futures import ThreadPoolExecutor
+
 import requests
 from flask import Blueprint, jsonify
 
@@ -8,6 +11,35 @@ from services.market import (
 )
 
 bp = Blueprint("market", __name__)
+
+# {"state", "at", "stats"} for Nasdaq's extended-trading tables. They are static outside the
+# pre/post sessions; during one, the TTL stays below the dashboard's 14s poll.
+_EXTENDED_STATS_CACHE = {}
+_EXTENDED_STATS_TTL_IN_SESSION_SEC = 10
+_EXTENDED_STATS_TTL_IDLE_SEC = 120
+
+
+def _extended_session_stats():
+    """{'pre': stats or None, 'post': stats or None} from Nasdaq."""
+    from helpers import gather_data
+
+    state = (_is_premarket_et(), _is_postmarket_et(), _is_nasdaq_open_et())
+    ttl = _EXTENDED_STATS_TTL_IN_SESSION_SEC if state[0] or state[1] else _EXTENDED_STATS_TTL_IDLE_SEC
+    cached = _EXTENDED_STATS_CACHE.get("entry")
+    if cached and cached["state"] == state and time.monotonic() - cached["at"] < ttl:
+        return cached["stats"]
+    rupee_conv_obj = gather_data.RupeeConv()
+    # Nasdaq takes 1-3s per request whether or not the connection is reused, so all three go at
+    # once. The post figures are measured against the quote's regular close; requesting the quote
+    # alongside means extended_session_stats('post') finds it in the quote cache.
+    with ThreadPoolExecutor(max_workers=3) as pool:
+        pool.submit(rupee_conv_obj.nasdaq_quote, "NVDA")
+        futures = {s: pool.submit(rupee_conv_obj.extended_session_stats, s) for s in ("pre", "post")}
+        stats = {s: f.result() for s, f in futures.items()}
+    # None can also mean Nasdaq failed; caching it would blank the card until the entry expired.
+    if all(stats.values()):
+        _EXTENDED_STATS_CACHE["entry"] = {"state": state, "at": time.monotonic(), "stats": stats}
+    return stats
 
 @bp.route("/api/market-status", methods=["GET"])
 def get_market_status():
@@ -61,12 +93,10 @@ def get_extended_session():
     it is absent until the session has started with the recorder running, and is flagged
     `openIsRecorded` to keep it distinguishable from an official figure.
     """
-    from helpers import gather_data
-
-    rupee_conv_obj = gather_data.RupeeConv()
+    stats_by_session = _extended_session_stats()
     sessions = {}
     for session in ("pre", "post"):
-        stats = rupee_conv_obj.extended_session_stats(session) or {}
+        stats = stats_by_session.get(session) or {}
         recorded = recorded_session_open(session) or {}
         if not stats and not recorded:
             sessions[session] = None
