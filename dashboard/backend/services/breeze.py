@@ -1,12 +1,19 @@
 """ICICI Direct Breeze (optional) helpers."""
 import json
 import os
+import threading
+import time
 
 from flask import Response, request
 
 from helpers import config
 
 _DASHBOARD_DIR = os.path.join(config.REPO_ROOT, "dashboard")
+
+# How long after the dashboard starts an ICICI login the callback will take its token.
+LOGIN_WINDOW_SEC = 10 * 60
+_pending_logins = {}
+_pending_lock = threading.Lock()
 
 try:
     import breeze_icici
@@ -39,6 +46,19 @@ def _extract_breeze_session_token():
             if key in data and data[key] is not None and str(data[key]).strip() != "":
                 return str(data[key]).strip()
     return ""
+
+
+def start_login(acct):
+    """Let the callback accept one token for `acct` during the next LOGIN_WINDOW_SEC."""
+    with _pending_lock:
+        _pending_logins[acct] = time.time() + LOGIN_WINDOW_SEC
+
+
+def take_pending_login(acct):
+    """True, once, if a login for `acct` was started and has not expired."""
+    with _pending_lock:
+        expires = _pending_logins.pop(acct, 0)
+    return expires > time.time()
 
 
 def _breeze_public_base():

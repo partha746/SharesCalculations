@@ -19,6 +19,12 @@ _PUBLIC_API_PATHS = frozenset(
 )
 
 
+def _is_public_api_path(path):
+    # ICICI's login result arrives as a cross-site POST, which never carries the SameSite=Lax
+    # session cookie. The callback checks for a login started from the dashboard instead.
+    return path in _PUBLIC_API_PATHS or path == "/api/breeze/callback" or path.startswith("/api/breeze/callback/")
+
+
 def _install_auth_guard(app):
     """Deny every /api request without a session, including before a password is set.
 
@@ -31,7 +37,7 @@ def _install_auth_guard(app):
     @app.before_request
     def _require_session():
         path = request.path or ""
-        if not path.startswith("/api/") or path in _PUBLIC_API_PATHS:
+        if not path.startswith("/api/") or _is_public_api_path(path):
             return None
         # CORS preflight carries no cookies; the browser sends the real request after.
         if request.method == "OPTIONS":

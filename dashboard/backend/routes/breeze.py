@@ -1,13 +1,34 @@
 """/api/breeze/* blueprint."""
+import urllib.parse
+
 from flask import Blueprint, jsonify, redirect, request
 
+from routes.auth import COOKIE_NAME
+from services import auth as auth_svc
 from services.breeze import (
     breeze_icici, _reload_dashboard_env, _extract_breeze_session_token,
     _breeze_public_base, _breeze_callback_url_for_acct, _breeze_dashboard_url,
-    _breeze_js_redirect,
+    _breeze_js_redirect, start_login, take_pending_login, LOGIN_WINDOW_SEC,
 )
 
 bp = Blueprint("breeze", __name__)
+
+
+@bp.route("/api/breeze/login/<acct>", methods=["GET"])
+def breeze_login(acct):
+    """Start an ICICI login from the signed-in dashboard, then hand the browser over to ICICI."""
+    _reload_dashboard_env()
+    if breeze_icici is None or acct not in breeze_icici.valid_account_ids():
+        return _breeze_js_redirect(_breeze_dashboard_url() + "&breeze_error=invalid_account")
+    # A link on another site would carry the Lax session cookie on this GET too.
+    if request.headers.get("Sec-Fetch-Site", "none") not in ("same-origin", "none"):
+        return jsonify({"error": "Start the ICICI login from the dashboard's ICICI tab."}), 403
+    login_url = breeze_icici.login_url(acct)
+    if not login_url:
+        return _breeze_js_redirect(_breeze_dashboard_url() + "&breeze_error=" + urllib.parse.quote("Add the API key first."))
+    start_login(acct)
+    return redirect(login_url)
+
 
 @bp.route("/api/breeze/callback/<acct>", methods=["GET", "POST"])
 def breeze_oauth_callback(acct):
@@ -16,17 +37,23 @@ def breeze_oauth_callback(acct):
         return _breeze_js_redirect(_breeze_dashboard_url() + "&breeze_error=invalid_account")
     token = _extract_breeze_session_token()
     print(f"[breeze-callback/{acct}] token={'YES' if token else 'EMPTY'}, query={request.query_string.decode()}", flush=True)
-    if token:
-        try:
-            breeze_icici.connect_session(token, acct)
-            dest = _breeze_dashboard_url() + f"&breeze_connected={acct}"
-            print(f"[breeze-callback/{acct}] connect_session OK, redirecting to: {dest}", flush=True)
-            return _breeze_js_redirect(dest)
-        except Exception as e:
-            print(f"[breeze-callback/{acct}] connect_session FAILED: {e}", flush=True)
-            import urllib.parse
-            return _breeze_js_redirect(_breeze_dashboard_url() + "&breeze_error=" + urllib.parse.quote(str(e)))
-    return _breeze_js_redirect(_breeze_dashboard_url() + "&breeze_error=no_token")
+    if not token:
+        return _breeze_js_redirect(_breeze_dashboard_url() + "&breeze_error=no_token")
+    # ICICI posts here from its own site, so the session cookie is missing and app.py lets the
+    # request through. Only a login started from the dashboard may hand over a token; otherwise
+    # anyone on the network could connect a different ICICI account.
+    if not take_pending_login(acct) and not auth_svc.resolve_session(request.cookies.get(COOKIE_NAME)):
+        print(f"[breeze-callback/{acct}] rejected: no login started from the dashboard", flush=True)
+        message = f"Use Connect on the ICICI tab, then finish the ICICI login within {LOGIN_WINDOW_SEC // 60} minutes."
+        return _breeze_js_redirect(_breeze_dashboard_url() + "&breeze_error=" + urllib.parse.quote(message))
+    try:
+        breeze_icici.connect_session(token, acct)
+        dest = _breeze_dashboard_url() + f"&breeze_connected={acct}"
+        print(f"[breeze-callback/{acct}] connect_session OK, redirecting to: {dest}", flush=True)
+        return _breeze_js_redirect(dest)
+    except Exception as e:
+        print(f"[breeze-callback/{acct}] connect_session FAILED: {e}", flush=True)
+        return _breeze_js_redirect(_breeze_dashboard_url() + "&breeze_error=" + urllib.parse.quote(str(e)))
 
 
 # Keep old path as alias for account 1

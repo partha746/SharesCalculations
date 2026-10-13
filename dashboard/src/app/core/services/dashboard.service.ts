@@ -228,6 +228,11 @@ export class DashboardService {
     return this.http.get<BreezeAccountStatus>(`${this.apiUrl}/breeze/status/${acct}?t=${Date.now()}`);
   }
 
+  /** Page that starts an ICICI login: opened in the browser, it redirects on to ICICI. */
+  breezeLoginStartUrl(acct: string): string {
+    return `${this.apiUrl}/breeze/login/${encodeURIComponent(acct)}`;
+  }
+
   postBreezeDisconnect(acct: string = '1'): Observable<{ success: boolean }> {
     return this.http.post<{ success: boolean }>(`${this.apiUrl}/breeze/disconnect/${acct}`, {});
   }

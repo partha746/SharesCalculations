@@ -620,7 +620,7 @@
                         } @else if (acct.loginUrl) {
                           <button type="button" class="icici-btn icici-btn--primary"
                             [disabled]="breezeConnectingAcct === acctId"
-                            (click)="connectBreezePopup(acctId, acct.loginUrl)">
+                            (click)="connectBreezePopup(acctId)">
                             {{ breezeConnectingAcct === acctId ? 'Connecting…' : 'Connect' }}
                           </button>
                         }

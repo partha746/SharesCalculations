@@ -776,10 +776,13 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
    * connection by polling /api/breeze/status. Closes the popup and refreshes once connected.
    * Falls back to a full-page redirect if the popup is blocked.
    */
-  connectBreezePopup(acctId: string, loginUrl: string): void {
-    const popup = window.open(loginUrl, 'icici_login', 'width=480,height=760,menubar=no,toolbar=no');
+  connectBreezePopup(acctId: string): void {
+    // The backend records that the login started here before sending the browser on to ICICI;
+    // ICICI's callback is only accepted after that.
+    const startUrl = this.dashboardService.breezeLoginStartUrl(acctId);
+    const popup = window.open(startUrl, 'icici_login', 'width=480,height=760,menubar=no,toolbar=no');
     if (!popup) {
-      window.location.href = loginUrl; // popup blocked -> fall back to redirect flow
+      window.location.href = startUrl; // popup blocked -> fall back to redirect flow
       return;
     }
     if (this.breezeConnectPollId != null) clearInterval(this.breezeConnectPollId);
