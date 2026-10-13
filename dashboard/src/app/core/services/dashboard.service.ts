@@ -20,9 +20,12 @@ import {
   MetalHoldingsResponse,
   MetalKey,
   MetalsResponse,
+  MfCsvImportResult,
   MfHoldingsResponse,
   MfOverlapResponse,
   MfSearchResult,
+  MfStatementImportResult,
+  MfStatementsResponse,
   NetworthItem,
   NetworthItemsResponse,
   NewsResponse,
@@ -126,8 +129,22 @@ export class DashboardService {
   deleteMfHolding(id: number): Observable<{ ok: boolean }> {
     return this.http.delete<{ ok: boolean }>(`${this.apiUrl}/mf/holdings/${id}`);
   }
-  importMfCsv(account: string, csv: string): Observable<{ imported: any[]; skipped: any[] }> {
-    return this.http.post<{ imported: any[]; skipped: any[] }>(`${this.apiUrl}/mf/import`, { account, csv });
+  importMfCsv(account: string, csv: string): Observable<MfCsvImportResult> {
+    return this.http.post<MfCsvImportResult>(`${this.apiUrl}/mf/import`, { account, csv });
+  }
+  /** Reads a CAS PDF: fills in the account's folio numbers and keeps its transactions for capital gains. */
+  importMfStatement(account: string, file: File, password: string): Observable<MfStatementImportResult> {
+    const form = new FormData();
+    form.append('account', account);
+    form.append('password', password);
+    form.append('file', file, file.name);
+    return this.http.post<MfStatementImportResult>(`${this.apiUrl}/mf/statement`, form);
+  }
+  getMfStatements(): Observable<MfStatementsResponse> {
+    return this.http.get<MfStatementsResponse>(`${this.apiUrl}/mf/statements?t=${Date.now()}`);
+  }
+  forgetMfStatement(account: string): Observable<{ ok: boolean }> {
+    return this.http.delete<{ ok: boolean }>(`${this.apiUrl}/mf/statements/${encodeURIComponent(account)}`);
   }
   /** Look-through fund overlap. Recomputed server-side from current holdings; `refresh`
    * also re-fetches the underlying fund portfolios from the provider. */

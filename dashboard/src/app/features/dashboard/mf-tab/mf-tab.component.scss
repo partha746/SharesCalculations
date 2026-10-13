@@ -44,6 +44,43 @@
   &:hover { border-color: #58a6ff; color: #58a6ff; }
 }
 .mf-error { color: #f85149; font-size: 0.88rem; }
+.mf-warn { color: #d29922; font-size: 0.85rem; margin: 0 0 0.35rem; }
+.mf-result { margin: 0 0 1rem; }
+.mf-result .mf-note { margin-bottom: 0.5rem; }
+.mf-list {
+  margin: 0 0 0.75rem;
+  padding-left: 1.2rem;
+  font-size: 0.83rem;
+  color: #c9d1d9;
+  li { margin: 0.15rem 0; }
+}
+.mf-list--warn { color: #d29922; }
+.mf-link {
+  font: inherit;
+  font-size: 0.8rem;
+  background: none;
+  border: none;
+  padding: 0 0.25rem;
+  color: #58a6ff;
+  cursor: pointer;
+  &:hover:not(:disabled) { text-decoration: underline; }
+  &:disabled { color: #6e7681; cursor: default; }
+}
+.mf-cas {
+  margin-top: 1rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid #21262d;
+  a { color: #58a6ff; }
+  .mf-add { margin-bottom: 0.75rem; }
+}
+.mf-cas__summary {
+  cursor: pointer;
+  font-size: 0.85rem;
+  color: #c9d1d9;
+  margin-bottom: 0.6rem;
+  &:hover { color: #58a6ff; }
+}
+.mf-field--file .mf-field__input { padding: 0.3rem 0.45rem; max-width: 100%; }
 .mf-muted { color: #6e7681; }
 .mf-pos { color: #3fb950; font-weight: 600; }
 .mf-neg { color: #f85149; font-weight: 600; }

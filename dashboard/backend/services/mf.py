@@ -2,7 +2,8 @@
 
 ICICI Breeze's MF endpoints require a facility that isn't enabled for the account, so live NAV is
 sourced from AMFI via the free mfapi.in API (no auth). Users add holdings manually (scheme + units
-+ optional invested cost); we compute current value and P&L from the latest NAV.
++ optional invested cost), import a CSV, or import a CAS statement (services/mf_cas.py); we compute
+current value and P&L from the latest NAV.
 """
 import csv as _csv
 import io
@@ -34,6 +35,10 @@ def _ensure_table(conn):
     cols = {r[1] for r in conn.execute("PRAGMA table_info(mf_holdings)").fetchall()}
     if "account" not in cols:
         conn.execute("ALTER TABLE mf_holdings ADD COLUMN account TEXT NOT NULL DEFAULT '1'")
+    # XIRR as reported by the broker's CSV export, shown when no statement gives one.
+    if "csv_xirr" not in cols:
+        conn.execute("ALTER TABLE mf_holdings ADD COLUMN csv_xirr REAL")
+        conn.execute("ALTER TABLE mf_holdings ADD COLUMN csv_xirr_date TEXT")
 
 
 def search_schemes(query):
@@ -70,27 +75,40 @@ _COMPOUND_SPLITS = {
 }
 
 
-def _clean_query(name):
+def _clean_query(name, split_compounds=True):
     n = re.sub(r"[-/(),.]", " ", (name or "").lower())
-    for k, v in _COMPOUND_SPLITS.items():
-        n = n.replace(k, v)
+    if split_compounds:
+        for k, v in _COMPOUND_SPLITS.items():
+            n = n.replace(k, v)
     toks = [t for t in n.split() if t and t not in _NOISE_WORDS]
     return " ".join(toks)
+
+
+def _broader_queries(name):
+    """The name without plan words, most specific first."""
+    out = []
+    # AMFI spells compounds both ways ("Mid Cap Fund", "Large and Midcap Fund"), so try each.
+    for split in (True, False):
+        toks = _clean_query(name, split).split()
+        # Then the most significant leading tokens.
+        for q in (" ".join(toks), " ".join(toks[:4])):
+            if q and q not in out:
+                out.append(q)
+    return out
 
 
 def _search_with_fallback(name):
     cands = search_schemes(name)
     if cands:
         return cands
-    cleaned = _clean_query(name)
-    if cleaned and cleaned.lower() != (name or "").strip().lower():
-        cands = search_schemes(cleaned)
-        if cands:
-            return cands
-    toks = cleaned.split()
-    if len(toks) > 4:  # try the most significant leading tokens
-        cands = search_schemes(" ".join(toks[:4]))
-    return cands
+    tried = {(name or "").strip().lower()}
+    for q in _broader_queries(name):
+        if q not in tried:
+            tried.add(q)
+            cands = search_schemes(q)
+            if cands:
+                return cands
+    return []
 
 
 def live_nav(scheme_code):
@@ -153,35 +171,80 @@ def _plan_flags(name):
     }
 
 
-def resolve_scheme(name, nav_hint=None):
-    """Best AMFI scheme code for a CSV scheme name.
-    Scores candidates by token overlap + plan match (Direct/Regular, Growth/IDCW), then breaks ties by
-    closeness of live NAV to nav_hint (disambiguates Regular vs Direct). Returns dict or None.
-    """
-    candidates = _search_with_fallback(name)
-    if not candidates:
-        return None
+# A CSV's recorded NAV can be some days older than the latest one.
+_NAV_TOLERANCE = 0.15
+
+
+def _ranked(name, candidates):
+    """(score, candidate) by token overlap + plan match (Direct/Regular, Growth/IDCW), best first."""
     target_tokens = _norm_tokens(name)
     tflags = _plan_flags(name)
-
     scored = []
     for c in candidates:
-        ctok = _norm_tokens(c["schemeName"])
         cflags = _plan_flags(c["schemeName"])
-        score = len(target_tokens & ctok)
+        score = len(target_tokens & _norm_tokens(c["schemeName"]))
         score += 3 if cflags["direct"] == tflags["direct"] else -3
         score += 2 if cflags["idcw"] == tflags["idcw"] else -2
         scored.append((score, c))
     scored.sort(key=lambda x: x[0], reverse=True)
+    return scored
 
-    top = [c for _, c in scored[:4]]
-    hint = None
+
+def _nav_date_key(nav):
+    try:
+        d, m, y = (int(p) for p in (nav.get("date") or "").split("-"))
+        return (y, m, d)
+    except ValueError:
+        return (0, 0, 0)
+
+
+def _nav_fits(nav, hint):
+    v = nav.get("nav") or 0
+    return v > 0 and not nav.get("unavailable") and abs(v - hint) <= hint * _NAV_TOLERANCE
+
+
+def _match_by_nav(name, candidates, hint):
+    """Best-named candidate whose NAV fits the hint, also searching the name without plan words
+    (AMFI drops them from some scheme names, e.g. "Motilal Oswal Midcap Fund")."""
+    pool = {c["schemeCode"]: c for c in candidates}
+    for q in _broader_queries(name):
+        for c in search_schemes(q):
+            pool.setdefault(c["schemeCode"], c)
+    fits = []
+    for score, c in _ranked(name, list(pool.values()))[:12]:
+        nv = live_nav(c["schemeCode"])
+        if _nav_fits(nv, hint):
+            fits.append((-score, abs(nv["nav"] - hint), c, nv))
+    if not fits:
+        return None
+    fits.sort(key=lambda f: f[:2])
+    return fits[0][2], fits[0][3]
+
+
+def resolve_scheme(name, nav_hint=None):
+    """Best AMFI scheme code for a CSV scheme name.
+    Scores candidates by token overlap + plan match, then breaks ties by closeness of live NAV to
+    nav_hint (disambiguates Regular vs Direct). With a nav_hint, a fund whose NAV is far from it is
+    never returned: the search widens, and None comes back when nothing fits. Returns dict or None.
+    """
+    candidates = _search_with_fallback(name)
+    if not candidates:
+        return None
     try:
         hint = float(nav_hint) if nav_hint not in (None, "") else None
     except (TypeError, ValueError):
         hint = None
+    if hint is not None and hint <= 0:
+        hint = None
 
+    ranked = _ranked(name, candidates)
+    top = [c for _, c in ranked[:4]]
     best = top[0]
+    if not hint:
+        tied = [c for s, c in ranked[:4] if s == ranked[0][0]]
+        if len(tied) > 1:
+            # Without a NAV to compare, a scheme that's still priced beats a wound-up plan.
+            best = max(tied, key=lambda c: _nav_date_key(live_nav(c["schemeCode"])))
     best_nav = live_nav(best["schemeCode"])
     if hint and len(top) > 1:
         # Pick the candidate whose live NAV is closest to the CSV's recorded NAV.
@@ -191,6 +254,11 @@ def resolve_scheme(name, nav_hint=None):
             diff = abs((nv.get("nav") or 0) - hint)
             if (nv.get("nav") or 0) > 0 and diff < best_diff:
                 best, best_nav, best_diff = c, nv, diff
+    if hint and not _nav_fits(best_nav, hint):
+        found = _match_by_nav(name, candidates, hint)
+        if found is None:
+            return None
+        best, best_nav = found
     return {"schemeCode": best["schemeCode"], "schemeName": best["schemeName"], "nav": best_nav.get("nav") or 0}
 
 
@@ -199,6 +267,8 @@ _CSV_NAME_KEYS = ("scheme", "fund name", "scheme name")
 _CSV_UNITS_KEYS = ("units held", "units", "unit")
 _CSV_INVESTED_KEYS = ("value at cost", "cost value", "invested", "amount invested", "purchase value")
 _CSV_NAVHINT_KEYS = ("last recorded nav", "current nav", "nav")
+_CSV_NAVDATE_KEYS = ("last recorded nav on", "nav date")
+_CSV_XIRR_KEYS = ("xirr %", "xirr")
 _CSV_FOLIO_KEYS = ("folio",)
 
 
@@ -215,9 +285,10 @@ def _pick_col(headers_lower, keys):
 
 
 def import_csv(csv_text, account="1"):
-    """Parse an ICICI-style MF portfolio CSV, resolve each scheme to AMFI, and upsert into mf_holdings.
-    Upsert key = (account, scheme_code): existing rows get units/invested updated; new ones inserted.
-    Returns {imported: [...], skipped: [...]}.
+    """Parse an ICICI-style MF portfolio CSV, resolve each scheme to AMFI, and make the account match it.
+    The CSV is the record for units, cost and XIRR. Key = (account, scheme_code): existing rows get those
+    updated, new ones are inserted, and once every row has matched, the account's other funds are
+    removed. Returns {imported: [...], skipped: [...], removed: [...]}.
     """
     text = (csv_text or "").lstrip("\ufeff")
     reader = _csv.DictReader(io.StringIO(text))
@@ -230,6 +301,8 @@ def import_csv(csv_text, account="1"):
         raise ValueError(f"Could not find scheme/units columns. Headers: {list(reader.fieldnames)}")
     invested_col = _pick_col(headers_lower, _CSV_INVESTED_KEYS)
     navhint_col = _pick_col(headers_lower, _CSV_NAVHINT_KEYS)
+    navdate_col = _pick_col(headers_lower, _CSV_NAVDATE_KEYS)
+    xirr_col = _pick_col(headers_lower, _CSV_XIRR_KEYS)
     folio_col = _pick_col(headers_lower, _CSV_FOLIO_KEYS)
     # "Scheme" can collide with "scheme" of category; prefer a column literally named Scheme over Fund.
     acct = str(account or "1").strip() or "1"
@@ -240,36 +313,57 @@ def import_csv(csv_text, account="1"):
         except (TypeError, ValueError):
             return None
 
-    imported, skipped = [], []
+    parsed = []
+    for row in reader:
+        name = (row.get(name_col) or "").strip()
+        units = _f(row.get(units_col))
+        if not name or not units or units <= 0:
+            continue
+        invested = _f(row.get(invested_col)) if invested_col else None
+        nav_hint = _f(row.get(navhint_col)) if navhint_col else None
+        xirr = _f(row.get(xirr_col)) if xirr_col else None
+        xirr_date = (row.get(navdate_col) or "").strip() if (navdate_col and xirr is not None) else None
+        folio = (row.get(folio_col) or "").strip() if folio_col else ""
+        parsed.append((name, units, invested, xirr, xirr_date, folio, resolve_scheme(name, nav_hint)))
+
+    # Matching is network-bound, so it's done before the write transaction to keep the lock short.
+    imported, skipped, removed = [], [], []
+    kept = {}  # scheme_code -> id of the row this import wrote
     with get_db() as conn:
         _ensure_table(conn)
-        for row in reader:
-            name = (row.get(name_col) or "").strip()
-            units = _f(row.get(units_col))
-            if not name or not units or units <= 0:
-                continue
-            invested = _f(row.get(invested_col)) if invested_col else None
-            nav_hint = _f(row.get(navhint_col)) if navhint_col else None
-            folio = (row.get(folio_col) or "").strip() if folio_col else ""
-            match = resolve_scheme(name, nav_hint)
+        for name, units, invested, xirr, xirr_date, folio, match in parsed:
             if not match:
-                skipped.append({"scheme": name, "reason": "no AMFI match"})
+                skipped.append({"scheme": name, "reason": "no AMFI fund with this name and NAV"})
                 continue
             code = match["schemeCode"]
-            existing = conn.execute(
+            existing = None if code in kept else conn.execute(
                 "SELECT id FROM mf_holdings WHERE account = ? AND scheme_code = ?", (acct, code)
             ).fetchone()
-            if existing:
+            if code in kept:
+                # The same fund on two rows (two folios) adds up; their XIRRs can't be combined.
                 conn.execute(
-                    "UPDATE mf_holdings SET units = ?, invested = ?, scheme_name = ?, folio = ? WHERE id = ?",
-                    (units, invested, match["schemeName"], folio, existing[0]),
+                    "UPDATE mf_holdings SET units = units + ?, "
+                    "invested = CASE WHEN invested IS NULL OR ? IS NULL THEN NULL ELSE invested + ? END, "
+                    "csv_xirr = NULL, csv_xirr_date = NULL WHERE id = ?",
+                    (units, invested, invested, kept[code]),
                 )
+                action = "combined"
+            elif existing:
+                # A CSV without folios keeps the folio numbers a statement filled in.
+                conn.execute(
+                    "UPDATE mf_holdings SET units = ?, invested = ?, scheme_name = ?, folio = COALESCE(NULLIF(?, ''), folio), "
+                    "csv_xirr = ?, csv_xirr_date = ? WHERE id = ?",
+                    (units, invested, match["schemeName"], folio, xirr, xirr_date, existing[0]),
+                )
+                kept[code] = existing[0]
                 action = "updated"
             else:
-                conn.execute(
-                    "INSERT INTO mf_holdings (scheme_code, scheme_name, units, invested, folio, account) VALUES (?, ?, ?, ?, ?, ?)",
-                    (code, match["schemeName"], units, invested, folio, acct),
+                cur = conn.execute(
+                    "INSERT INTO mf_holdings (scheme_code, scheme_name, units, invested, folio, account, csv_xirr, csv_xirr_date) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    (code, match["schemeName"], units, invested, folio, acct, xirr, xirr_date),
                 )
+                kept[code] = cur.lastrowid
                 action = "added"
             imported.append({
                 "csvScheme": name,
@@ -280,7 +374,18 @@ def import_csv(csv_text, account="1"):
                 "nav": match["nav"],
                 "action": action,
             })
-    return {"imported": imported, "skipped": skipped}
+        if not imported and not skipped:
+            raise ValueError("This CSV has no fund rows with units, so nothing was changed.")
+        # A skipped row may be one of the account's funds, so only a fully matched CSV removes anything.
+        if not skipped:
+            kept_ids = set(kept.values())
+            for r in conn.execute(
+                "SELECT id, scheme_name FROM mf_holdings WHERE account = ? ORDER BY scheme_name", (acct,)
+            ).fetchall():
+                if r["id"] not in kept_ids:
+                    conn.execute("DELETE FROM mf_holdings WHERE id = ?", (r["id"],))
+                    removed.append({"id": r["id"], "scheme": r["scheme_name"]})
+    return {"imported": imported, "skipped": skipped, "removed": removed}
 
 
 def delete_holding(holding_id):
@@ -306,14 +411,15 @@ def list_holdings(account=None):
     acct = str(account).strip() if account not in (None, "", "all") else None
     with get_db() as conn:
         _ensure_table(conn)
+        cols = "id, scheme_code, scheme_name, units, invested, folio, account, csv_xirr, csv_xirr_date"
         if acct:
             rows = conn.execute(
-                "SELECT id, scheme_code, scheme_name, units, invested, folio, account FROM mf_holdings WHERE account = ? ORDER BY scheme_name",
+                f"SELECT {cols} FROM mf_holdings WHERE account = ? ORDER BY scheme_name",
                 (acct,),
             ).fetchall()
         else:
             rows = conn.execute(
-                "SELECT id, scheme_code, scheme_name, units, invested, folio, account FROM mf_holdings ORDER BY account, scheme_name"
+                f"SELECT {cols} FROM mf_holdings ORDER BY account, scheme_name"
             ).fetchall()
 
     holdings = []
@@ -345,6 +451,9 @@ def list_holdings(account=None):
             "invested": invested,
             "pnl": pnl,
             "pnlPct": pnl_pct,
+            # As reported in the last CSV import; it isn't recomputed as the NAV moves.
+            "xirr": r["csv_xirr"],
+            "xirrDate": r["csv_xirr_date"] or "",
             "navUnavailable": not nav_ok,
             "folio": r["folio"] or "",
         })

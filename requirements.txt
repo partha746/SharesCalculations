@@ -17,6 +17,8 @@ certifi>=2024.7.4
 retrying>=1.3.4
 
 vaderSentiment>=3.3.2
+# Reads CAMS/KFintech/NSDL/CDSL consolidated account statements (mutual funds) offline.
+casparser>=1.4.1
 
 # Legacy ELK push (helpers/eks.py) is not used by the dashboard. Install
 # separately if you need it:  pip install elasticsearch pytz

@@ -12,12 +12,17 @@ Session (per account):
   1. Register redirect URL in ICICI (must match /api/breeze/callback/1 or /2 — see /api/breeze/status/<acct>).
   2. Open the login URL, log in; ICICI redirects with apisession in the query string.
   3. The callback auto-connects and redirects back to the dashboard.
+  4. The session token is saved, so a backend restart reconnects until ICICI refuses it or the
+     account is disconnected.
 
 SDK: https://pypi.org/project/breeze-connect/
 """
 from __future__ import annotations
 
+import importlib.util
 import os
+import socket
+import sys
 import threading
 import urllib.parse
 from datetime import datetime, timedelta, timezone
@@ -31,6 +36,16 @@ _PORTFOLIO_HOLDINGS_EXCHANGES = frozenset({"NSE", "NFO"})
 # Accounts 1 & 2 come from env (.env); additional accounts are stored in the DB.
 _ENV_ACCOUNT_IDS = ("1", "2")
 
+# The SDK sets no timeouts on its calls to ICICI, so a stalled ICICI server would hang the request.
+_SIGN_IN_TIMEOUT_SEC = 60
+_SDK_IMPORT_SOCKET_TIMEOUT_SEC = 30
+_NAME_TIMEOUT_SEC = 10
+_SAVED_SESSION_MAX_AGE = timedelta(hours=24)
+_RESTORE_WAIT_SEC = 15
+
+_sdk_import_lock = threading.Lock()
+_restored = threading.Event()
+_restored.set()
 _lock = threading.Lock()
 _clients: Dict[str, Any] = {}
 _account_names: Dict[str, str] = {}  # acct -> holder name (from customer details)
@@ -88,6 +103,46 @@ def _save_account_name(acct: str, name: str) -> None:
         pass  # naming is cosmetic; never fail a request over it
 
 
+def _ensure_sessions_table(conn):
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS breeze_sessions (
+           id TEXT PRIMARY KEY, token TEXT NOT NULL, saved_at TEXT NOT NULL
+        )"""
+    )
+
+
+def _save_session(acct: str, token: str) -> None:
+    try:
+        with get_db() as conn:
+            _ensure_sessions_table(conn)
+            conn.execute(
+                "INSERT INTO breeze_sessions (id, token, saved_at) VALUES (?, ?, ?) "
+                "ON CONFLICT(id) DO UPDATE SET token = excluded.token, saved_at = excluded.saved_at",
+                (acct, token, datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")),
+            )
+    except Exception as e:
+        print(f"[breeze] account {acct} session not saved, so a restart will sign it out: {e!r}", flush=True)
+
+
+def _forget_session(acct: str) -> None:
+    with get_db() as conn:
+        _ensure_sessions_table(conn)
+        conn.execute("DELETE FROM breeze_sessions WHERE id = ?", (acct,))
+
+
+def _saved_sessions() -> Dict[str, str]:
+    cutoff = (datetime.now(timezone.utc) - _SAVED_SESSION_MAX_AGE).strftime("%Y-%m-%dT%H:%M:%S")
+    try:
+        with get_db() as conn:
+            _ensure_sessions_table(conn)
+            conn.execute("DELETE FROM breeze_sessions WHERE saved_at < ?", (cutoff,))
+            rows = conn.execute("SELECT id, token FROM breeze_sessions ORDER BY id").fetchall()
+        return {r["id"]: r["token"] for r in rows}
+    except Exception as e:
+        print(f"[breeze] saved sessions unreadable: {e!r}", flush=True)
+        return {}
+
+
 def valid_account_ids() -> tuple:
     ids = list(_ENV_ACCOUNT_IDS)
     for k in _db_accounts():
@@ -138,14 +193,59 @@ def delete_db_account(acct: str) -> None:
 
 
 def sdk_installed() -> bool:
-    # NB: importing breeze_connect performs a network download (SecurityMaster) at import time,
-    # so a transient DNS/network failure raises here too — treat any failure as "not available"
-    # rather than crashing the caller (e.g. /api/breeze/status).
+    # Only looks for the package: importing it downloads ICICI's security master (see _sdk_class).
+    return importlib.util.find_spec("breeze_connect") is not None
+
+
+def _sdk_class():
+    """BreezeConnect. Importing breeze_connect downloads ICICI's security master with no timeout, and
+    a stalled download would hold the import lock for good, so the import runs with a socket timeout."""
+    with _sdk_import_lock:
+        if "breeze_connect" not in sys.modules:
+            previous = socket.getdefaulttimeout()
+            socket.setdefaulttimeout(_SDK_IMPORT_SOCKET_TIMEOUT_SEC)
+            try:
+                import breeze_connect  # noqa: F401
+            except OSError as e:
+                raise RuntimeError(f"Couldn't reach ICICI ({e}). Try connecting again.") from e
+            finally:
+                socket.setdefaulttimeout(previous)
+    from breeze_connect import BreezeConnect
+    return BreezeConnect
+
+
+def preload_sdk() -> None:
+    """Import the SDK in the background, so it's ready by the time ICICI calls back."""
+    if "breeze_connect" not in sys.modules and not _sdk_import_lock.locked():
+        threading.Thread(target=_preload, name="breeze-import", daemon=True).start()
+
+
+def _preload() -> None:
     try:
-        import breeze_connect  # noqa: F401
-        return True
-    except Exception:
-        return False
+        _sdk_class()
+    except Exception as e:
+        print(f"[breeze] SDK import failed: {e!r}", flush=True)
+
+
+def _within(seconds: float, fn):
+    """fn() on a worker thread, raising TimeoutError if it takes longer; a stalled worker is left behind."""
+    done = threading.Event()
+    out: Dict[str, Any] = {}
+
+    def run():
+        try:
+            out["value"] = fn()
+        except BaseException as e:
+            out["error"] = e
+        finally:
+            done.set()
+
+    threading.Thread(target=run, name="breeze-call", daemon=True).start()
+    if not done.wait(seconds):
+        raise TimeoutError(f"ICICI didn't respond within {seconds:g} seconds. Try connecting again.")
+    if "error" in out:
+        raise out["error"]
+    return out.get("value")
 
 
 def get_env_config(acct: str = "1") -> dict:
@@ -178,7 +278,7 @@ def get_client(acct: str = "1"):
         return _clients.get(acct)
 
 
-def connect_session(session_token: str, acct: str = "1") -> Any:
+def connect_session(session_token: str, acct: str = "1", restoring: bool = False) -> Any:
     if not sdk_installed():
         raise RuntimeError("breeze-connect is not installed (pip install breeze-connect)")
     cfg = get_env_config(acct)
@@ -188,22 +288,60 @@ def connect_session(session_token: str, acct: str = "1") -> Any:
     if not t:
         raise ValueError("session_token is required")
 
-    from breeze_connect import BreezeConnect
+    def sign_in():
+        b = _sdk_class()(api_key=cfg["api_key"])
+        # The security master is only for the SDK's live feeds, which the dashboard doesn't use, and
+        # generate_session would download it twice more.
+        b.get_stock_script_list = lambda: None
+        b.generate_session(api_secret=cfg["api_secret"], session_token=t)
+        return b
 
-    b = BreezeConnect(api_key=cfg["api_key"])
-    b.generate_session(api_secret=cfg["api_secret"], session_token=t)
+    b = _within(_SIGN_IN_TIMEOUT_SEC, sign_in)
     with _lock:
+        # A sign-in from the dashboard that finished during the restore is the newer session.
+        if restoring and acct in _clients:
+            return _clients[acct]
         _clients[acct] = b
         _account_names.pop(acct, None)
         # generate_session overwrites b.session_key with a decoded value, so keep the
         # original token around: get_customer_details needs the raw SessionToken.
         _session_tokens[acct] = t
+    if not restoring:
+        _save_session(acct, t)
     # Capture the account holder name for display (best-effort).
     try:
         get_account_name(acct)
     except Exception:
         pass
     return b
+
+
+def restore_sessions() -> None:
+    """Reconnect, in the background, the accounts whose sessions were saved before a restart."""
+    _restored.clear()
+    threading.Thread(target=_restore_sessions, name="breeze-restore", daemon=True).start()
+
+
+def _restore_sessions() -> None:
+    try:
+        for acct, token in _saved_sessions().items():
+            if get_client(acct) is not None:
+                continue
+            try:
+                connect_session(token, acct, restoring=True)
+                print(f"[breeze] account {acct} reconnected with its saved session", flush=True)
+            except (TimeoutError, RuntimeError) as e:
+                print(f"[breeze] account {acct} not reconnected; keeping its session for the next restart: {e}", flush=True)
+            except Exception as e:
+                print(f"[breeze] account {acct} saved session refused, so it's forgotten: {e}", flush=True)
+                _forget_session(acct)
+    finally:
+        _restored.set()
+
+
+def wait_for_restore() -> None:
+    """Give a restore that's under way a moment, so status doesn't show its accounts as signed out."""
+    _restored.wait(_RESTORE_WAIT_SEC)
 
 
 # Candidate keys (across Breeze/ICICI response variants) that hold the holder name.
@@ -228,7 +366,7 @@ def get_account_name(acct: str = "1") -> Optional[str]:
         return None
     token = _session_tokens.get(acct) or getattr(b, "session_key", "") or ""
     try:
-        res = b.get_customer_details(api_session=token) or {}
+        res = _within(_NAME_TIMEOUT_SEC, lambda: b.get_customer_details(api_session=token)) or {}
         success = res.get("Success") if isinstance(res, dict) else None
         if isinstance(success, dict):
             for key in _NAME_KEYS:
@@ -247,6 +385,7 @@ def get_account_name(acct: str = "1") -> Optional[str]:
 
 
 def disconnect(acct: str = "1") -> None:
+    _forget_session(acct)
     with _lock:
         _clients.pop(acct, None)
         _account_names.pop(acct, None)

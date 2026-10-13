@@ -1,0 +1,36 @@
+.mf-gains { margin-top: 1rem; }
+.mf-gains__years { display: flex; flex-wrap: wrap; gap: 0.35rem; margin-bottom: 0.85rem; }
+.mf-gains__years .mf-chip { margin-left: 0; }
+.mf-gains__cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 0.6rem;
+  margin-bottom: 0.85rem;
+}
+.mf-gains__card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  padding: 0.6rem 0.75rem;
+  background: #0d1117;
+  border: 1px solid #21262d;
+  border-radius: 8px;
+}
+.mf-gains__label {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #8b949e;
+}
+.mf-gains__value { font-size: 1.05rem; font-weight: 600; }
+.mf-gains__sub { font-size: 0.75rem; color: #8b949e; }
+.mf-gains__table {
+  min-width: 820px;
+  tbody td.mf-pos { color: #3fb950; }
+  tbody td.mf-neg { color: #f85149; }
+  tbody td.mf-muted { color: #6e7681; }
+  tfoot th { text-align: left; }
+}
+.mf-num { text-align: right !important; font-variant-numeric: tabular-nums; }
+.mf-gains__folio { display: block; font-size: 0.72rem; color: #6e7681; margin-top: 0.15rem; }
+.mf-gains__footnote { font-size: 0.75rem; color: #6e7681; line-height: 1.5; margin: 0.75rem 0 0; }

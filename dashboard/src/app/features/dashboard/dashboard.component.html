@@ -684,7 +684,7 @@
               <p class="tax-tab__error">{{ breezeConnectError }}</p>
             }
             <!-- Mutual fund management (works without an ICICI login) -->
-            <app-mf-tab [accountNames]="breezeAccountNames" (changed)="loadMfHoldings()"></app-mf-tab>
+            <app-mf-tab [accountNames]="breezeAccountNames" (changed)="loadMfHoldings()" (statementChanged)="mfStatementsVersion = mfStatementsVersion + 1"></app-mf-tab>
 
             @if (breezeAnyConnected) {
               <div class="icici-panel">
@@ -765,6 +765,7 @@
                         <th class="icici-th--sort icici-th--num" (click)="setIciciSort('value')">Value <span class="icici-th__sort">{{ iciciSortIndicator('value') }}</span></th>
                         <th class="icici-th--sort icici-th--num" (click)="setIciciSort('pl')">P&amp;L <span class="icici-th__sort">{{ iciciSortIndicator('pl') }}</span></th>
                         <th class="icici-th--sort icici-th--num" (click)="setIciciSort('plPct')">P&amp;L % <span class="icici-th__sort">{{ iciciSortIndicator('plPct') }}</span></th>
+                        <th class="icici-th--sort icici-th--num" (click)="setIciciSort('xirr')" title="Funds only: ICICI's XIRR from the last CSV import">XIRR <span class="icici-th__sort">{{ iciciSortIndicator('xirr') }}</span></th>
                         <th></th>
                       </tr>
                     </thead>
@@ -778,13 +779,17 @@
                             <td [ngClass]="'icici-breeze-pl icici-breeze-pl--' + g.totals.plKind">{{ g.totals.pl }}</td>
                             <td [ngClass]="'icici-breeze-pl icici-breeze-pl--' + g.totals.plKind">{{ g.totals.plPct }}</td>
                             <td></td>
+                            <td></td>
                           </tr>
                         }
                         @for (r of g.rows; track $index) {
                           <tr>
                             <td><span class="icici-type" [class.icici-type--mf]="r.type === 'MF'" [class.icici-type--eq]="r.type === 'Equity'">{{ r.type }}</span></td>
                             <td>{{ accountShortLabel(r.account) }}</td>
-                            <td class="icici-name">{{ r.name }}</td>
+                            <td class="icici-name">
+                              {{ r.name }}
+                              @if (r.folio) { <span class="icici-folio">Folio {{ r.folio }}</span> }
+                            </td>
                             <td>{{ r.qty }}</td>
                             <td>{{ r.avg }}</td>
                             <td>{{ r.price }}</td>
@@ -792,6 +797,7 @@
                             <td>{{ r.value }}</td>
                             <td [ngClass]="'icici-breeze-pl icici-breeze-pl--' + r.plKind">{{ r.pl }}</td>
                             <td [ngClass]="'icici-breeze-pl icici-breeze-pl--' + r.plKind">{{ r.plPct }}</td>
+                            <td [ngClass]="'icici-breeze-pl icici-breeze-pl--' + r.xirrKind" [attr.title]="r.xirrNote || null">{{ r.xirr }}</td>
                             <td>
                               @if (r.mfId != null) {
                                 <button type="button" class="icici-del" title="Remove fund" (click)="deleteMfHoldingById(r.mfId)">✕</button>
@@ -809,12 +815,14 @@
                         <td [ngClass]="'icici-breeze-pl icici-breeze-pl--' + combined.totals.plKind">{{ combined.totals.pl }}</td>
                         <td [ngClass]="'icici-breeze-pl icici-breeze-pl--' + combined.totals.plKind">{{ combined.totals.plPct }}</td>
                         <td></td>
+                        <td></td>
                       </tr>
                     </tfoot>
                   </table>
                 </div>
               }
             </div>
+            <app-mf-gains [accountNames]="breezeAccountNames" [version]="mfStatementsVersion"></app-mf-gains>
           }
         </section>
       </div>

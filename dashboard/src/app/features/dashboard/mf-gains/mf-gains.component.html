@@ -1,0 +1,113 @@
+@if (error) { <p class="mf-error">{{ error }}</p> }
+@if (current; as st) {
+  <div class="mf-panel mf-gains">
+    <div class="mf-panel__toolbar">
+      <span class="mf-panel__head">Mutual funds: capital gains on what you've sold</span>
+      @if (statements.length > 1) {
+        <div class="mf-acct-filter">
+          @for (s of statements; track s.account) {
+            <button type="button" class="mf-chip" [class.mf-chip--active]="s.account === selectedAccount" (click)="pickAccount(s.account)">
+              {{ acctLabel(s.account) }}
+            </button>
+          }
+        </div>
+      }
+    </div>
+    <p class="mf-note">
+      From the {{ issuerLabel(st) }} statement for {{ st.investorName || acctLabel(st.account) }},
+      {{ st.periodFrom }} to {{ st.periodTo }}, read on {{ readOn(st) }}.
+      <button type="button" class="mf-link" [disabled]="forgetting" (click)="forget()">Forget statement</button>
+    </p>
+    @if (st.warnings.length) {
+      <ul class="mf-list mf-list--warn">
+        @for (w of st.warnings; track $index) { <li>{{ w }}</li> }
+      </ul>
+    }
+
+    @if (!st.gains.length) {
+      <p class="mf-note">Nothing has been sold in this statement's period, so there are no capital gains.</p>
+    } @else {
+      <div class="mf-gains__years">
+        @for (y of st.gains; track y.fy) {
+          <button type="button" class="mf-chip" [class.mf-chip--active]="y.fy === selectedFy" (click)="pickFy(y.fy)">{{ fyLabel(y.fy) }}</button>
+        }
+      </div>
+      @if (year; as y) {
+        <div class="mf-gains__cards">
+          <div class="mf-gains__card">
+            <span class="mf-gains__label">Equity, short-term</span>
+            <span class="mf-gains__value" [class]="kind(y.totals.equityStcg)">{{ money(y.totals.equityStcg) }}</span>
+          </div>
+          <div class="mf-gains__card">
+            <span class="mf-gains__label">Equity, long-term</span>
+            <span class="mf-gains__value" [class]="kind(y.totals.equityLtcg)">{{ money(y.totals.equityLtcg) }}</span>
+            @if (y.totals.equityLtcgTaxable !== y.totals.equityLtcg) {
+              <span class="mf-gains__sub">{{ money(y.totals.equityLtcgTaxable) }} taxable after grandfathering</span>
+            }
+          </div>
+          <div class="mf-gains__card">
+            <span class="mf-gains__label">Debt, short-term</span>
+            <span class="mf-gains__value" [class]="kind(y.totals.debtStcg)">{{ money(y.totals.debtStcg) }}</span>
+          </div>
+          <div class="mf-gains__card">
+            <span class="mf-gains__label">Debt, long-term</span>
+            <span class="mf-gains__value" [class]="kind(y.totals.debtLtcg)">{{ money(y.totals.debtLtcg) }}</span>
+            @if (y.totals.debtLtcgTaxable !== y.totals.debtLtcg) {
+              <span class="mf-gains__sub">{{ money(y.totals.debtLtcgTaxable) }} taxable after indexation</span>
+            }
+          </div>
+        </div>
+
+        <div class="mf-table-wrap">
+          <table class="mf-table mf-gains__table">
+            <thead>
+              <tr>
+                <th>Fund</th>
+                <th>Type</th>
+                <th class="mf-num">Sold for</th>
+                <th class="mf-num">Cost</th>
+                <th class="mf-num">Short-term</th>
+                <th class="mf-num">Long-term</th>
+                <th class="mf-num" title="After grandfathering (equity bought by 31 Jan 2018) or indexation (debt sold before 23 Jul 2024)">Long-term, taxable</th>
+              </tr>
+            </thead>
+            <tbody>
+              @for (r of y.rows; track r.scheme + r.isin) {
+                <tr>
+                  <td class="mf-scheme">
+                    {{ r.scheme }}
+                    @if (r.folios) { <span class="mf-gains__folio">Folio {{ r.folios }}</span> }
+                  </td>
+                  <td>{{ r.type === 'EQUITY' ? 'Equity' : 'Debt' }}</td>
+                  <td class="mf-num">{{ money(r.sold) }}</td>
+                  <td class="mf-num">{{ money(r.cost) }}</td>
+                  <td class="mf-num" [class]="kind(r.stcg)">{{ money(r.stcg) }}</td>
+                  <td class="mf-num" [class]="kind(r.ltcg)">{{ money(r.ltcg) }}</td>
+                  <td class="mf-num">{{ money(r.ltcgTaxable) }}</td>
+                </tr>
+              }
+            </tbody>
+            <tfoot class="mf-tfoot">
+              <tr>
+                <th colspan="2" scope="row">Total</th>
+                <td class="mf-num">{{ money(y.totals.sold) }}</td>
+                <td class="mf-num">{{ money(y.totals.cost) }}</td>
+                <td class="mf-num">{{ money(y.totals.equityStcg + y.totals.debtStcg) }}</td>
+                <td class="mf-num">{{ money(y.totals.equityLtcg + y.totals.debtLtcg) }}</td>
+                <td class="mf-num">{{ money(y.totals.equityLtcgTaxable + y.totals.debtLtcgTaxable) }}</td>
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+      }
+      <p class="mf-gains__footnote">
+        Sales are matched to the oldest units first within each folio, and cost includes stamp duty. Equity funds are
+        long-term after 12 months; for units bought by 31 Jan 2018 the taxable gain uses that day's NAV as the cost when
+        it's higher. Up to ₹1.25 lakh a year of equity long-term gains is tax-free from FY 2024-25 (₹1 lakh before),
+        counted together with listed shares. Debt fund units bought from 1 Apr 2023 are always short-term; older ones are
+        long-term after 24 months, or 36 months with indexation for sales before 23 Jul 2024. Check these against the
+        capital gains statement from CAMS before filing.
+      </p>
+    }
+  </div>
+}

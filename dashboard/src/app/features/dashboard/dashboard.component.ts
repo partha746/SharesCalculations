@@ -139,6 +139,7 @@ import { FinancialPlanningComponent } from './financial-planning/financial-plann
 import { DataTabComponent } from './data-tab/data-tab.component';
 import { NewsTabComponent } from './news-tab/news-tab.component';
 import { MfTabComponent } from './mf-tab/mf-tab.component';
+import { MfGainsComponent } from './mf-gains/mf-gains.component';
 import { NetworthTabComponent } from './networth-tab/networth-tab.component';
 import { YearOverlayChartComponent } from './year-overlay-chart/year-overlay-chart.component';
 import { SeasonalityChartComponent } from './seasonality-chart/seasonality-chart.component';
@@ -168,7 +169,7 @@ const HOLDINGS_COLUMN_ORDER_STORAGE_KEY = 'dashboard.holdingsColumnOrder';
 
 @Component({
     selector: 'app-dashboard',
-    imports: [CommonModule, FormsModule, StatCardComponent, OverviewTimeCardComponent, LivePriceExtendedHintComponent, FinancialPlanningComponent, DataTabComponent, NewsTabComponent, MfTabComponent, NetworthTabComponent, YearOverlayChartComponent, SeasonalityChartComponent, IndianNumberDirective],
+    imports: [CommonModule, FormsModule, StatCardComponent, OverviewTimeCardComponent, LivePriceExtendedHintComponent, FinancialPlanningComponent, DataTabComponent, NewsTabComponent, MfTabComponent, MfGainsComponent, NetworthTabComponent, YearOverlayChartComponent, SeasonalityChartComponent, IndianNumberDirective],
     templateUrl: './dashboard.component.html',
     styleUrl: './dashboard.component.scss',
     changeDetection: ChangeDetectionStrategy.OnPush
@@ -274,6 +275,8 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
 
   /** Manual mutual-fund holdings (with live AMFI NAV); merged with ICICI equity in the combined table. */
   mfHoldings: MfHolding[] = [];
+  /** Bumped after a CAS statement is read so the capital gains panel reloads. */
+  mfStatementsVersion = 0;
   mfHoldingsLoading = false;
 
   taxConfig: any = null;
@@ -1518,6 +1521,7 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
           plPct: this._pct(r.plPctNum), plKind: r.plKind, mfId: null,
           qtyNum: isFinite(qtyNum) ? qtyNum : null, avgNum: r.avgNum, priceNum: r.curPxNum,
           investedNum: r.investedNum, valueNum: r.currentNum, plNum: r.plNum, plPctNum: r.plPctNum,
+          xirr: '—', xirrNum: null, xirrKind: 'na', xirrNote: '', folio: '',
         });
       }
     }
@@ -1533,16 +1537,20 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
         plKind: this._plKind(m.pnl), mfId: m.id,
         qtyNum: m.units, avgNum: avg, priceNum: m.navUnavailable ? null : m.nav,
         investedNum: m.invested, valueNum: m.value, plNum: m.pnl, plPctNum: m.pnlPct,
+        xirr: this._pct(m.xirr), xirrNum: m.xirr, xirrKind: this._plKind(m.xirr),
+        xirrNote: m.xirr != null && m.xirrDate ? `ICICI's XIRR as of ${m.xirrDate.replace(/-/g, ' ')}, from the CSV import` : '',
+        folio: m.folio,
       });
     }
 
-    // Filter by search across type, account name, and scheme/stock name.
+    // Filter by search across type, account name, scheme/stock name and folio.
     const q = this.iciciSearch.trim().toLowerCase();
     let view = raw;
     if (q) {
       view = raw.filter((r) =>
         r.name.toLowerCase().includes(q) ||
         r.type.toLowerCase().includes(q) ||
+        r.folio.toLowerCase().includes(q) ||
         this.accountLabel(r.account).toLowerCase().includes(q) ||
         this.accountShortLabel(r.account).toLowerCase().includes(q),
       );

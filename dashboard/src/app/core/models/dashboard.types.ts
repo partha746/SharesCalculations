@@ -33,7 +33,8 @@ export type IciciSortCol =
   | 'invested'
   | 'value'
   | 'pl'
-  | 'plPct';
+  | 'plPct'
+  | 'xirr';
 
 /** One row of the combined ICICI holdings table (display strings + numeric sort keys). */
 export interface IciciCombinedRow {
@@ -56,6 +57,12 @@ export interface IciciCombinedRow {
   valueNum: number | null;
   plNum: number | null;
   plPctNum: number | null;
+  /** Funds only: the broker's XIRR from the last CSV import, with the date it was reported for. */
+  xirr: string;
+  xirrNum: number | null;
+  xirrKind: string;
+  xirrNote: string;
+  folio: string;
 }
 
 /** Sortable column keys for ICICI portfolio table (UI). */
@@ -164,6 +171,75 @@ export interface MfHolding {
   pnlPct: number | null;
   navUnavailable: boolean;
   folio: string;
+  /** XIRR % from the last broker CSV import and the NAV date it was reported for ("12-Oct-2026"). */
+  xirr: number | null;
+  xirrDate: string;
+}
+
+/** Result of importing a broker CSV into one account. */
+export interface MfCsvImportResult {
+  imported: Array<{ csvScheme: string; matchedScheme: string; schemeCode: string; units: number; invested: number | null; nav: number; action: 'added' | 'updated' | 'combined' }>;
+  skipped: Array<{ scheme: string; reason: string }>;
+  /** The account's funds the CSV doesn't list, removed only when every CSV row matched. */
+  removed: Array<{ id: number; scheme: string }>;
+}
+
+/** Result of reading a consolidated account statement (CAS) for one account. */
+export interface MfStatementImportResult {
+  issuer: string;
+  statementType: 'DETAILED' | 'SUMMARY' | 'DEMAT';
+  investorName: string;
+  periodFrom: string;
+  periodTo: string;
+  foliosSet: Array<{ scheme: string; folio: string }>;
+  /** Funds the statement shows units in that aren't in the account's list. */
+  notInList: string[];
+  gainYears: string[];
+  warnings: string[];
+}
+
+export interface MfGainsRow {
+  scheme: string;
+  isin: string;
+  folios: string;
+  type: 'EQUITY' | 'DEBT';
+  sold: number;
+  cost: number;
+  stcg: number;
+  ltcg: number;
+  /** Long-term gain after grandfathering (equity) or indexation (debt). */
+  ltcgTaxable: number;
+}
+
+export interface MfGainsYear {
+  fy: string;
+  rows: MfGainsRow[];
+  totals: {
+    sold: number;
+    cost: number;
+    equityStcg: number;
+    equityLtcg: number;
+    equityLtcgTaxable: number;
+    debtStcg: number;
+    debtLtcg: number;
+    debtLtcgTaxable: number;
+  };
+}
+
+export interface MfStatementSummary {
+  account: string;
+  issuer: string;
+  investorName: string;
+  periodFrom: string;
+  periodTo: string;
+  importedAt: number;
+  /** Newest financial year first. */
+  gains: MfGainsYear[];
+  warnings: string[];
+}
+
+export interface MfStatementsResponse {
+  statements: MfStatementSummary[];
 }
 
 export interface MfHoldingsResponse {

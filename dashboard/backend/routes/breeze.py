@@ -27,6 +27,7 @@ def breeze_login(acct):
     if not login_url:
         return _breeze_js_redirect(_breeze_dashboard_url() + "&breeze_error=" + urllib.parse.quote("Add the API key first."))
     start_login(acct)
+    breeze_icici.preload_sdk()
     return redirect(login_url)
 
 
@@ -36,7 +37,7 @@ def breeze_oauth_callback(acct):
     if breeze_icici is None or acct not in breeze_icici.valid_account_ids():
         return _breeze_js_redirect(_breeze_dashboard_url() + "&breeze_error=invalid_account")
     token = _extract_breeze_session_token()
-    print(f"[breeze-callback/{acct}] token={'YES' if token else 'EMPTY'}, query={request.query_string.decode()}", flush=True)
+    print(f"[breeze-callback/{acct}] token={'YES' if token else 'EMPTY'}, params={sorted(request.values)}", flush=True)
     if not token:
         return _breeze_js_redirect(_breeze_dashboard_url() + "&breeze_error=no_token")
     # ICICI posts here from its own site, so the session cookie is missing and app.py lets the
@@ -95,6 +96,8 @@ def breeze_status_all():
     _reload_dashboard_env()
     if breeze_icici is None:
         return jsonify({"accounts": {}})
+    breeze_icici.preload_sdk()
+    breeze_icici.wait_for_restore()
     result = {}
     for acct in breeze_icici.valid_account_ids():
         connected = breeze_icici.get_client(acct) is not None

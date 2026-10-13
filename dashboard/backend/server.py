@@ -34,6 +34,9 @@ if __name__ == "__main__":
     from helpers import gather_data  # noqa: F401
     start_recorder()
     start_metal_recorder()
+    from services.breeze import breeze_icici
+    if breeze_icici is not None:
+        breeze_icici.restore_sessions()
     print(f"Backend API at http://127.0.0.1:{PORT} (configs at {REPO_ROOT})")
     print("Live price recorder: running in background (records every 14s when market open)")
     # use_reloader=False: pm2 manages restarts; the reloader would spawn duplicate recorder threads.

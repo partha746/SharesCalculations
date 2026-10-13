@@ -1,7 +1,8 @@
-"""/api/mf blueprint: manual mutual-fund holdings + live NAV (AMFI via mfapi.in)."""
+"""/api/mf blueprint: mutual-fund holdings + live NAV (AMFI via mfapi.in), CAS statement import."""
 from flask import Blueprint, jsonify, request
 
 from services import mf as mf_service
+from services import mf_cas
 
 bp = Blueprint("mf", __name__)
 
@@ -56,6 +57,44 @@ def mf_import():
         return jsonify({"error": str(e)}), 400
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+
+@bp.route("/api/mf/statement", methods=["POST"])
+def mf_import_statement():
+    """Multipart: `file` (CAS PDF), `password`, `account`. The PDF and password are never stored."""
+    if (request.content_length or 0) > mf_cas.MAX_PDF_BYTES + 64 * 1024:
+        return jsonify({"error": "That file is too large for a CAS statement."}), 413
+    upload = request.files.get("file")
+    if upload is None:
+        return jsonify({"error": "Choose the statement PDF."}), 400
+    pdf = upload.read(mf_cas.MAX_PDF_BYTES + 1)
+    if len(pdf) > mf_cas.MAX_PDF_BYTES:
+        return jsonify({"error": "That file is too large for a CAS statement."}), 413
+    try:
+        return jsonify(mf_cas.import_statement(pdf, request.form.get("password", ""), request.form.get("account") or "1"))
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    except Exception as e:
+        print(f"[mf-cas] import failed: {type(e).__name__}: {e}", flush=True)
+        return jsonify({"error": "Couldn't import this statement."}), 500
+
+
+@bp.route("/api/mf/statements", methods=["GET"])
+def mf_statements():
+    try:
+        return jsonify(mf_cas.summary())
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@bp.route("/api/mf/statements/<account>", methods=["DELETE"])
+def mf_forget_statement(account):
+    try:
+        if mf_cas.forget_statement(account) == 0:
+            return jsonify({"error": "Not found"}), 404
+        return jsonify({"ok": True})
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
 
 
 @bp.route("/api/mf/overlap", methods=["GET"])
