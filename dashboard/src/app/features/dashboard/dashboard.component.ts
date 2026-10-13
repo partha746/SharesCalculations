@@ -140,6 +140,8 @@ import { DataTabComponent } from './data-tab/data-tab.component';
 import { NewsTabComponent } from './news-tab/news-tab.component';
 import { MfTabComponent } from './mf-tab/mf-tab.component';
 import { NetworthTabComponent } from './networth-tab/networth-tab.component';
+import { YearOverlayChartComponent } from './year-overlay-chart/year-overlay-chart.component';
+import { SeasonalityChartComponent } from './seasonality-chart/seasonality-chart.component';
 import { IndianNumberDirective } from '../../core/directives/indian-number.directive';
 import { NO_SLEEP_MP4 } from '../../core/utils/no-sleep-video';
 
@@ -166,7 +168,7 @@ const HOLDINGS_COLUMN_ORDER_STORAGE_KEY = 'dashboard.holdingsColumnOrder';
 
 @Component({
     selector: 'app-dashboard',
-    imports: [CommonModule, FormsModule, StatCardComponent, OverviewTimeCardComponent, LivePriceExtendedHintComponent, FinancialPlanningComponent, DataTabComponent, NewsTabComponent, MfTabComponent, NetworthTabComponent, IndianNumberDirective],
+    imports: [CommonModule, FormsModule, StatCardComponent, OverviewTimeCardComponent, LivePriceExtendedHintComponent, FinancialPlanningComponent, DataTabComponent, NewsTabComponent, MfTabComponent, NetworthTabComponent, YearOverlayChartComponent, SeasonalityChartComponent, IndianNumberDirective],
     templateUrl: './dashboard.component.html',
     styleUrl: './dashboard.component.scss',
     changeDetection: ChangeDetectionStrategy.OnPush
@@ -3547,9 +3549,8 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
   }
 
   /** Navigate to a tab's URL; the route param subscription applies it. */
-  setActiveTab(tab: DashboardTab): void {
-    if (tab === this.activeTab) return;
-    this.router.navigate(['/', tab]);
+  setActiveTab(tab: DashboardTab): Promise<boolean> {
+    return tab === this.activeTab ? Promise.resolve(true) : this.router.navigate(['/', tab]);
   }
 
   /** Floating quick-nav (bottom-right FAB) open state. */
@@ -3574,16 +3575,34 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
     { id: 'data', label: 'Data' },
   ];
 
-  /** Jump to a tab from the floating menu, then scroll up so the tab bar is in view. */
+  @ViewChild('tabSection') private tabSection?: ElementRef<HTMLElement>;
+
+  /** Jump to a tab from the floating menu and bring that tab's section into view. */
   goToTab(tab: DashboardTab): void {
     this.showTabMenu = false;
-    this.setActiveTab(tab);
-    try {
-      window.scrollTo({ top: 0, behavior: 'smooth' });
-    } catch {
-      window.scrollTo(0, 0);
-    }
     this.cdr.markForCheck();
+    // Measure once the new tab has rendered.
+    this.setActiveTab(tab).then(() => requestAnimationFrame(() => this.scrollToTabSection()));
+  }
+
+  private scrollToTabSection(): void {
+    const section = this.tabSection?.nativeElement;
+    if (!section?.isConnected) return;
+    // The status strip stays pinned at the top, so stop just below it rather than underneath.
+    const pinned = document.querySelector('app-overview-time-card')?.getBoundingClientRect().height ?? 0;
+    const top = Math.max(0, section.getBoundingClientRect().top + window.scrollY - pinned - 8);
+    // On a phone the tab bar is a sideways strip, which may have the chosen tab out of sight.
+    const active = section.querySelector<HTMLElement>('.tab-btn--active');
+    const bar = active?.parentElement;
+    try {
+      window.scrollTo({ top, behavior: 'smooth' });
+      if (active && bar) {
+        const offset = active.getBoundingClientRect().left - bar.getBoundingClientRect().left;
+        bar.scrollTo({ left: bar.scrollLeft + offset - (bar.clientWidth - active.offsetWidth) / 2, behavior: 'smooth' });
+      }
+    } catch {
+      window.scrollTo(0, top);
+    }
   }
 
   /** Apply a tab: set active state and run its data-load / chart lifecycle side-effects. Called from the route param subscription. */
@@ -4322,6 +4341,7 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
   private metalChart: InstanceType<typeof Chart> | null = null;
   @ViewChild('metalChartCanvas') metalChartCanvas?: ElementRef<HTMLCanvasElement>;
   private metalHistory: MetalHistoryPoint[] = [];
+  private metalChartAverage = 0;
 
   // Add-lot form. Total and per-gram derive from each other, since a bill shows the total
   // while the stored lot needs a per-gram figure.
@@ -4449,6 +4469,19 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
     this.metalChart = null;
   }
 
+  /** Average rate over the plotted span. Rows are only written when the rate moves, so each one
+   *  is weighted by how long it stood; a plain mean would over-count days with several moves. */
+  private metalAverageRate(): number {
+    const pts = this.metalHistory;
+    const end = Math.max(Date.now(), pts[pts.length - 1].timestamp);
+    let weighted = 0;
+    pts.forEach((p, i) => {
+      weighted += p.pricePerGram * ((i + 1 < pts.length ? pts[i + 1].timestamp : end) - p.timestamp);
+    });
+    const span = end - pts[0].timestamp;
+    return span > 0 ? weighted / span : pts.reduce((sum, p) => sum + p.pricePerGram, 0) / pts.length;
+  }
+
   private initOrUpdateMetalChart(): void {
     const canvas = this.metalChartCanvas?.nativeElement;
     if (!canvas || this.metalHistory.length < 2) { this.destroyMetalChart(); return; }
@@ -4457,14 +4490,20 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
     const data = this.metalHistory.map((p) => p.pricePerGram);
     const isGold = this.metalChartKey.startsWith('gold');
     const colour = isGold ? '#d4a72c' : '#8b949e';
+    const label = this.metalOptions.find((o) => o.key === this.metalChartKey)?.label ?? 'Rate';
+    this.metalChartAverage = this.metalAverageRate();
+    const average = data.map(() => this.metalChartAverage);
+    const averageLabel = `Average ₹${this.formatInr(this.metalChartAverage)}`;
 
     if (this.metalChart) {
       this.metalChart.data.labels = labels;
-      const ds = this.metalChart.data.datasets[0] as { data: number[]; label: string; borderColor: string; backgroundColor: string };
+      const [ds, avgDs] = this.metalChart.data.datasets as { data: number[]; label: string; borderColor: string; backgroundColor: string }[];
       ds.data = data;
-      ds.label = this.metalOptions.find((o) => o.key === this.metalChartKey)?.label ?? 'Rate';
+      ds.label = label;
       ds.borderColor = colour;
       ds.backgroundColor = colour + '22';
+      avgDs.data = average;
+      avgDs.label = averageLabel;
       this.metalChart.update();
       return;
     }
@@ -4473,7 +4512,7 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
       data: {
         labels,
         datasets: [{
-          label: this.metalOptions.find((o) => o.key === this.metalChartKey)?.label ?? 'Rate',
+          label,
           data,
           borderColor: colour,
           backgroundColor: colour + '22',
@@ -4482,6 +4521,16 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
           pointHoverRadius: 4,
           tension: 0.25,
           fill: true,
+        }, {
+          label: averageLabel,
+          data: average,
+          borderColor: '#c9d1d9',
+          borderWidth: 1.5,
+          borderDash: [6, 4],
+          pointRadius: 0,
+          pointHoverRadius: 0,
+          tension: 0,
+          fill: false,
         }],
       },
       options: {
@@ -4489,11 +4538,18 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
         maintainAspectRatio: false,
         interaction: { mode: 'index', intersect: false },
         plugins: {
-          legend: { display: false },
+          legend: { labels: { color: '#c9d1d9', boxWidth: 14, boxHeight: 8, padding: 12 } },
           datalabels: { display: false },
           tooltip: {
+            // The average is the same everywhere, so the rate's line says where it sits against it instead.
+            filter: (item: any) => item.datasetIndex === 0,
             callbacks: {
-              label: (ctx: any) => '₹ ' + this.formatInr(Number(ctx.parsed.y)) + ' / gram',
+              label: (ctx: any) => {
+                const v = Number(ctx.parsed.y);
+                const vsAvg = (v / this.metalChartAverage - 1) * 100;
+                const where = Math.abs(vsAvg) < 0.05 ? 'at the average' : `${Math.abs(vsAvg).toFixed(1)}% ${vsAvg > 0 ? 'above' : 'below'} average`;
+                return `₹ ${this.formatInr(v)} / gram (${where})`;
+              },
             },
           },
         },
@@ -4506,7 +4562,8 @@ export class DashboardComponent implements OnInit, AfterViewInit, OnDestroy {
           y: {
             beginAtZero: false,
             title: { display: true, text: '₹ per gram', color: '#8b949e' },
-            ticks: { color: '#8b949e', callback: (v: any) => '₹' + this.formatInrCompact(Number(v)) },
+            // Whole rupees: gold moves within a few hundred of ₹15,000, which the compact "₹15k" can't tell apart.
+            ticks: { color: '#8b949e', callback: (v: any) => '₹' + this.formatInr(Number(v)) },
             grid: { color: '#21262d' },
           },
         },

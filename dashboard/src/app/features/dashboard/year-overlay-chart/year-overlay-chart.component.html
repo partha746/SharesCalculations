@@ -1,0 +1,30 @@
+<div class="chart-card__head">
+  <h2 class="chart-card__title">NVDA year by year</h2>
+  <div class="chart-card__toggle" role="group" aria-label="Plot each year as">
+    <button type="button" class="chart-card__mode" [class.chart-card__mode--active]="mode === 'pct'"
+            [attr.aria-pressed]="mode === 'pct'" (click)="setMode('pct')">% change</button>
+    <button type="button" class="chart-card__mode" [class.chart-card__mode--active]="mode === 'price'"
+            [attr.aria-pressed]="mode === 'price'" (click)="setMode('price')">Price</button>
+  </div>
+</div>
+<p class="chart-card__desc">
+  One line per calendar year of daily closes, on a shared Jan–Dec axis so the years line up.
+  % change is from the previous year's last close; tap a year in the legend to hide it.
+</p>
+
+@if (hasLines) {
+  <div class="chart-card__plot"><canvas #canvas></canvas></div>
+  <p class="chart-card__note">
+    Split-adjusted closes from Twelve Data, up to {{ lastCloseLabel }}.
+    @if (history?.stale) {
+      <span class="chart-card__stale">Could not refresh just now, so this is the copy fetched {{ fetchedAtLabel }}.</span>
+    }
+  </p>
+} @else if (error) {
+  <p class="chart-card__hint chart-card__hint--error">
+    {{ error }}
+    <button type="button" class="chart-card__retry" [disabled]="loading" (click)="load()">Retry</button>
+  </p>
+} @else {
+  <p class="chart-card__hint">Loading {{ years }} years of NVDA closes…</p>
+}

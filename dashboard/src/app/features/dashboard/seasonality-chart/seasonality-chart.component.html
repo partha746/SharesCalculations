@@ -1,0 +1,59 @@
+<div class="chart-card__head">
+  <h2 class="chart-card__title">Is {{ analysis?.currentYear ?? 'this year' }} following past years?</h2>
+</div>
+<p class="chart-card__desc">
+  NVDA's year so far against the same point in earlier years, and how its weeks and months usually go.
+  Medians are used throughout, so one exceptional year can't drag the typical figure with it.
+</p>
+
+@if (path && analysis && summary) {
+  <ul class="season__summary">
+    <li>{{ summary.level }}</li>
+    <li>{{ summary.pattern }}</li>
+    <li>{{ summary.consistent }}</li>
+  </ul>
+
+  <h3 class="season__subtitle">Typical year vs {{ analysis.currentYear }}</h3>
+  <div class="chart-card__plot season__plot"><canvas #pathCanvas></canvas></div>
+
+  <div class="chart-card__head season__pattern-head">
+    <h3 class="season__subtitle">{{ unit === 'week' ? 'Week by week' : 'Month by month' }}</h3>
+    <div class="chart-card__toggle" role="group" aria-label="Group returns by">
+      <button type="button" class="chart-card__mode" [class.chart-card__mode--active]="unit === 'week'"
+              [attr.aria-pressed]="unit === 'week'" (click)="setUnit('week')">Weekly</button>
+      <button type="button" class="chart-card__mode" [class.chart-card__mode--active]="unit === 'month'"
+              [attr.aria-pressed]="unit === 'month'" (click)="setUnit('month')">Monthly</button>
+    </div>
+  </div>
+  <p class="chart-card__desc">{{ patternDesc }}</p>
+  <div class="chart-card__plot season__plot"><canvas #patternCanvas></canvas></div>
+
+  <div class="season__matches">
+    <span class="season__matches-label">Pattern match by {{ unit }}, each year against the others:</span>
+    <span class="season__match season__match--current"
+          [class.season__match--pos]="(analysis.currentMatch ?? 0) >= 0.3"
+          [class.season__match--neg]="(analysis.currentMatch ?? 0) <= -0.3">
+      {{ analysis.currentYear }} {{ formatMatch(analysis.currentMatch) }}
+    </span>
+    @for (m of analysis.pastMatches; track m.year) {
+      <span class="season__match" [class.season__match--pos]="(m.r ?? 0) >= 0.3" [class.season__match--neg]="(m.r ?? 0) <= -0.3">
+        {{ m.year }} {{ formatMatch(m.r) }}
+      </span>
+    }
+  </div>
+  <p class="chart-card__note">
+    The score is the correlation of a year's {{ unit }}ly returns with the median of the other years: 1 would be in step,
+    0 unrelated, negative the opposite. {{ analysis.currentYear }} only counts finished {{ unit }}s.
+    Split-adjusted closes from Twelve Data, up to {{ lastCloseLabel }}.
+    @if (history?.stale) {
+      <span class="chart-card__stale">Could not refresh just now, so this is the copy fetched {{ fetchedAtLabel }}.</span>
+    }
+  </p>
+} @else if (error) {
+  <p class="chart-card__hint chart-card__hint--error">
+    {{ error }}
+    <button type="button" class="chart-card__retry" [disabled]="loading" (click)="load()">Retry</button>
+  </p>
+} @else {
+  <p class="chart-card__hint">Loading NVDA closes…</p>
+}

@@ -452,7 +452,7 @@
     </div>
   </section>
 
-  <section class="dashboard-section tab-section">
+  <section class="dashboard-section tab-section" #tabSection>
     <div class="tab-bar">
       <button type="button" class="tab-btn" [class.tab-btn--active]="activeTab === 'holdings'" (click)="setActiveTab('holdings')">Holdings</button>
       <button type="button" class="tab-btn" [class.tab-btn--active]="activeTab === 'sold'" (click)="setActiveTab('sold')">Sold Shares</button>
@@ -1181,6 +1181,14 @@
     }
     @if (activeTab === 'playground') {
   <div class="playground-section">
+    <section class="dashboard-section playground-card">
+      <app-year-overlay-chart />
+    </section>
+
+    <section class="dashboard-section playground-card">
+      <app-seasonality-chart />
+    </section>
+
     <p class="holdings-table__hint">Use live price and USD→INR rate from the dashboard. Adjust inputs to see how many shares to sell or compare values.</p>
 
     <section class="dashboard-section playground-card">

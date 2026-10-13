@@ -1,0 +1,54 @@
+@use '../chart-card';
+
+.season__summary {
+  margin: 0 0 1.25rem;
+  padding: 0.75rem 1rem 0.75rem 1.9rem;
+  background: #0d1117;
+  border: 1px solid #30363d;
+  border-radius: 6px;
+  color: #c9d1d9;
+  font-size: 0.88rem;
+  line-height: 1.5;
+  li + li { margin-top: 0.4rem; }
+}
+.season__subtitle {
+  font-size: 0.9rem;
+  font-weight: 600;
+  margin: 0 0 0.5rem;
+  color: #c9d1d9;
+}
+.season__plot { height: 300px; }
+.season__pattern-head {
+  margin-top: 1.5rem;
+  margin-bottom: 0.5rem;
+  .season__subtitle { margin: 0; }
+}
+.season__matches {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem 0.5rem;
+  margin-top: 0.85rem;
+  font-size: 0.8rem;
+}
+.season__matches-label {
+  color: #8b949e;
+  margin-right: 0.25rem;
+}
+.season__match {
+  padding: 0.15rem 0.55rem;
+  border: 1px solid #30363d;
+  border-radius: 999px;
+  background: #21262d;
+  color: #c9d1d9;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.season__match--current { border-color: #388bfd; }
+.season__match--pos { color: #3fb950; }
+.season__match--neg { color: #f85149; }
+
+@media (max-width: 560px) {
+  .season__plot { height: 250px; }
+  .season__summary { font-size: 0.84rem; padding-left: 1.5rem; }
+}

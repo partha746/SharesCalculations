@@ -6,6 +6,7 @@ import {
   BreezeAccountStatus,
   BreezeStatusAllResponse,
   BreezeStatusResponse,
+  DailyPriceHistoryResponse,
   DashboardResponse,
   Earmark,
   EarmarksResponse,
@@ -57,6 +58,11 @@ export class DashboardService {
   /** Pre/post-market open, high, low, last and volume for NVDA. */
   getExtendedSession(): Observable<ExtendedSessionResponse> {
     return this.http.get<ExtendedSessionResponse>(`${this.apiUrl}/extended-session?t=${Date.now()}`);
+  }
+
+  /** Split-adjusted daily NVDA closes covering the last `years` calendar years. */
+  getDailyPriceHistory(years = 5): Observable<DailyPriceHistoryResponse> {
+    return this.http.get<DailyPriceHistoryResponse>(`${this.apiUrl}/price-history/daily?years=${years}&t=${Date.now()}`);
   }
 
   /** Pune gold/silver rates with each series' day range. */

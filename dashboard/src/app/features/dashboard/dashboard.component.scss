@@ -1384,6 +1384,9 @@
 
 .tab-section {
   margin-top: 0.5rem;
+  // Tall enough for the quick-nav menu to bring the tab bar to the top even while the tab is
+  // short or still loading.
+  min-height: 100vh;
 }
 .tax-tab {
   padding: 1rem 0;

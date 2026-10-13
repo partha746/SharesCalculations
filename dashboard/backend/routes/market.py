@@ -1,10 +1,11 @@
-"""/api/market-status + /api/extended-session blueprint."""
+"""/api/market-status, /api/extended-session and /api/price-history blueprint."""
 import time
 from concurrent.futures import ThreadPoolExecutor
 
 import requests
-from flask import Blueprint, jsonify
+from flask import Blueprint, jsonify, request
 
+from services import price_history
 from services.market import (
     _FINNHUB_TOKEN, _is_nasdaq_open_et, _is_premarket_et,
     _is_postmarket_et, _next_market_open_close_et, recorded_session_open,
@@ -127,4 +128,14 @@ def get_extended_session():
         "pre": sessions.get("pre"),
         "post": sessions.get("post"),
     })
+
+
+@bp.route("/api/price-history/daily", methods=["GET"])
+def get_daily_price_history():
+    """Split-adjusted daily NVDA closes for the last `years` calendar years (default 5, max 10)."""
+    years = min(10, max(1, request.args.get("years", default=5, type=int)))
+    try:
+        return jsonify(price_history.daily_closes("NVDA", years))
+    except Exception as e:
+        return jsonify({"error": f"Could not load NVDA price history: {e}"}), 502
 

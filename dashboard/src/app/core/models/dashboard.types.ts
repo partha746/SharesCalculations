@@ -357,6 +357,21 @@ export interface MetalHistoryPoint {
   pricePerGram: number;
 }
 
+/**
+ * Split-adjusted daily closes, oldest first. The series starts in the December before
+ * `firstYear`, so that year's change can be measured from the previous year's last close.
+ */
+export interface DailyPriceHistoryResponse {
+  symbol: string;
+  firstYear: number;
+  /** YYYY-MM-DD trading days, parallel to `closes`. */
+  dates: string[];
+  closes: number[];
+  fetchedAt: number;
+  /** True when the refresh failed and an earlier copy is being served. */
+  stale: boolean;
+}
+
 /** One purchase lot, valued against the current rate. */
 export interface MetalHolding {
   id: number;
